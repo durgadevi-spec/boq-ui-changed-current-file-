@@ -293,7 +293,7 @@ export default function PORequestDetail() {
                 {/* Actions Header */}
                 <div className="flex justify-between items-start no-print">
                     <div className="space-y-1">
-                        <Button variant="ghost" size="sm" onClick={() => setLocation('/po-approvals')} className="mb-4 text-slate-500 hover:text-slate-900 -ml-2">
+                        <Button variant="ghost" size="sm" onClick={() => setLocation(mode === 'approval' ? '/po-approvals' : '/my-po-requests')} className="mb-4 text-slate-500 hover:text-slate-900 -ml-2">
                             <ArrowLeft className="h-4 w-4 mr-1" /> Back to List
                         </Button>
                         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-3">

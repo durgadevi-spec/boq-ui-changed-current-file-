@@ -7533,7 +7533,7 @@ export async function registerRoutes(
 
       if (user.role === 'admin' || user.role === 'software_team') {
         // Admins and software team see all requests
-      } else {
+      } else if (view !== 'my') {
         params.push(user.id);
         queryStr += ` AND project_id IN (SELECT project_id FROM user_project_permissions WHERE user_id = $${params.length})`;
       }
