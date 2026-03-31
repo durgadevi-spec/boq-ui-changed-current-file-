@@ -1000,7 +1000,23 @@ export default function GeneratePo() {
         configBasis = { requiredUnitType: "Sqft" as UnitType, baseRequiredQty: 1, wastagePctDefault: 0 };
         materialLines = pendingItems.map(i => ({ materialId: i.id || Math.random().toString(), materialName: i.title || "Item", unit: i.unit || "nos", baseQty: i.qty || 1, supplyRate: i.supply_rate || 0, installRate: i.install_rate || 0 }));
       }
-      const tableData = { product_name: selectedProduct.name, product_id: selectedProduct.id, category: selectedProduct.category, subcategory: selectedProduct.subcategory, hsn_sac_type: selectedProduct.tax_code_type || null, hsn_sac_code: selectedProduct.tax_code_value || null, hsn_code: selectedProduct.hsn_code || null, sac_code: selectedProduct.sac_code || null, targetRequiredQty, configBasis, materialLines, step11_items: pendingItems, finalize_description: pendingItems[0]?.description || "", created_at: new Date().toISOString() };
+      const tableData = { 
+        product_name: selectedProduct.name, 
+        product_id: selectedProduct.id, 
+        category: selectedProduct.category, 
+        subcategory: selectedProduct.subcategory, 
+        hsn_sac_type: selectedProduct.tax_code_type || null, 
+        hsn_sac_code: selectedProduct.tax_code_value || null, 
+        hsn_code: selectedProduct.hsn_code || null, 
+        sac_code: selectedProduct.sac_code || null, 
+        targetRequiredQty, 
+        unit: configBasis.requiredUnitType,
+        configBasis, 
+        materialLines, 
+        step11_items: pendingItems, 
+        finalize_description: pendingItems[0]?.description || "", 
+        created_at: new Date().toISOString() 
+      };
       const res = await apiFetch("/api/boq-items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: selectedProjectId, version_id: selectedVersionId, estimator: getEstimatorTypeFromProduct(selectedProduct) || "General", table_data: tableData }) });
       if (!res.ok) throw new Error("Failed to save");
       const newItem = await res.json();

@@ -77,16 +77,33 @@ const PhotoColumn = ({
   item, idx, category, images, isLocked, isCompact,
   handleRowImageUpload, removeRowImage, renameRowImage,
   setPreviewImage, setSketchTarget, setSketchInitialData,
-  lastSketchItemIdxRef, setSketchDialogOpen
+  lastSketchItemIdxRef, setSketchDialogOpen,
+  onImageDragStart, onImageDrop
 }: any) => {
+  const [isOver, setIsOver] = useState(false);
+
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <div className={cn(
-          "relative inline-block cursor-pointer p-0.5 border rounded hover:border-amber-300 transition-colors bg-white shadow-sm",
-          isLocked && "pointer-events-auto hover:border-slate-200",
-          isCompact ? "scale-100" : ""
-        )}>
+        <div
+          className={cn(
+            "relative inline-block cursor-pointer p-0.5 border rounded hover:border-amber-300 transition-all bg-white shadow-sm",
+            isLocked && "pointer-events-auto hover:border-slate-200",
+            isCompact ? "scale-100" : "",
+            isOver && "border-indigo-500 bg-indigo-50 scale-110 shadow-md ring-2 ring-indigo-200 z-10"
+          )}
+          onDragOver={(e) => {
+            if (isLocked) return;
+            e.preventDefault();
+            setIsOver(true);
+          }}
+          onDragLeave={() => setIsOver(false)}
+          onDrop={(e) => {
+            if (isLocked) return;
+            setIsOver(false);
+            onImageDrop(e, { type: category, rowIdx: idx });
+          }}
+        >
           {images.length > 0 ? (
             <div className={cn("relative rounded overflow-hidden", isCompact ? "w-6 h-6" : "w-8 h-8")}>
               <img src={images[0].url} className="w-full h-full object-cover" />
@@ -99,15 +116,35 @@ const PhotoColumn = ({
               <Camera className={cn(isCompact ? "w-3 h-3" : "w-4 h-4")} />
             </div>
           )}
+          {isOver && (
+            <div className="absolute inset-0 flex items-center justify-center bg-indigo-500/20 rounded pointer-events-none">
+              <Plus className="w-4 h-4 text-indigo-600 animate-bounce" />
+            </div>
+          )}
         </div>
       </DialogTrigger>
       <DialogContent className="max-w-2xl z-[120]">
         <DialogHeader>
           <DialogTitle>Item {category === "pre" ? "Pre-work" : "Post-work"} Photos - {item.item_name || `Item ${idx + 1}`}</DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-4 gap-4 py-4 max-h-[60vh] overflow-y-auto">
+        <div
+          className="grid grid-cols-4 gap-4 py-4 max-h-[60vh] overflow-y-auto"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            if (isLocked) return;
+            onImageDrop(e, { type: category, rowIdx: idx });
+          }}
+        >
           {images.map((img: any, imgIdx: number) => (
-            <div key={imgIdx} className="relative group aspect-square rounded border overflow-hidden bg-slate-100">
+            <div
+              key={imgIdx}
+              className={cn(
+                "relative group aspect-square rounded border overflow-hidden bg-slate-100",
+                !isLocked && "cursor-grab active:cursor-grabbing"
+              )}
+              draggable={!isLocked}
+              onDragStart={(e) => onImageDragStart(e, { type: category, rowIdx: idx, imgIdx })}
+            >
               <img
                 src={img.url}
                 className="w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity"
@@ -127,6 +164,9 @@ const PhotoColumn = ({
                   }} className="bg-slate-800 text-white p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity" title="Edit in Sketch Editor">
                     <Pencil className="w-3 h-3" />
                   </button>
+                  <div className="bg-indigo-500 text-white p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-grab shadow-sm" title="Drag to move image">
+                    <Move className="w-3 h-3" />
+                  </div>
                 </div>
               )}
               {!isLocked && (
@@ -168,7 +208,7 @@ const SketchPlanRow = ({
   openPopoverIdx, setOpenPopoverIdx, renameRowImage, removeRowImage,
   handleRowImageUpload, isLocked, isCompact, setPreviewImage,
   setSketchTarget, setSketchInitialData, lastSketchItemIdxRef, toast, setSketchDialogOpen,
-  isSelected, toggleSelect, userRole
+  isSelected, toggleSelect, userRole, onImageDragStart, onImageDrop
 }: any) => {
   const dragControls = useDragControls();
   const isSupplier = userRole === "supplier";
@@ -184,9 +224,9 @@ const SketchPlanRow = ({
     >
       <td className="px-2 py-2 text-center">
         {!isSupplier && (
-          <Checkbox 
-            checked={isSelected} 
-            onCheckedChange={() => toggleSelect(item.id)} 
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={() => toggleSelect(item.id)}
             className="mr-2"
           />
         )}
@@ -389,6 +429,8 @@ const SketchPlanRow = ({
           setSketchInitialData={setSketchInitialData}
           lastSketchItemIdxRef={lastSketchItemIdxRef}
           setSketchDialogOpen={setSketchDialogOpen}
+          onImageDragStart={onImageDragStart}
+          onImageDrop={onImageDrop}
         />
       </td>
       {/* Post-work Photos Column */}
@@ -408,6 +450,8 @@ const SketchPlanRow = ({
           setSketchInitialData={setSketchInitialData}
           lastSketchItemIdxRef={lastSketchItemIdxRef}
           setSketchDialogOpen={setSketchDialogOpen}
+          onImageDragStart={onImageDragStart}
+          onImageDrop={onImageDrop}
         />
       </td>
       <td className={cn("px-1 text-center border-l", isCompact ? "py-0" : "py-2")}>
@@ -600,7 +644,7 @@ export default function CreateSketchPlan() {
 
   const handleAssignToVendor = async (shopId: string) => {
     if (selectedItemIds.size === 0) return;
-    
+
     setAssigningLoading(true);
     try {
       const shopName = vendors.find(v => v.id === shopId)?.name || "Vendor";
@@ -610,7 +654,7 @@ export default function CreateSketchPlan() {
         }
         return item;
       });
-      
+
       setItems(updatedItems);
       toast({ title: "Success", description: `Assigned ${selectedItemIds.size} items to ${shopName}` });
       setSelectedItemIds(new Set());
@@ -1026,8 +1070,8 @@ export default function CreateSketchPlan() {
             ...(it.preImages || []).map(img => ({ ...img, name: `PRE_${img.name}` })),
             ...(it.postImages || []).map(img => ({ ...img, name: `POST_${img.name}` }))
           ];
-          return { 
-            ...it, 
+          return {
+            ...it,
             images: flattenedImages,
             assigned_vendor_id: it.assigned_vendor_id,
             vendor_name: it.vendor_name
@@ -1420,6 +1464,71 @@ export default function CreateSketchPlan() {
     }
   };
 
+  const handleImageDragStart = (e: React.DragEvent, source: any) => {
+    e.dataTransfer.setData("imageSource", JSON.stringify(source));
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleImageDrop = (e: React.DragEvent, target: any) => {
+    e.preventDefault();
+    if (isLocked) return;
+
+    const sourceStr = e.dataTransfer.getData("imageSource");
+    if (!sourceStr) return;
+    const source = JSON.parse(sourceStr);
+
+    if (source.type === target.type && source.rowIdx === target.rowIdx && source.imgIdx === target.imgIdx) return;
+
+    // Clone current states
+    const nextItems = [...items];
+    const nextPlanImages = [...planImages];
+    let imageSource: PlanImage | undefined;
+
+    // Decide if copy or move
+    const isSameSection = source.type === target.type && (source.type === "main" ? true : source.rowIdx === target.rowIdx);
+    const isTargetItemSection = target.type === "pre" || target.type === "post";
+    // Copy if dragging to pre/post and it's not the same spot
+    const shouldCopy = isTargetItemSection && !isSameSection;
+
+    // 1. Identify image and remove from source if moving
+    if (source.type === "main") {
+      imageSource = nextPlanImages[source.imgIdx];
+      if (!shouldCopy) nextPlanImages.splice(source.imgIdx, 1);
+    } else {
+      const field = source.type === "pre" ? "preImages" : "postImages";
+      const row = { ...nextItems[source.rowIdx] };
+      const images = [...(row[field] || [])];
+      imageSource = images[source.imgIdx];
+      if (!shouldCopy) {
+        images.splice(source.imgIdx, 1);
+        row[field] = images;
+        nextItems[source.rowIdx] = row;
+      }
+    }
+
+    if (!imageSource) return;
+
+    // 2. Add to target (clear ID for copies so they are saved as new records)
+    const finalImage = shouldCopy ? { ...imageSource, id: undefined } : imageSource;
+
+    if (target.type === "main") {
+      nextPlanImages.push(finalImage);
+    } else {
+      const field = target.type === "pre" ? "preImages" : "postImages";
+      const row = { ...nextItems[target.rowIdx] };
+      row[field] = [...(row[field] || []), finalImage];
+      nextItems[target.rowIdx] = row;
+    }
+
+    // Update states
+    setPlanImages(nextPlanImages);
+    setItems(nextItems);
+    toast({
+      title: `Image ${shouldCopy ? "Copied" : "Moved"}`,
+      description: `${shouldCopy ? "Copied" : "Moved"} image into ${target.type === "main" ? "Plan Photos" : `Row ${target.rowIdx + 1} (${target.type})`}`
+    });
+  };
+
   const LayoutComponent = isSupplier ? SupplierLayout : Layout;
 
   return (
@@ -1626,12 +1735,12 @@ export default function CreateSketchPlan() {
             <CardContent className="p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
               <div className="space-y-1 col-span-1 md:col-span-3">
                 <Label className="text-[10px] uppercase font-bold text-slate-500">Plan Name</Label>
-                <Input 
-                  value={name} 
-                  onChange={(e) => setName(e.target.value)} 
-                  className={cn("h-8 text-xs", !name.trim() && "border-red-300 bg-red-50 focus:ring-red-500")} 
-                  placeholder="Enter Plan Name (Required)" 
-                  disabled={isLocked || userRole === "supplier"} 
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className={cn("h-8 text-xs", !name.trim() && "border-red-300 bg-red-50 focus:ring-red-500")}
+                  placeholder="Enter Plan Name (Required)"
+                  disabled={isLocked || userRole === "supplier"}
                 />
               </div>
               <div className="space-y-1 col-span-1 md:col-span-3">
@@ -1734,26 +1843,26 @@ export default function CreateSketchPlan() {
                 <FileText className="w-4 h-4 text-indigo-500" /> Project Itemized Requirements
               </CardTitle>
               <div className="flex gap-2">
-                  {userRole === "supplier" && currentId && (
-                    <Button 
-                      onClick={handleLoadToProposal} 
-                      disabled={loadingToProposal} 
-                      size="sm" 
-                      className="h-8 gap-1 bg-green-600 hover:bg-green-700 text-white"
-                    >
-                      {loadingToProposal ? "Loading..." : "Load to Proposal"}
-                    </Button>
-                  )}
-                  {selectedItemIds.size > 0 && !isSupplier && (
-                    <Button 
-                      onClick={() => { loadVendors(); setShowAssignDialog(true); }} 
-                      size="sm" 
-                      variant="outline" 
-                      className="h-8 gap-1 border-amber-500 text-amber-600 hover:bg-amber-50"
-                    >
-                      Assign to Vendor ({selectedItemIds.size})
-                    </Button>
-                  )}
+                {userRole === "supplier" && currentId && (
+                  <Button
+                    onClick={handleLoadToProposal}
+                    disabled={loadingToProposal}
+                    size="sm"
+                    className="h-8 gap-1 bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    {loadingToProposal ? "Loading..." : "Load to Proposal"}
+                  </Button>
+                )}
+                {selectedItemIds.size > 0 && !isSupplier && (
+                  <Button
+                    onClick={() => { loadVendors(); setShowAssignDialog(true); }}
+                    size="sm"
+                    variant="outline"
+                    className="h-8 gap-1 border-amber-500 text-amber-600 hover:bg-amber-50"
+                  >
+                    Assign to Vendor ({selectedItemIds.size})
+                  </Button>
+                )}
                 {userRole !== "supplier" && (
                   <Button onClick={addItem} size="sm" variant="outline" className="h-8 gap-1 border-indigo-200 text-indigo-600 hover:bg-indigo-50" disabled={isLocked}>
                     <Plus className="w-3.5 h-3.5" /> Add New Row
@@ -1771,8 +1880,8 @@ export default function CreateSketchPlan() {
                     <tr className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 border-b">
                       <th className={cn("w-12 px-2", isCompact ? "py-1" : "py-3")}>
                         {!isSupplier && (
-                          <Checkbox 
-                            checked={selectedItemIds.size === items.length && items.length > 0} 
+                          <Checkbox
+                            checked={selectedItemIds.size === items.length && items.length > 0}
                             onCheckedChange={toggleSelectAll}
                           />
                         )}
@@ -1830,6 +1939,8 @@ export default function CreateSketchPlan() {
                         isSelected={selectedItemIds.has(item.id)}
                         toggleSelect={toggleSelectItem}
                         userRole={userRole}
+                        onImageDragStart={handleImageDragStart}
+                        onImageDrop={handleImageDrop}
                       />
                     ))}
                   </Reorder.Group>
@@ -1847,10 +1958,31 @@ export default function CreateSketchPlan() {
                   <Camera className="w-3.5 h-3.5 text-indigo-500" /> Plan-Level Site Photos
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-3 flex-1 overflow-y-auto max-h-[220px] relative z-20">
+              <CardContent
+                className={cn(
+                  "p-3 flex-1 overflow-y-auto max-h-[220px] relative z-20 transition-colors",
+                  !(isLocked || userRole === "supplier") && "min-h-[100px]"
+                )}
+                onDragOver={(e) => {
+                  if (isLocked || userRole === "supplier") return;
+                  e.preventDefault();
+                }}
+                onDrop={(e) => {
+                  if (isLocked || userRole === "supplier") return;
+                  handleImageDrop(e, { type: "main" });
+                }}
+              >
                 <div className="grid grid-cols-4 gap-2">
                   {planImages.map((img, idx) => (
-                    <div key={idx} className={cn("relative group aspect-square rounded border overflow-hidden bg-slate-100", (isLocked || userRole === "supplier") && "pointer-events-auto")}>
+                    <div
+                      key={idx}
+                      className={cn(
+                        "relative group aspect-square rounded border overflow-hidden bg-slate-100 transition-all",
+                        (isLocked || userRole === "supplier") ? "pointer-events-auto" : "cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-indigo-300"
+                      )}
+                      draggable={!(isLocked || userRole === "supplier")}
+                      onDragStart={(e) => handleImageDragStart(e, { type: "main", imgIdx: idx })}
+                    >
                       <img src={img.url} className="w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setPreviewImage(img)} title="Click to view full image" />
                       <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[8px] p-1 truncate opacity-0 group-hover:opacity-100 transition-opacity pr-6 pointer-events-none">
                         {img.name}
@@ -1887,24 +2019,6 @@ export default function CreateSketchPlan() {
                           <Plus className="w-5 h-5 text-slate-400" />
                         </label>
                       </Button>
-                      <label className="aspect-square rounded border-2 border-dashed border-indigo-200 flex flex-col items-center justify-center text-indigo-400 hover:border-indigo-400 hover:bg-indigo-50 cursor-pointer transition-all shadow-sm bg-white">
-                        <Camera className="w-5 h-5" />
-                        <span className="text-[8px] font-bold mt-1 uppercase text-center">Open<br />Camera</span>
-                        <input type="file" accept="image/*" capture="environment" onChange={(e) => {
-                          const files = e.target.files;
-                          if (files) {
-                            Array.from(files).forEach(file => {
-                              const reader = new FileReader();
-                              const fileName = `CAM_${new Date().getTime()}`;
-                              reader.onloadend = () => setPlanImages(prev => [
-                                ...prev,
-                                { url: reader.result as string, name: fileName }
-                              ]);
-                              reader.readAsDataURL(file);
-                            });
-                          }
-                        }} className="hidden" />
-                      </label>
                     </>
                   )}
                 </div>
@@ -2140,12 +2254,12 @@ export default function CreateSketchPlan() {
                 </p>
               </DialogHeader>
             </div>
-            
+
             <div className="p-4 space-y-4 bg-white flex-1 overflow-hidden flex flex-col">
               <div className="relative group shrink-0">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-violet-500 transition-colors" />
-                <Input 
-                  placeholder="Search vendors by name or city..." 
+                <Input
+                  placeholder="Search vendors by name or city..."
                   className="pl-9 h-11 bg-slate-50 border-slate-200 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all font-medium"
                   value={vendorSearchTerm}
                   onChange={(e) => setVendorSearchTerm(e.target.value)}
@@ -2153,8 +2267,8 @@ export default function CreateSketchPlan() {
               </div>
 
               <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar min-h-[100px]">
-                {vendors.filter(v => 
-                  v.name?.toLowerCase().includes(vendorSearchTerm.toLowerCase()) || 
+                {vendors.filter(v =>
+                  v.name?.toLowerCase().includes(vendorSearchTerm.toLowerCase()) ||
                   v.city?.toLowerCase().includes(vendorSearchTerm.toLowerCase())
                 ).length === 0 ? (
                   <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-200 flex flex-col items-center gap-2 m-2">
@@ -2166,8 +2280,8 @@ export default function CreateSketchPlan() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 gap-2 p-1">
-                    {vendors.filter(v => 
-                      v.name?.toLowerCase().includes(vendorSearchTerm.toLowerCase()) || 
+                    {vendors.filter(v =>
+                      v.name?.toLowerCase().includes(vendorSearchTerm.toLowerCase()) ||
                       v.city?.toLowerCase().includes(vendorSearchTerm.toLowerCase())
                     ).map(v => (
                       <Button
@@ -2204,7 +2318,7 @@ export default function CreateSketchPlan() {
                 )}
               </div>
             </div>
-            
+
             <div className="p-4 bg-slate-50 border-t flex justify-end shrink-0">
               <Button variant="ghost" onClick={() => setShowAssignDialog(false)} className="text-slate-500 hover:text-slate-700 font-semibold h-9">
                 Close

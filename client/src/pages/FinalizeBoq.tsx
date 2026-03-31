@@ -1895,7 +1895,12 @@ export default function FinalizeBoq() {
           else if (colName === "HSN") rowValues[colName] = tableData.hsn_code || (tableData.hsn_sac_type === 'hsn' ? tableData.hsn_sac_code : "") || "—";
           else if (colName === "SAC") rowValues[colName] = tableData.sac_code || (tableData.hsn_sac_type === 'sac' ? tableData.hsn_sac_code : "") || "—";
           else if (colName === "Rate / Unit") rowValues[colName] = Number(rateSqft.toFixed(2));
-          else if (colName === "Unit") rowValues[colName] = productUnits[boqItem.id] ?? (currentStep11Items[0]?.unit || tableData.unit || "");
+          else if (colName === "Unit") {
+            const defaultUnit = (tableData.materialLines && tableData.targetRequiredQty !== undefined)
+              ? (tableData.configBasis?.requiredUnitType || tableData.unit || "Sqft")
+              : (currentStep11Items[0]?.unit || tableData.unit || "nos");
+            rowValues[colName] = productUnits[boqItem.id] ?? defaultUnit;
+          }
           else if (colName === "Qty") rowValues[colName] = Number(displayQty.toFixed(2));
           else if (colName === "Total Value (₹)") rowValues[colName] = Number(totalVal.toFixed(2));
           else if (colName === "Override Rate") rowValues[colName] = Number((parseFloat(overrideRates[boqItem.id] || "0") || 0).toFixed(2));
@@ -2186,7 +2191,12 @@ export default function FinalizeBoq() {
         if (selectedPdfExportCols.includes("Description")) row.push(manualDesc);
         if (selectedPdfExportCols.includes("HSN")) row.push(tableData.hsn_code || (tableData.hsn_sac_type === 'hsn' ? tableData.hsn_sac_code : "") || "—");
         if (selectedPdfExportCols.includes("SAC")) row.push(tableData.sac_code || (tableData.hsn_sac_type === 'sac' ? tableData.hsn_sac_code : "") || "—");
-        if (selectedPdfExportCols.includes("Unit")) row.push(productUnits[boqItem.id] ?? (currentStep11Items[0]?.unit || tableData.unit || ""));
+        if (selectedPdfExportCols.includes("Unit")) {
+          const defaultUnit = (tableData.materialLines && tableData.targetRequiredQty !== undefined)
+            ? (tableData.configBasis?.requiredUnitType || tableData.unit || "Sqft")
+            : (currentStep11Items[0]?.unit || tableData.unit || "nos");
+          row.push(productUnits[boqItem.id] ?? defaultUnit);
+        }
         if (selectedPdfExportCols.includes("Qty")) row.push(displayQty.toFixed(2));
         if (selectedPdfExportCols.includes("Rate")) row.push(rateSqft.toFixed(2));
         if (selectedPdfExportCols.includes("Total")) row.push(totalVal.toFixed(2));
@@ -3726,11 +3736,21 @@ export default function FinalizeBoq() {
                               <td className="border-r px-2 py-1 text-center font-medium text-gray-800 align-middle w-24 min-w-[80px]">
                                 <input
                                   type="text"
-                                  value={productUnits[boqItem.id] ?? (currentStep11Items[0]?.unit || tableData.unit || "")}
+                                  value={(() => {
+                                    const defaultUnit = (tableData.materialLines && tableData.targetRequiredQty !== undefined)
+                                      ? (tableData.configBasis?.requiredUnitType || tableData.unit || "Sqft")
+                                      : (currentStep11Items[0]?.unit || tableData.unit || "nos");
+                                    return productUnits[boqItem.id] ?? defaultUnit;
+                                  })()}
                                   disabled={isVersionSubmitted}
                                   onChange={e => setProductUnits(prev => ({ ...prev, [boqItem.id]: e.target.value }))}
                                   onBlur={() => saveItemLayout(boqItem.id, undefined, undefined, undefined, undefined, undefined, productUnits[boqItem.id])}
-                                  className={`w-full border-none rounded p-0.5 text-[10px] focus:ring-1 ring-blue-300 outline-none bg-transparent text-center font-semibold h-7 ${getIsModified(boqItem.id, "unit", productUnits[boqItem.id] ?? (currentStep11Items[0]?.unit || tableData.unit || "")) ? "text-blue-600 underline" : ""}`}
+                                  className={`w-full border-none rounded p-0.5 text-[10px] focus:ring-1 ring-blue-300 outline-none bg-transparent text-center font-semibold h-7 ${(() => {
+                                    const defaultUnit = (tableData.materialLines && tableData.targetRequiredQty !== undefined)
+                                      ? (tableData.configBasis?.requiredUnitType || tableData.unit || "Sqft")
+                                      : (currentStep11Items[0]?.unit || tableData.unit || "nos");
+                                    return getIsModified(boqItem.id, "unit", productUnits[boqItem.id] ?? defaultUnit);
+                                  })() ? "text-blue-600 underline" : ""}`}
                                   placeholder="Unit"
                                 />
                               </td>

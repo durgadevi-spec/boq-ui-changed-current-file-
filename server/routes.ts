@@ -1742,9 +1742,9 @@ export async function registerRoutes(
   // GET /api/shops - list shops
   app.get("/api/shops", async (_req, res) => {
     try {
-      // Only return shops that are approved for public listing
+      // Return shops that are not explicitly rejected
       const result = await query(
-        "SELECT * FROM shops WHERE approved IS TRUE ORDER BY created_at DESC",
+        "SELECT * FROM shops WHERE approved IS NOT FALSE ORDER BY name ASC",
       );
 
       const archivedIds = archiveService.getArchivedItemIds('shops');
@@ -9548,7 +9548,7 @@ ${list.rows.map((row: any) => `- ${row.name}`).join('\n')}`;
       let shopName = "All Vendors";
       let shopId = null;
 
-      const shopRes = await query("SELECT id, name FROM shops WHERE owner_id = $1 LIMIT 1", [userId]);
+      const shopRes = await query("SELECT id, name FROM shops WHERE owner_id::text = $1::text LIMIT 1", [userId]);
       if (userRole === 'supplier') {
         if (shopRes.rows.length === 0) {
           return res.status(400).json({ message: "No shop associated with your account" });
@@ -9646,7 +9646,7 @@ ${list.rows.map((row: any) => `- ${row.name}`).join('\n')}`;
       const params: any[] = [];
 
       if (userRole === 'supplier') {
-        const shopRes = await query("SELECT id FROM shops WHERE owner_id = $1 LIMIT 1", [userId]);
+      const shopRes = await query("SELECT id FROM shops WHERE owner_id::text = $1::text LIMIT 1", [userId]);
         if (shopRes.rows.length > 0) {
           q += " WHERE vendor_id = $1";
           params.push(shopRes.rows[0].id);
