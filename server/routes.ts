@@ -6,7 +6,7 @@ import { comparePasswords, generateToken } from "./auth";
 import { authMiddleware, requireRole } from "./middleware";
 import { randomUUID } from "crypto";
 import { query } from "./db/client";
-import { sendSketchPlanEmail, sendSiteReportEmail } from "./email";
+import { sendSketchPlanEmail, sendSiteReportEmail, sendProposalStatusEmail } from "./email";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -632,6 +632,42 @@ export async function registerRoutes(
       "[db] Could not migrate boq_items columns:",
       (err as any)?.message || err,
     );
+  }
+
+  // Ensure purchase_orders table exists
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS proposals (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_id VARCHAR(100) NOT NULL REFERENCES boq_projects(id) ON DELETE CASCADE,
+        project_name VARCHAR(255),
+        vendor_id VARCHAR(100) NOT NULL,
+        vendor_name VARCHAR(255),
+        version_number INTEGER DEFAULT 1,
+        status VARCHAR(50) DEFAULT 'draft',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(project_id, vendor_id, version_number)
+      )
+    `);
+    
+    await query(`
+      CREATE TABLE IF NOT EXISTS proposal_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        proposal_id UUID NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+        material_id VARCHAR(255),
+        item_name VARCHAR(255) NOT NULL,
+        description TEXT,
+        qty DECIMAL(10,2) NOT NULL,
+        unit VARCHAR(50),
+        rate DECIMAL(15,2) DEFAULT 0,
+        amount DECIMAL(15,2) DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    console.log("[db] Dedicated proposals tables verified/created");
+  } catch (err: unknown) {
+    console.warn("[db] Could not create proposals tables:", (err as any)?.message || err);
   }
 
   // Ensure purchase_orders table exists
@@ -4634,10 +4670,18 @@ export async function registerRoutes(
             continue;
           }
           
-          const itemIdx = parseInt(parts[parts.length - 1], 10);
-          const type = parts[parts.length - 2]; // "engine" or "manual"
-          // Reconstruct boqItemId (everything before the type and index)
-          const boqItemId = parts.slice(0, parts.length - 2).join("-");
+          const itemIdxStr = parts[parts.length - 1];
+          const itemIdx = parseInt(itemIdxStr, 10);
+          
+          let type = parts[parts.length - 2];
+          let boqItemId = "";
+          
+          if (type === "engine" || type === "manual") {
+             boqItemId = parts.slice(0, parts.length - 2).join("-");
+          } else {
+             type = "manual"; // non-engine products store items in step11_items, so treat as manual
+             boqItemId = parts.slice(0, parts.length - 1).join("-");
+          }
 
           if (!editsByItem[boqItemId]) editsByItem[boqItemId] = { engine: {}, manual: {} };
           
@@ -4688,6 +4732,7 @@ export async function registerRoutes(
               const f = fields as any;
               // MaterialLines uses supplyRate/installRate (camelCase)
               if (f.supply_rate !== undefined) tableData.materialLines[itemIdx].supplyRate = Number(f.supply_rate);
+              else if (f.rate !== undefined) tableData.materialLines[itemIdx].supplyRate = Number(f.rate);
               if (f.install_rate !== undefined) tableData.materialLines[itemIdx].installRate = Number(f.install_rate);
               if (f.qty !== undefined) tableData.materialLines[itemIdx].perUnitQty = Number(f.qty);
               editsAppliedToThisItem++;
@@ -9368,6 +9413,290 @@ ${list.rows.map((row: any) => `- ${row.name}`).join('\n')}`;
       await query("ROLLBACK");
       console.error("POST /api/site-reports/:id/send-email error:", err);
       res.status(500).json({ message: "Failed to send report email", error: err.message || String(err) });
+    }
+  });
+  // ==================== DEDICATED PROPOSAL ROUTES ====================
+
+  // POST /api/sketch-plans/:id/load-to-proposal - Load assigned items to proposal
+  app.post("/api/sketch-plans/:id/load-to-proposal", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const userId = (req as any).user?.id;
+      const userRole = (req as any).user?.role;
+
+      if (userRole !== 'supplier' && userRole !== 'admin' && userRole !== 'software_team') {
+        return res.status(403).json({ message: "Only vendors or admins can load items to proposal" });
+      }
+
+      const planRes = await query("SELECT * FROM sketch_plans WHERE id = $1", [id]);
+      if (planRes.rows.length === 0) return res.status(404).json({ message: "Plan not found" });
+      const plan = planRes.rows[0];
+
+      if (!plan.project_id) {
+        return res.status(400).json({ message: "This sketch plan is not linked to any project" });
+      }
+
+      let itemsQuery = "SELECT * FROM sketch_plan_items WHERE plan_id = $1";
+      const queryParams: any[] = [id];
+      let shopName = "All Vendors";
+      let shopId = null;
+      
+      const shopRes = await query("SELECT id, name FROM shops WHERE owner_id = $1 LIMIT 1", [userId]);
+      if (userRole === 'supplier') {
+        if (shopRes.rows.length === 0) {
+          return res.status(400).json({ message: "No shop associated with your account" });
+        }
+        shopId = shopRes.rows[0].id;
+        shopName = shopRes.rows[0].name || "Vendor";
+        itemsQuery += " AND assigned_vendor_id::text = $2";
+        queryParams.push(shopId);
+      } else if (userRole !== 'admin' && userRole !== 'software_team') {
+        return res.status(403).json({ message: "Only vendors or admins can load items to proposal" });
+      }
+
+      const itemsRes = await query(itemsQuery, queryParams);
+      const items = itemsRes.rows;
+
+      if (items.length === 0) {
+        return res.status(400).json({ message: "No items assigned to you in this plan" });
+      }
+
+      await query("BEGIN");
+
+      try {
+        const projectRes = await query("SELECT * FROM boq_projects WHERE id = $1", [plan.project_id]);
+        const project = projectRes.rows[0];
+        if (!project) throw new Error("Associated project not found");
+
+        const vendorIdToUse = shopId || userId;
+
+        const versionRes = await query(
+          "SELECT COALESCE(MAX(version_number), 0) as last_version FROM proposals WHERE project_id = $1 AND vendor_id = $2",
+          [plan.project_id, vendorIdToUse]
+        );
+        const nextVersionNum = (versionRes.rows[0].last_version || 0) + 1;
+
+        const proposalCreateRes = await query(
+          `INSERT INTO proposals (
+            project_id, project_name, vendor_id, vendor_name, version_number, status
+          ) VALUES ($1, $2, $3, $4, $5, 'draft') RETURNING id`,
+          [plan.project_id, project.name, vendorIdToUse, shopName, nextVersionNum]
+        );
+        const newProposalId = proposalCreateRes.rows[0].id;
+
+        const materialsRes = await query("SELECT id, name, rate, unit, description FROM materials", []);
+        const materialsById = Object.fromEntries(materialsRes.rows.map(m => [m.id?.toString(), m]));
+        const materialsByName = Object.fromEntries(materialsRes.rows.map(m => [m.name?.toLowerCase()?.trim() || "", m]));
+
+        for (const item of items) {
+          let matchedMaterial = item.material_id ? materialsById[item.material_id.toString()] : null;
+          if (!matchedMaterial && item.item_name) {
+            matchedMaterial = materialsByName[item.item_name.toLowerCase().trim()];
+          }
+          
+          await query(
+            `INSERT INTO proposal_items (
+              proposal_id, material_id, item_name, description, qty, unit, rate, amount
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [
+              newProposalId,
+              matchedMaterial?.id || item.material_id,
+              item.item_name,
+              item.description || item.remarks || matchedMaterial?.description || "",
+              parseFloat(item.qty) || 0,
+              item.unit || matchedMaterial?.unit || "pcs",
+              matchedMaterial ? parseFloat(matchedMaterial.rate) : 0,
+              0
+            ]
+          );
+        }
+
+        await query("COMMIT");
+        res.json({ 
+          success: true, 
+          message: `Proposal version ${nextVersionNum} for ${shopName} created`, 
+          versionId: newProposalId, 
+          projectId: plan.project_id 
+        });
+      } catch (err) {
+        await query("ROLLBACK");
+        throw err;
+      }
+    } catch (err) {
+      console.error("POST /api/sketch-plans/:id/load-to-proposal error", err);
+      res.status(500).json({ message: "Failed to load items to proposal" });
+    }
+  });
+
+  // GET /api/proposals - Fetch proposals (Vendor sees own, Admin sees all)
+  app.get("/api/proposals", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const userRole = (req as any).user?.role;
+      const userId = (req as any).user?.id;
+      const { projectId } = req.query;
+
+      let q = "SELECT * FROM proposals";
+      const params: any[] = [];
+
+      if (userRole === 'supplier') {
+        const shopRes = await query("SELECT id FROM shops WHERE owner_id = $1 LIMIT 1", [userId]);
+        if (shopRes.rows.length > 0) {
+          q += " WHERE vendor_id = $1";
+          params.push(shopRes.rows[0].id);
+        } else {
+          q += " WHERE vendor_id = 'NONE'";
+        }
+
+        if (projectId) {
+          q += ` AND project_id = $${params.length + 1}`;
+          params.push(projectId);
+        }
+      } else {
+        // Admin
+        if (projectId) {
+          q += " WHERE project_id = $1";
+          params.push(projectId);
+        }
+      }
+
+      q += " ORDER BY created_at DESC";
+      const result = await query(q, params);
+      res.json(result.rows);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to fetch proposals" });
+    }
+  });
+
+  // GET /api/proposals/:id/items - Fetch items for a proposal
+  app.get("/api/proposals/:id/items", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const result = await query("SELECT * FROM proposal_items WHERE proposal_id = $1 ORDER BY created_at ASC", [req.params.id]);
+      res.json(result.rows);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to fetch proposal items" });
+    }
+  });
+
+  // POST /api/proposals/:id/submit - Vendor submits proposal
+  app.post("/api/proposals/:id/submit", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      // Can update item rates and quantities here from req.body.items if provided
+      const { items } = req.body;
+      
+      await query("BEGIN");
+      
+      if (items && Array.isArray(items)) {
+        for (const it of items) {
+          await query(
+            "UPDATE proposal_items SET rate = $1, amount = $2 WHERE id = $3",
+            [it.rate, it.amount, it.id]
+          );
+        }
+      }
+
+      const result = await query(
+        "UPDATE proposals SET status = 'submitted', updated_at = NOW() WHERE id = $1 RETURNING *", 
+        [req.params.id]
+      );
+      
+      await query("COMMIT");
+      res.json(result.rows[0]);
+    } catch (err) {
+      await query("ROLLBACK");
+      console.error(err);
+      res.status(500).json({ message: "Failed to submit proposal" });
+    }
+  });
+
+  // POST /api/proposals/:id/approve - Admin approves proposal
+  app.post("/api/proposals/:id/approve", authMiddleware, requireRole('admin', 'software_team'), async (req: Request, res: Response) => {
+    try {
+      const result = await query(
+        "UPDATE proposals SET status = 'approved', updated_at = NOW() WHERE id = $1 RETURNING *", 
+        [req.params.id]
+      );
+      const proposal = result.rows[0];
+      
+      try {
+        const vendorRes = await query(`
+          SELECT u.email, u.display_name 
+          FROM users u 
+          JOIN shops s ON u.id = s.owner_id 
+          WHERE s.id = $1
+        `, [proposal.vendor_id]);
+        
+        if (vendorRes.rows.length > 0 && vendorRes.rows[0].email) {
+          await sendProposalStatusEmail(
+             vendorRes.rows[0].email,
+             vendorRes.rows[0].display_name || 'Vendor',
+             proposal.project_name || 'Project',
+             proposal.version_number,
+             'approved'
+          );
+        }
+      } catch (e) {
+        console.error("Failed to send approval email", e);
+      }
+      
+      res.json(proposal);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to approve proposal" });
+    }
+  });
+
+  // POST /api/proposals/:id/reject - Admin rejects proposal
+  app.post("/api/proposals/:id/reject", authMiddleware, requireRole('admin', 'software_team'), async (req: Request, res: Response) => {
+    try {
+      const { reason } = req.body;
+      const result = await query(
+        "UPDATE proposals SET status = 'rejected', rejection_reason = $1, updated_at = NOW() WHERE id = $2 RETURNING *", 
+        [reason || 'No reason specified', req.params.id]
+      );
+      const proposal = result.rows[0];
+      
+      try {
+        const vendorRes = await query(`
+          SELECT u.email, u.display_name 
+          FROM users u 
+          JOIN shops s ON u.id = s.owner_id 
+          WHERE s.id = $1
+        `, [proposal.vendor_id]);
+        
+        if (vendorRes.rows.length > 0 && vendorRes.rows[0].email) {
+          await sendProposalStatusEmail(
+             vendorRes.rows[0].email,
+             vendorRes.rows[0].display_name || 'Vendor',
+             proposal.project_name || 'Project',
+             proposal.version_number,
+             'rejected',
+             proposal.rejection_reason
+          );
+        }
+      } catch (e) {
+        console.error("Failed to send rejection email", e);
+      }
+      
+      res.json(proposal);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to reject proposal" });
+    }
+  });
+
+  // GET /api/proposals/approved/:projectId - Fetch approved proposals for BOM
+  app.get("/api/proposals/approved/:projectId", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const result = await query(
+        "SELECT * FROM proposals WHERE project_id = $1 AND status = 'approved' ORDER BY vendor_name, version_number DESC", 
+        [req.params.projectId]
+      );
+      res.json(result.rows);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to fetch approved proposals" });
     }
   });
 
