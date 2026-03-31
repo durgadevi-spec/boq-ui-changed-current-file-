@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Reorder, useDragControls } from "framer-motion";
-import { ChevronUp, ChevronDown, Loader2, CheckCircle2, XCircle, Lock, History, Clock, Briefcase, MapPin, IndianRupee, GripVertical, Search, ArrowUp, Plus, Trash2, Save, MessageSquare, Users, ChevronsUpDown, Check, X, FileText } from "lucide-react";
+import { ChevronUp, ChevronDown, Loader2, CheckCircle2, XCircle, Lock, History, Clock, Briefcase, MapPin, IndianRupee, GripVertical, Search, ArrowUp, Plus, Trash2, Save, MessageSquare, Users, ChevronsUpDown, Check, X, RefreshCw } from "lucide-react";
 import { fuzzySearch, cn } from "@/lib/utils";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,7 +18,6 @@ import { getEstimatorTypeFromProduct } from "@/lib/estimatorUtils";
 import ProductPicker from "@/components/ProductPicker";
 import MaterialPicker from "@/components/MaterialPicker";
 import Step11Preview from "@/components/Step11Preview";
-import ProposalPicker from "@/components/ProposalPicker";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from 'xlsx';
@@ -333,7 +332,7 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
       const qty = Number(getEditedValue(itemKey, "qty", line.perUnitQty));
       const sRate = Number(getEditedValue(itemKey, "supply_rate", line.supplyRate));
       const iRate = Number(getEditedValue(itemKey, "install_rate", line.installRate));
-      const rate = Number(getEditedValue(itemKey, "supply_rate", sRate + iRate)) || (sRate + iRate);
+      const rate = Number(getEditedValue(itemKey, "rate", sRate + iRate)) || (sRate + iRate);
       const reqQty = Number((qty * calculationTarget).toFixed(2));
       const roundOff = line.applyRounding !== false ? Math.ceil(reqQty) : reqQty;
       return {
@@ -349,25 +348,35 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
       // This handles cases where a template might have both populated inconsistently
       if (tableData.materialLines?.some((ml: any) => (ml.id || ml.materialId) === it.id)) return null;
 
-      const itemKey = `${boqItem.id}-manual-${s11Idx}`;
-      const qty = Number(getEditedValue(itemKey, "qty", it.qty ?? 0)) || 0;
+      const itemKey = it.itemKey || `${boqItem.id}-manual-${s11Idx}`;
+      const qty = Number(getEditedValue(itemKey, "qty", it.qtyPerSqf ?? it.qty ?? 0)) || 0;
       const sRate = Number(getEditedValue(itemKey, "supply_rate", it.supply_rate ?? 0)) || 0;
       const iRate = Number(getEditedValue(itemKey, "install_rate", it.install_rate ?? 0)) || 0;
-      const rate = Number(getEditedValue(itemKey, "supply_rate", sRate + iRate)) || (sRate + iRate);
-      return { ...it, manual: true, itemKey, _s11Idx: s11Idx, qtyPerSqf: it.qtyPerSqf ?? 0, supply_rate: sRate, install_rate: iRate, amount: Number((qty * rate).toFixed(2)) };
+      const rate = Number(getEditedValue(itemKey, "rate", sRate + iRate)) || (sRate + iRate);
+
+      // --- FIX: Manual items should NOT be scaled by calculationTarget ---
+      const reqQty = qty;
+      const roundOff = reqQty; // No rounding for manual items usually, or just keep as is
+      const amount = Number((reqQty * rate).toFixed(2));
+      return { ...it, manual: true, itemKey, _s11Idx: s11Idx, qtyPerSqf: qty, requiredQty: reqQty, roundOff, amount, supply_rate: sRate, install_rate: iRate };
     }).filter(Boolean);
     displayLines = [...computedLines, ...manualStep11];
   } else {
     displayLines = step11Items.map((it: any, s11Idx: number) => {
-      const itemKey = it.itemKey || `${boqItem.id}-${s11Idx}`;
-      const baseQty = Number(getEditedValue(itemKey, "qty", it.qty ?? 0)) || 0;
+      const itemKey = it.itemKey || `${boqItem.id}-manual-${s11Idx}`;
+      const baseQty = Number(getEditedValue(itemKey, "qty", it.qtyPerSqf ?? it.qty ?? 0)) || 0;
       const sRate = Number(getEditedValue(itemKey, "supply_rate", it.supply_rate ?? 0)) || 0;
       const iRate = Number(getEditedValue(itemKey, "install_rate", it.install_rate ?? 0)) || 0;
-      const rate = Number(getEditedValue(itemKey, "supply_rate", sRate + iRate)) || (sRate + iRate);
+      const rate = Number(getEditedValue(itemKey, "rate", sRate + iRate)) || (sRate + iRate);
 
-      // For semi-manual products, treat the quantity as "Qty per Unit" if Target is defined/editable
-      const scaledQty = Number((baseQty * calculationTarget).toFixed(2));
-      return { ...it, itemKey, _s11Idx: s11Idx, qtyPerSqf: baseQty, qty: scaledQty, rateSqft: rate, amount: Number((scaledQty * rate).toFixed(2)) };
+      // --- FIX: For non-engine products/manual items, don't scale by default if it's a fixed item ---
+      // However, some "Product Templates" might still want scaling. 
+      // But based on user feedback, manual additions should not scale.
+      const isManual = it.manual || !tableData.materialLines;
+      const scaledQty = isManual ? baseQty : Number((baseQty * calculationTarget).toFixed(2));
+      const roundOff = (it.applyRounding !== false && !isManual) ? Math.ceil(scaledQty) : scaledQty;
+      const amount = Number((roundOff * rate).toFixed(2));
+      return { ...it, itemKey, _s11Idx: s11Idx, qtyPerSqf: baseQty, qty: scaledQty, roundOff, rateSqft: rate, amount, manual: isManual };
     });
   }
 
@@ -622,6 +631,7 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="border px-1 py-2 text-center w-8 text-gray-400" title="Drag to reorder"><GripVertical className="h-3 w-3 mx-auto" /></th>
                   <th className="border px-2 py-2 text-left font-semibold w-10">Sl</th>
+                  <th className="border px-1 py-1 text-center w-12 font-semibold">Image</th>
                   <th className="border px-2 py-2 text-left font-semibold w-64">Item</th>
                   {!isCompactView && <th className="border px-2 py-2 text-left font-semibold w-32">Shop</th>}
                   {!isCompactView && <th className="border px-2 py-2 text-left font-semibold w-[300px]">Description</th>}
@@ -671,7 +681,7 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
               </tbody>
               <tfoot className="bg-gray-50/50 border-t-2 border-gray-200">
                 <tr className="text-gray-600 font-medium">
-                  <td colSpan={isCompactView ? 7 : 10} className="border px-2 py-1 text-right uppercase tracking-wider text-[10px]">Material Sub-total</td>
+                  <td colSpan={isCompactView ? 8 : 11} className="border px-2 py-1 text-right uppercase tracking-wider text-[10px]">Material Sub-total</td>
                   <td className="border px-2 py-1 text-right">₹{totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td className="border px-2 py-1"></td>
                 </tr>
@@ -685,14 +695,14 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
 
                   return (
                     <tr className="text-gray-500 italic">
-                      <td colSpan={isCompactView ? 7 : 10} className="border px-2 py-1 text-right uppercase tracking-wider text-[10px]">Round Off (Adjustment)</td>
+                      <td colSpan={isCompactView ? 8 : 11} className="border px-2 py-1 text-right uppercase tracking-wider text-[10px]">Round Off (Adjustment)</td>
                       <td className="border px-2 py-1 text-right">{roundOff > 0 ? "+" : ""}₹{roundOff.toFixed(2)}</td>
                       <td className="border px-2 py-1"></td>
                     </tr>
                   );
                 })()}
                 <tr className="font-bold bg-blue-50/20 text-blue-900">
-                  <td colSpan={isCompactView ? 7 : 10} className="border px-2 py-1.5 text-right uppercase tracking-wider text-[10px]">Grand Total</td>
+                  <td colSpan={isCompactView ? 8 : 11} className="border px-2 py-1.5 text-right uppercase tracking-wider text-[10px]">Grand Total</td>
                   <td className="border px-2 py-1.5 text-right bg-blue-50/30">
                     ₹{grandTotalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
@@ -815,18 +825,75 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
   selectedVersionId: string | null;
 }) {
   const { toast } = useToast();
-  const itemKey = item.itemKey || `${boqItem.id}-${itemIdx}`;
-  const baseQty = Number(getEditedValue(itemKey, "qty", item.qtyPerSqf ?? item.qty ?? 0)) || 0;
-  const sRate = Number(getEditedValue(itemKey, "supply_rate", item.supply_rate ?? item.rate ?? 0)) || 0;
+  const itemKey = item.itemKey || `${boqItem.id}-manual-${itemIdx}`;
+
+  // Engine items (from computeBoq) have pre-computed rateSqft/requiredQty/roundOff/amount.
+  // Rendering them through the editable path reads supply_rate=0, causing the "0 rate" bug.
+  const perItemIsEngine = isEngineBased && !item.manual;
+
+  if (perItemIsEngine) {
+    // Read-only display for engine-computed items
+    return (
+      <tr
+        className={`border-b border-gray-200 hover:bg-gray-50 transition-colors text-xs ${isDragOver ? 'bg-blue-50 border-blue-300' : ''}`}
+        draggable={isDraggable}
+        onDragStart={onDragStart}
+        onDragOver={(e) => { e.preventDefault(); onDragOver?.(); }}
+        onDrop={onDrop}
+      >
+        <td className="border px-1 py-2 text-center w-8 text-gray-400">{isDraggable && <GripVertical className="h-3 w-3 mx-auto cursor-grab hover:text-blue-500" />}</td>
+        <td className="border px-2 py-2 text-center font-medium w-10">{item.s_no || itemIdx + 1}</td>
+        <td className="border px-0.5 py-0.5 text-center w-12 bg-gray-50/30">
+          <div className="w-10 h-10 rounded border border-gray-200 bg-white overflow-hidden flex items-center justify-center mx-auto shadow-sm">
+            {item.image ? (<img src={item.image.startsWith('data:') ? item.image : parseImages(item.image)[0]} alt="material" className="max-w-full max-h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100?text=No+Image'; }} />) : (<span className="text-[8px] text-gray-400">N/A</span>)}
+          </div>
+        </td>
+        <td className="border px-2 py-2 text-left w-64">
+          <div className="font-medium text-gray-900">{item.title || item.name || "-"}</div>
+          {mismatch && (<div className="mt-1 flex items-center gap-1 text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-200"><ArrowUp className="h-3 w-3" />Rate updated ₹{mismatch.new.toLocaleString()}</div>)}
+        </td>
+        {!isCompactView && <td className="border px-2 py-2 text-left w-32 text-gray-600">{item.shop_name || "-"}</td>}
+        {!isCompactView && <td className="border px-2 py-2 text-left w-[300px] text-gray-600 truncate max-w-[300px]">{item.description || "-"}</td>}
+        <td className="border px-2 py-2 text-center w-16">{item.unit || "-"}</td>
+        <td className="border px-2 py-2 text-center w-20 font-medium">{(item.qtyPerSqf ?? 0).toFixed(3)}</td>
+        <td className="border px-2 py-2 text-center w-24 text-blue-600 font-medium">{(item.requiredQty ?? 0).toFixed(2)}</td>
+        {!isCompactView && <td className="border px-2 py-2 text-center w-24 font-bold">{item.roundOff}</td>}
+        <td className={`border px-2 py-2 text-center w-24 ${mismatch ? 'bg-amber-50' : ''}`}><span className={mismatch ? 'text-amber-700 font-bold' : ''}>₹{(item.rateSqft || 0).toLocaleString()}</span></td>
+        <td className="border px-2 py-2 text-center w-28 font-bold text-green-700 bg-green-50">₹{(item.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td className="border px-2 py-2 text-center w-16">
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50" onClick={() => onAddComment(selectedVersionId!, itemKey)} title={`Comments (${comments.filter(c => c.item_id === itemKey).length})`}><MessageSquare className="h-3 w-3" /></Button>
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-600 hover:text-red-800 hover:bg-red-50" onClick={() => handleDeleteRow(boqItem.id, tableData, itemIdx, item)} disabled={isVersionSubmitted} title="Delete Item"><Trash2 className="h-3 w-3" /></Button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  // ── Manual / non-engine editable path ──────────────────────────────────────
+  const baseQty = Number(getEditedValue(itemKey, "qty", item.qty ?? 0)) || 0;
+  const sRate = Number(getEditedValue(itemKey, "supply_rate", item.supply_rate ?? item.rateSqft ?? 0)) || 0;
   const iRate = Number(getEditedValue(itemKey, "install_rate", item.install_rate ?? 0)) || 0;
-  const rate = Number(getEditedValue(itemKey, "supply_rate", sRate + iRate)) || (sRate + iRate);
+  const rate = Number(getEditedValue(itemKey, "rate", sRate + iRate)) || (sRate + iRate);
   const desc = getEditedValue(itemKey, "description", item.description || "");
   const unit = getEditedValue(itemKey, "unit", item.unit || "nos");
 
-  const calculationTarget = tableData.targetRequiredQty || 1;
-  const scaledQty = Number((baseQty * calculationTarget).toFixed(2));
-  const roundOff = item.applyRounding !== false ? Math.ceil(scaledQty) : scaledQty;
-  const amount = Number((roundOff * rate).toFixed(2));
+  // Local state for smooth typing
+  const [localDesc, setLocalDesc] = useState(desc);
+  const [localUnit, setLocalUnit] = useState(unit);
+  const [localQty, setLocalQty] = useState(baseQty.toString());
+  const [localRate, setLocalRate] = useState(rate.toString());
+
+  // Preview values — manual items: qty × rate directly, no project-target scaling
+  const previewQtyValue = parseFloat(localQty) || 0;
+  const previewRateValue = parseFloat(localRate) || 0;
+  const previewAmount = Number((previewQtyValue * previewRateValue).toFixed(2));
+
+  // Sync local state with props
+  useEffect(() => { setLocalDesc(desc); }, [desc]);
+  useEffect(() => { setLocalUnit(unit); }, [unit]);
+  useEffect(() => { setLocalQty(baseQty.toString()); }, [baseQty]);
+  useEffect(() => { setLocalRate(rate.toString()); }, [rate]);
 
   return (
     <tr
@@ -840,8 +907,31 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
         {isDraggable && <GripVertical className="h-3 w-3 mx-auto cursor-grab hover:text-blue-500" />}
       </td>
       <td className="border px-2 py-2 text-center font-medium w-10">{item.s_no || itemIdx + 1}</td>
+      <td className="border px-0.5 py-0.5 text-center w-12 bg-gray-50/30">
+        <div className="w-10 h-10 rounded border border-gray-200 bg-white overflow-hidden flex items-center justify-center mx-auto shadow-sm">
+          {item.image ? (
+            <img
+              src={item.image.startsWith('data:') ? item.image : parseImages(item.image)[0]}
+              alt="material"
+              className="max-w-full max-h-full object-contain"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = 'https://placehold.co/100x100?text=No+Image';
+              }}
+            />
+          ) : (
+            <span className="text-[8px] text-gray-400">N/A</span>
+          )}
+        </div>
+      </td>
       <td className="border px-2 py-2 text-left w-64">
-        <div className="font-medium text-gray-900">{item.title || item.name || "-"}</div>
+        <div className="flex items-center gap-2">
+          <div className="font-medium text-gray-900">{item.title || item.name || "-"}</div>
+          {item.manual && (
+            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[9px] px-1.5 py-0 font-bold uppercase leading-tight">
+              Manual
+            </Badge>
+          )}
+        </div>
         {mismatch && (
           <div className="mt-1 flex items-center gap-1 text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-200">
             <ArrowUp className="h-3 w-3" />
@@ -852,8 +942,9 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
       {!isCompactView && <td className="border px-2 py-2 text-left w-32 text-gray-600">{item.shop_name || "-"}</td>}
       {!isCompactView && <td className="border px-2 py-2 text-left w-[300px]">
         <Input
-          value={desc}
-          onChange={(e) => updateEditedField(itemKey, "description", e.target.value)}
+          value={localDesc}
+          onChange={(e) => setLocalDesc(e.target.value)}
+          onBlur={() => updateEditedField(itemKey, "description", localDesc)}
           placeholder="Description..."
           className="h-7 text-xs border-gray-200 focus:border-blue-400"
           disabled={isVersionSubmitted}
@@ -863,8 +954,9 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
       <td className="border px-2 py-2 text-center w-16">
         <Input
           type="text"
-          value={unit}
-          onChange={(e) => updateEditedField(itemKey, "unit", e.target.value)}
+          value={localUnit}
+          onChange={(e) => setLocalUnit(e.target.value)}
+          onBlur={() => updateEditedField(itemKey, "unit", localUnit)}
           className="h-7 w-12 text-xs text-center border-gray-200 focus:border-blue-400"
           disabled={isVersionSubmitted}
           onFocus={checkBudgetEarly}
@@ -872,53 +964,53 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
       </td>
       <td className="border px-2 py-2 text-center w-20">
         <Input
-          type="number"
-          step="0.01"
-          value={baseQty}
-          onChange={(e) => updateEditedField(itemKey, "qty", parseFloat(e.target.value) || 0)}
+          type="text"
+          value={localQty}
+          onChange={(e) => setLocalQty(e.target.value)}
+          onBlur={() => updateEditedField(itemKey, "qty", parseFloat(localQty) || 0)}
           className="h-7 w-16 text-xs text-center border-gray-200 focus:border-blue-400"
           disabled={isVersionSubmitted}
           onFocus={checkBudgetEarly}
         />
       </td>
+      {/* Required Qty — manual items show qty directly (no scaling) */}
       <td className="border px-2 py-2 text-center w-24 font-medium text-gray-900">
-        {scaledQty.toFixed(2)}
+        {previewQtyValue.toFixed(2)}
       </td>
-      {!isCompactView && <td className="border px-2 py-2 text-center w-24 font-medium text-gray-900">
-        {roundOff.toFixed(2)}
-      </td>}
+      {/* Round off — not applicable for manual items */}
+      {!isCompactView && <td className="border px-2 py-2 text-center w-24 font-medium text-gray-500">-</td>}
       <td className="border px-2 py-2 text-center w-24">
         <Input
-          type="number"
-          step="0.01"
-          value={rate}
-          onChange={(e) => updateEditedField(itemKey, "supply_rate", parseFloat(e.target.value) || 0)}
+          type="text"
+          value={localRate}
+          onChange={(e) => setLocalRate(e.target.value)}
+          onBlur={() => {
+            const v = parseFloat(localRate) || 0;
+            updateEditedField(itemKey, "rate", v);
+            updateEditedField(itemKey, "supply_rate", v);
+            updateEditedField(itemKey, "install_rate", 0);
+          }}
           className="h-7 w-20 text-xs text-center border-gray-200 focus:border-blue-400"
           disabled={isVersionSubmitted}
           onFocus={checkBudgetEarly}
         />
       </td>
       <td className="border px-2 py-2 text-center w-28 font-bold text-green-700 bg-green-50">
-        ₹{amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        ₹{previewAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </td>
       <td className="border px-2 py-2 text-center w-16">
         <div className="flex items-center gap-1">
           <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-            onClick={() => onAddComment(selectedVersionId!, item.itemKey || `${boqItem.id}-${itemIdx}`)}
-            title={`Add Comment (${comments.filter(c => c.item_id === (item.itemKey || `${boqItem.id}-${itemIdx}`)).length})`}
+            variant="ghost" size="sm" className="h-6 w-6 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+            onClick={() => onAddComment(selectedVersionId!, itemKey)}
+            title={`Comments (${comments.filter(c => c.item_id === itemKey).length})`}
           >
             <MessageSquare className="h-3 w-3" />
           </Button>
           <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 p-0 text-red-600 hover:text-red-800 hover:bg-red-50"
+            variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-600 hover:text-red-800 hover:bg-red-50"
             onClick={() => handleDeleteRow(boqItem.id, tableData, itemIdx, item)}
-            disabled={isVersionSubmitted}
-            title="Delete Item"
+            disabled={isVersionSubmitted} title="Delete Item"
           >
             <Trash2 className="h-3 w-3" />
           </Button>
@@ -1026,6 +1118,7 @@ export default function CreateBom() {
   const [templateSearch, setTemplateSearch] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; type: 'template' | 'sketch' | 'version'; id: string; name: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -1103,92 +1196,75 @@ export default function CreateBom() {
   };
 
   const handleApplySketchTemplate = async (template: any) => {
-    if (!selectedVersionId || isSaving) return;
+    if (!selectedProjectId || !selectedVersionId || isSaving) return;
     setIsSaving(true);
 
     try {
       let data = template.template_data;
       if (typeof data === 'string') {
-        try { data = JSON.parse(data); } catch (e) { console.error("Parse error", e); return; }
+        try { data = JSON.parse(data); } catch (e) { console.error("Parse error", e); setIsSaving(false); return; }
       }
 
       const items = Array.isArray(data) ? data : (data?.items || []);
 
       if (items.length === 0) {
         toast({ title: "Empty Template", description: "This sketch template has no items.", variant: "destructive" });
+        setIsSaving(false);
         return;
       }
 
       toast({ title: "Importing Sketch", description: `Adding ${items.length} items to your BOM...` });
 
-      let currentMaterials = materialsById;
-      // Ensure materials are loaded to get rates
-      if (Object.keys(currentMaterials).length === 0) {
-        try {
-          const mRes = await apiFetch("/api/materials");
-          if (mRes.ok) {
-            const mData = await mRes.json();
-            const mById = Object.fromEntries((mData.materials || []).map((m: any) => [m.id, m]));
-            setMaterialsById(mById);
-            currentMaterials = mById;
-          }
-        } catch (e) { console.error("Failed to pre-load materials", e); }
-      }
-
-      let currentSortOrder = boqItems.length;
-      for (const item of items) {
+      const batchItems = items.map((item: any) => {
         const dims = [item.length, item.width, item.height].filter(Boolean).filter(d => d !== "0" && d !== "").join(' x ');
         const desc = `${item.description || ''} ${dims ? `(Dims: ${dims} ${item.dimension_unit || ''})` : ''}`.trim();
 
-        let matRate = 0;
-        if (item.material_id && currentMaterials[item.material_id]) {
-          matRate = currentMaterials[item.material_id].rate || 0;
-        }
-
-        const tableData = {
-          product_name: item.item_name || "Sketch Item",
-          product_id: null,
-          category: item.category || "General",
-          finalize_description: desc,
-          finalize_qty: Number(item.qty) || 1,
-          finalize_rate: matRate,
-          unit: item.unit || "nos",
-          step11_items: [
-            {
-              s_no: 1,
-              title: item.item_name || "Sketch Item",
-              description: desc,
-              unit: item.unit || "nos",
-              qty: Number(item.qty) || 1,
-              supply_rate: matRate,
-              install_rate: 0,
-              manual: true
-            }
-          ],
-          created_at: new Date().toISOString()
+        return {
+          estimator: "General",
+          table_data: {
+            product_name: item.item_name || "Sketch Item",
+            product_id: null,
+            material_id: item.material_id || null,
+            category: item.category || "General",
+            finalize_description: desc,
+            finalize_qty: Number(item.qty) || 1,
+            finalize_rate: 0,
+            unit: item.unit || "nos",
+            step11_items: [
+              {
+                s_no: 1,
+                material_id: item.material_id || null,
+                title: item.item_name || "Sketch Item",
+                description: desc,
+                unit: item.unit || "nos",
+                qty: Number(item.qty) || 1,
+                supply_rate: 0,
+                install_rate: 0,
+                manual: true
+              }
+            ],
+            created_at: new Date().toISOString()
+          }
         };
+      });
 
-        const resp = await apiFetch("/api/boq-items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            project_id: selectedProjectId,
-            version_id: selectedVersionId,
-            estimator: "General",
-            table_data: tableData,
-            sort_order: currentSortOrder++,
-          }),
-        });
+      const resp = await apiFetch("/api/boq-items/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: selectedProjectId,
+          version_id: selectedVersionId,
+          items: batchItems
+        }),
+      });
 
-        if (resp.ok) {
-          const created = await resp.json();
-          const itemWithParsedData = { ...created, table_data: parseTableData(created.table_data) };
-          setBoqItems(prev => [...prev, itemWithParsedData]);
-        }
+      if (resp.ok) {
+        setShowTemplateManager(false);
+        toast({ title: "Sketch Imported", description: `${items.length} items added from sketch template.` });
+        loadBoqItemsAndEdits();
+      } else {
+        throw new Error("Batch import failed");
       }
-
-      setShowTemplateManager(false);
-      toast({ title: "Sketch Imported", description: `${items.length} items added from sketch template.` });
     } catch (e) {
       console.error("Apply sketch template error:", e);
       toast({ title: "Error", description: "Failed to import sketch template", variant: "destructive" });
@@ -1252,7 +1328,6 @@ export default function CreateBom() {
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
 
-  const [showProposalPicker, setShowProposalPicker] = useState(false);
 
   useEffect(() => { editedFieldsRef.current = editedFields; }, [editedFields]);
 
@@ -1408,6 +1483,42 @@ export default function CreateBom() {
     return list;
   }, [boqItems, materialsById]);
 
+  const handleRefreshRates = async () => {
+    if (!selectedVersionId || isUpdatingRates) return;
+    if (!confirm("This will pull current rates from the materials master table for all items in this version. Continue?")) return;
+
+    setIsUpdatingRates(true);
+    try {
+      const response = await apiFetch(`/api/boq-versions/${selectedVersionId}/refresh-rates`, {
+        method: "POST"
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.updatedItems && data.updatedItems.length > 0) {
+          // Merge updated items into local state
+          setBoqItems((prev) => {
+            const byId = new Map(prev.map((i) => [i.id, i]));
+            for (const up of data.updatedItems) {
+              const td = typeof up.table_data === "string" ? JSON.parse(up.table_data) : up.table_data;
+              const existing = byId.get(up.id) || {};
+              // Ensure table_data is parsed
+              byId.set(up.id, { ...existing, ...up, table_data: td });
+            }
+            return prev.map((p) => byId.get(p.id) || p);
+          });
+          toast({ title: "Rates Refreshed", description: data.message });
+        } else {
+          toast({ title: "Up to Date", description: "All rates are already current." });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to refresh rates", e);
+      toast({ title: "Error", description: "Failed to refresh rates", variant: "destructive" });
+    } finally {
+      setIsUpdatingRates(false);
+    }
+  };
+
   const activeMismatches = useMemo(() => {
     return mismatches.filter(m => !ignoredMismatches.has(`${m.boqItemId}-${m.type}-${m.index}`));
   }, [mismatches, ignoredMismatches]);
@@ -1520,7 +1631,16 @@ export default function CreateBom() {
   // ── Field helpers ──────────────────────────────────────────────────────────
 
   const updateEditedField = (itemKey: string, field: string, value: any) => {
-    setEditedFields((prev: Record<string, any>) => { const next = { ...prev, [itemKey]: { ...prev[itemKey], [field]: value } }; editedFieldsRef.current = next; return next; });
+    setEditedFields((prev: Record<string, any>) => {
+      const next = { ...prev, [itemKey]: { ...prev[itemKey], [field]: value } };
+      editedFieldsRef.current = next;
+      return next;
+    });
+    // Debounced auto-save (e.g., 2 seconds after user stops typing)
+    if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      handleSaveProject();
+    }, 2000);
   };
 
   const getEditedValue = (itemKey: string, field: string, original: any) =>
@@ -1684,10 +1804,12 @@ export default function CreateBom() {
   };
 
   const handleAddMaterialToBoq = async (template: any, qty: number = 1) => {
+    if (isSaving) return;
     const rate = Number(template.rate ?? template.supply_rate ?? template.default_rate ?? 0) || 0;
     const futureVal = currentProjectValue + (rate * qty);
     await withBudgetCheck(() => futureVal, async () => {
       if (!selectedProjectId || !selectedVersionId) { toast({ title: "Error", description: "Select a project and version first", variant: "destructive" }); return; }
+      setIsSaving(true);
       try {
         const { unit, rate, shopName, hsnSacType, hsnSacCode } = await resolveMaterialFields(template);
         const materialItem = {
@@ -1722,13 +1844,16 @@ export default function CreateBom() {
         toast({ title: "Success", description: `Added ${template.name} to BOM` });
         loadBoqItemsAndEdits();
       } catch { toast({ title: "Error", description: "Failed to add material", variant: "destructive" }); }
+      finally { setIsSaving(false); }
     })();
   };
 
   const handleAddItemToProduct = async (boqItemId: string, template: any, qty: number = 1) => {
+    if (isSaving) return;
     const rate = Number(template.rate ?? template.supply_rate ?? template.default_rate ?? 0) || 0;
     const futureVal = currentProjectValue + (rate * qty);
     await withBudgetCheck(() => futureVal, async () => {
+      setIsSaving(true);
       try {
         const existing = boqItems.find(i => i.id === boqItemId);
         if (!existing) throw new Error("Product group not found");
@@ -1763,6 +1888,7 @@ export default function CreateBom() {
         toast({ title: "Success", description: `Added ${template.name}` });
         loadBoqItemsAndEdits();
       } catch { toast({ title: "Error", description: "Failed to add item", variant: "destructive" }); }
+      finally { setIsSaving(false); }
     })();
   };
 
@@ -1821,8 +1947,8 @@ export default function CreateBom() {
             unit: item.unit,
             baseQty: Number(item.base_qty ?? item.qty ?? 0),
             wastagePct: item.wastage_pct != null ? Number(item.wastage_pct) : undefined,
-            supplyRate: Number(item.supply_rate),
-            installRate: Number(item.install_rate),
+            supplyRate: Number(item.supply_rate ?? item.rate ?? 0),
+            installRate: Number(item.install_rate ?? 0),
             shop_name: item.shop_name
           }));
         }
@@ -1831,24 +1957,7 @@ export default function CreateBom() {
         configBasis = { requiredUnitType: "Sqft" as UnitType, baseRequiredQty: 1, wastagePctDefault: 0 };
         materialLines = pendingItems.map(i => ({ materialId: i.id || Math.random().toString(), materialName: i.title || "Item", unit: i.unit || "nos", baseQty: i.qty || 1, supplyRate: i.supply_rate || 0, installRate: i.install_rate || 0 }));
       }
-      const tableData = { 
-        product_name: selectedProduct.name, 
-        product_id: selectedProduct.id, 
-        image: selectedProduct.image, 
-        category: selectedProduct.category, 
-        subcategory: selectedProduct.subcategory, 
-        hsn_sac_type: selectedProduct.tax_code_type || null, 
-        hsn_sac_code: selectedProduct.tax_code_value || null, 
-        hsn_code: selectedProduct.hsn_code || null, 
-        sac_code: selectedProduct.sac_code || null, 
-        targetRequiredQty, 
-        configBasis, 
-        unit: configBasis.requiredUnitType,
-        materialLines, 
-        step11_items: pendingItems, 
-        finalize_description: pendingItems[0]?.description || "", 
-        created_at: new Date().toISOString() 
-      };
+      const tableData = { product_name: selectedProduct.name, product_id: selectedProduct.id, image: selectedProduct.image, category: selectedProduct.category, subcategory: selectedProduct.subcategory, hsn_sac_type: selectedProduct.tax_code_type || null, hsn_sac_code: selectedProduct.tax_code_value || null, hsn_code: selectedProduct.hsn_code || null, sac_code: selectedProduct.sac_code || null, targetRequiredQty, configBasis, materialLines, step11_items: pendingItems, finalize_description: pendingItems[0]?.description || "", created_at: new Date().toISOString() };
 
       // --- NEW: Check for Material Quantity Increases in Approved POs ---
       const materialIds = materialLines.map(ml => ml.id || ml.materialId).filter(Boolean);
@@ -1917,6 +2026,7 @@ export default function CreateBom() {
   };
 
   const handleSaveProject = async () => {
+    if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
     if (!selectedVersionId) return;
     const payload = editedFieldsRef.current || {};
     if (Object.keys(payload).length === 0) return;
@@ -1932,16 +2042,9 @@ export default function CreateBom() {
 
       const saveResp = await res.json();
       if (saveResp?.updatedItems?.length) {
-        setBoqItems(prev => {
-          const byId = new Map(prev.map(i => [i.id, i]));
-          saveResp.updatedItems.forEach((up: any) => {
-            const existing = byId.get(up.id) || {};
-            byId.set(up.id, { ...existing, ...up, table_data: parseTableData(up.table_data) });
-          });
-          return prev.map(p => byId.get(p.id) ?? p);
-        });
         setEditedFields({});
         editedFieldsRef.current = {};
+        await loadBoqItemsAndEdits();
       }
 
       toast({ title: "Success", description: "Draft saved automatically" });
@@ -1966,7 +2069,9 @@ export default function CreateBom() {
   const handleCreateNewVersion = async (copyFromPrevious: boolean) => {
     if (!selectedProjectId) return;
     try {
-      const prevId = copyFromPrevious && versions.length > 0 ? versions[0].id : null;
+      // Always copy from the currently selected version — not versions[0] — 
+      // to avoid cumulative duplication across all past versions.
+      const prevId = copyFromPrevious && selectedVersionId ? selectedVersionId : null;
       const res = await apiFetch("/api/boq-versions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: selectedProjectId, copy_from_version: prevId }) });
       if (!res.ok) throw new Error();
       const v = await res.json(); setVersions(prev => [v, ...prev]); setSelectedVersionId(v.id);
@@ -2216,8 +2321,9 @@ export default function CreateBom() {
       doc.text("BILL OF QUANTITIES (BOQ)", pageWidth / 2, 25, { align: "center" });
 
       // 3. Prepare Table columns and body
-      const tableHeaders = ["Sl", "Item / Component", "Shop", "Description", "Unit", "Qty/Unit", "Req Qty", "R.Off", "Rate", "Total (₹)"];
+      const tableHeaders = ["Sl", "Img", "Item / Component", "Shop", "Description", "Unit", "Qty/Unit", "Req Qty", "R.Off", "Rate", "Total (₹)"];
       const tableBody: any[] = [];
+      const rowImages: { [rowIndex: number]: string } = {};
       let grandTotal = 0;
 
       boqItems.forEach((boqItem, boqIdx) => {
@@ -2231,6 +2337,7 @@ export default function CreateBom() {
         // Product Header Row (Gray background)
         tableBody.push([
           { content: (boqIdx + 1).toString(), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
+          { content: "", styles: { fillColor: [240, 240, 240] } },
           { content: (productName + hsnFull).toUpperCase(), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
           { content: td.finalize_description || "", colSpan: 8, styles: { fontStyle: 'italic', fillColor: [240, 240, 240] } }
         ]);
@@ -2241,7 +2348,7 @@ export default function CreateBom() {
           const computedLines = boqResult.computed.map((line: any, idx: number) => ({
             title: line.name, description: line.name, unit: line.unit, shop_name: line.shop_name,
             qtyPerSqf: line.perUnitQty, requiredQty: line.scaledQty, roundOff: line.roundOffQty,
-            rate: line.supplyRate + line.installRate, amount: line.lineTotal
+            rate: line.supplyRate + line.installRate, amount: line.lineTotal, image: line.image
           }));
           const manualStep11 = step11Items.filter((i: any) => {
             if (!i?.manual) return false;
@@ -2255,7 +2362,7 @@ export default function CreateBom() {
             return {
               ...it, manual: true, title: it.title, description: getEditedValue(key, "description", it.description || ""),
               unit: getEditedValue(key, "unit", it.unit || "nos"), qtyPerSqf: "-", requiredQty: qty, roundOff: "-",
-              rate, amount: qty * rate
+              rate, amount: qty * rate, image: it.image
             };
           }).filter(Boolean);
           displayLines = [...computedLines, ...manualStep11];
@@ -2269,15 +2376,19 @@ export default function CreateBom() {
             return {
               ...it, title: it.title, description: getEditedValue(key, "description", it.description || ""),
               unit: getEditedValue(key, "unit", it.unit || "nos"), qtyPerSqf: baseQty, requiredQty: scaledQty, roundOff: "-",
-              rate, amount: scaledQty * rate
+              rate, amount: scaledQty * rate, image: it.image
             };
           });
         }
 
         let productTotal = 0;
         displayLines.forEach((l, lIdx) => {
+          const rowIndex = tableBody.length;
+          if (l.image) rowImages[rowIndex] = l.image;
+
           tableBody.push([
             `${boqIdx + 1}.${lIdx + 1}`,
+            "", // image cell
             l.title || "-",
             l.shop_name || "-",
             l.description || "-",
@@ -2301,7 +2412,7 @@ export default function CreateBom() {
 
         if (Math.abs(roundOff) >= 0.01) {
           tableBody.push([
-            { content: "", colSpan: 8 },
+            { content: "", colSpan: 9 },
             { content: "Round Off", styles: { fontStyle: 'italic', textColor: [100, 100, 100], fillColor: [252, 252, 252] } },
             { content: (roundOff > 0 ? "+" : "") + roundOff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), styles: { fontStyle: 'italic', textColor: [100, 100, 100], fillColor: [252, 252, 252], halign: 'right' } }
           ]);
@@ -2309,7 +2420,7 @@ export default function CreateBom() {
 
         // Product Subtotal Row
         tableBody.push([
-          { content: "", colSpan: 8, styles: { borderTop: [1, 0, 0, 0] } },
+          { content: "", colSpan: 9, styles: { borderTop: [1, 0, 0, 0] } },
           { content: "Grand Total", styles: { fontStyle: 'bold', fillColor: [250, 250, 250] } },
           { content: productGrandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), styles: { fontStyle: 'bold', fillColor: [250, 250, 250], halign: 'right' } }
         ]);
@@ -2319,7 +2430,7 @@ export default function CreateBom() {
 
       // Grand Total Row (Dark accent)
       tableBody.push([
-        { content: "GRAND TOTAL", colSpan: 9, styles: { fontStyle: 'bold', halign: 'right', fillColor: [41, 41, 41], textColor: [255, 255, 255] } },
+        { content: "GRAND TOTAL", colSpan: 10, styles: { fontStyle: 'bold', halign: 'right', fillColor: [41, 41, 41], textColor: [255, 255, 255] } },
         { content: grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right', fillColor: [41, 41, 41], textColor: [255, 255, 255] } }
       ]);
 
@@ -2334,14 +2445,34 @@ export default function CreateBom() {
         theme: "grid",
         columnStyles: {
           0: { cellWidth: 10 },    // Sl
-          1: { cellWidth: 40 },    // Item
-          2: { cellWidth: 25 },    // Shop
-          4: { cellWidth: 12 },    // Unit
-          5: { cellWidth: 15 },    // Qty/Unit
-          6: { cellWidth: 15 },    // Req Qty
-          7: { cellWidth: 12 },    // R.Off
-          8: { cellWidth: 25, halign: 'right' },    // Rate
-          9: { cellWidth: 25, halign: 'right' },    // Amount
+          1: { cellWidth: 15 },    // Img
+          2: { cellWidth: 35 },    // Item
+          3: { cellWidth: 20 },    // Shop
+          5: { cellWidth: 12 },    // Unit
+          6: { cellWidth: 15 },    // Qty/Unit
+          7: { cellWidth: 15 },    // Req Qty
+          8: { cellWidth: 12 },    // R.Off
+          9: { cellWidth: 20, halign: 'right' },    // Rate
+          10: { cellWidth: 20, halign: 'right' },   // Amount
+        },
+        didParseCell: (data: any) => {
+          if (data.section === 'body' && data.column.index === 1 && rowImages[data.row.index]) {
+            data.cell.styles.minCellHeight = 15;
+          }
+        },
+        didDrawCell: (data: any) => {
+          if (data.section === 'body' && data.column.index === 1 && rowImages[data.row.index]) {
+            try {
+              const base64Img = rowImages[data.row.index];
+              const format = base64Img.includes("png") ? "PNG" : "JPEG";
+              const imgData = base64Img.startsWith('data:') ? base64Img : parseImages(base64Img)[0];
+              if (imgData) {
+                doc.addImage(imgData, format, data.cell.x + 0.5, data.cell.y + 0.5, 14, 14);
+              }
+            } catch (e) {
+              console.warn("PDF Line image error", e);
+            }
+          }
         }
       });
 
@@ -2372,73 +2503,6 @@ export default function CreateBom() {
   // Budget reason logging removed for Generate BOM page
 
   // ── Render ─────────────────────────────────────────────────────────────────
-
-  const handleSelectProposal = async (proposalItems: any[]) => {
-    if (!selectedProjectId || !selectedVersionId) return;
-    if (proposalItems.length === 0) {
-      toast({ title: "Info", description: "This proposal has no items." });
-      return;
-    }
-
-    try {
-      setIsSaving(true);
-      let currentSortOrder = boqItems.length;
-      
-      for (const item of proposalItems) {
-        const amount = Number(item.amount) || (Number(item.qty) * Number(item.rate));
-        
-        const tableData = {
-          product_name: "Vendor Proposal Item",
-          product_id: null,
-          category: "General",
-          finalize_description: item.description || item.item_name,
-          finalize_qty: Number(item.qty) || 1,
-          finalize_rate: Number(item.rate) || 0,
-          unit: item.unit || "nos",
-          step11_items: [
-            {
-              s_no: 1,
-              title: item.item_name || "Sketch Item",
-              description: item.description || "",
-              unit: item.unit || "nos",
-              qty: Number(item.qty) || 1,
-              supply_rate: Number(item.rate) || 0,
-              install_rate: 0,
-              manual: true,
-              shop_name: "Proposal"
-            }
-          ],
-          created_at: new Date().toISOString()
-        };
-
-        const resp = await apiFetch("/api/boq-items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            project_id: selectedProjectId,
-            version_id: selectedVersionId,
-            estimator: "Vendor Proposal",
-            table_data: tableData,
-            sort_order: currentSortOrder++,
-          }),
-        });
-
-        if (resp.ok) {
-          const created = await resp.json();
-          const itemWithParsedData = { ...created, table_data: parseTableData(created.table_data) };
-          setBoqItems(prev => [...prev, itemWithParsedData]);
-        }
-      }
-
-      toast({ title: "Proposal Loaded", description: `Added ${proposalItems.length} items from proposal.` });
-      loadBoqItemsAndEdits();
-    } catch (e) {
-      console.error("Load proposal error:", e);
-      toast({ title: "Error", description: "Failed to load proposal items", variant: "destructive" });
-    } finally {
-      setIsSaving(false);
-    }
-  };
 
   if (loading) return <Layout><div className="text-center py-8">Loading projects...</div></Layout>;
 
@@ -2634,9 +2698,6 @@ export default function CreateBom() {
                   )}
 
                   <div className="flex gap-2 h-9 ml-auto">
-                    <Button onClick={() => setShowProposalPicker(true)} variant="outline" className="border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 h-full px-4 text-xs font-bold shadow-sm flex items-center gap-2" disabled={isVersionSubmitted || !selectedVersionId}>
-                      <FileText className="h-4 w-4" /> Add Proposal
-                    </Button>
                     <Button onClick={() => setShowTemplateManager(true)} variant="outline" className="border-slate-200 h-full px-4 text-xs font-bold shadow-sm bg-white flex items-center gap-2" disabled={isVersionSubmitted || !selectedVersionId}>
                       <History className="h-4 w-4" /> Load Template
                     </Button>
@@ -2775,7 +2836,6 @@ export default function CreateBom() {
 
             <ProductPicker open={showProductPicker} onOpenChange={setShowProductPicker} onSelectProduct={handleSelectProduct} selectedProjectId={selectedProjectId!} />
             <MaterialPicker open={showMaterialPicker} onOpenChange={setShowMaterialPicker} onSelectTemplate={handleSelectMaterialTemplate} />
-            <ProposalPicker open={showProposalPicker} onOpenChange={setShowProposalPicker} projectId={selectedProjectId} onSelectProposal={handleSelectProposal} />
 
             {selectedProduct && (
               <Step11Preview product={selectedProduct} open={showStep11Preview} onClose={() => { setShowStep11Preview(false); setTimeout(() => setSelectedProduct(null), 300); }} onAddToBoq={handleAddToBom} />
@@ -2796,6 +2856,17 @@ export default function CreateBom() {
                       className={`h-9 px-3 font-semibold ${isCompactView ? 'bg-blue-50 text-blue-600 border-blue-300' : 'text-slate-600 border-slate-200 hover:bg-slate-50'}`}
                     >
                       Compact View
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRefreshRates}
+                      disabled={isUpdatingRates || isVersionSubmitted}
+                      className="h-9 px-3 font-semibold text-emerald-600 border-emerald-200 hover:bg-emerald-50 gap-2"
+                      title="Sync all items with latest market rates"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${isUpdatingRates ? 'animate-spin' : ''}`} />
+                      <span>Refresh Rates</span>
                     </Button>
                     <div className="relative w-72">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -3203,7 +3274,7 @@ export default function CreateBom() {
 
       {deleteConfirm && (
         <DeleteConfirmationDialog
-          isOpen={deleteConfirm.isOpen}
+          isOpen={!!deleteConfirm}
           onOpenChange={(open) => !open && setDeleteConfirm(null)}
           onConfirm={confirmDelete}
           itemName={deleteConfirm.name}

@@ -4618,18 +4618,38 @@ export async function registerRoutes(
             [copy_from_version, project_id],
           );
 
-          const archivedItemIds = archiveService.getArchivedItemIds("boq_items");
-          const trashedItemIds = archiveService.getTrashedItemIds("boq_items");
-
-          console.log(`Copying ${itemsResult.rows.length} items from version ${copy_from_version} to ${versionId}`);
-
           const archivedIds = archiveService.getArchivedItemIds('boq_items');
           const trashedIds = archiveService.getTrashedItemIds('boq_items');
 
+          // Deduplicate items before copying to the new version to ensure it remains clean
+          const seenProducts = new Map<string, any>();
           for (const item of itemsResult.rows) {
             // Skip archived or trashed items
             if (archivedIds.includes(item.id) || trashedIds.includes(item.id)) continue;
 
+            let td = item.table_data;
+            if (typeof td === "string") {
+              try { td = JSON.parse(td); } catch (e) { /* ignore */ }
+            }
+
+            const productKey = (td?.product_name || item.estimator || item.id).toLowerCase().trim();
+            const existing = seenProducts.get(productKey);
+            
+            if (!existing) {
+              seenProducts.set(productKey, item);
+            } else {
+              const existingDate = new Date(existing.created_at).getTime();
+              const newDate = new Date(item.created_at).getTime();
+              if (newDate > existingDate) {
+                seenProducts.set(productKey, item);
+              }
+            }
+          }
+
+          const deduplicatedItems = Array.from(seenProducts.values());
+          console.log(`Deduplicated copy: ${deduplicatedItems.length} items from ${itemsResult.rows.length} raw rows.`);
+
+          for (const item of deduplicatedItems) {
             const newItemId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
             await query(
               `INSERT INTO boq_items (id, project_id, estimator, table_data, version_id, sort_order, user_added, created_at)
@@ -4644,7 +4664,6 @@ export async function registerRoutes(
                 item.user_added ?? true,
               ],
             );
-
           }
         }
 
@@ -5240,27 +5259,45 @@ export async function registerRoutes(
 
       // Fetch all items for this version
       const itemsResult = await query(
-        `SELECT id, table_data FROM boq_items WHERE version_id = $1`,
+        `SELECT id, table_data, estimator, created_at FROM boq_items WHERE version_id = $1`,
         [latestVersionId],
       );
 
       const archivedIds = archiveService.getArchivedItemIds('boq_items');
       const trashedIds = archiveService.getTrashedItemIds('boq_items');
 
-      let totalValue = 0;
-      itemsResult.rows.forEach((row: any) => {
+      // Deduplicate items based on product name/estimator key to prevent inflated project values
+      const seenProducts = new Map<string, any>();
+      for (const row of itemsResult.rows) {
         // Skip archived or trashed items
-        if (archivedIds.includes(row.id) || trashedIds.includes(row.id)) return;
+        if (archivedIds.includes(row.id) || trashedIds.includes(row.id)) continue;
 
         let tableData = row.table_data;
         if (typeof tableData === "string") {
-          try { tableData = JSON.parse(tableData); } catch (e) { return; }
+          try { tableData = JSON.parse(tableData); } catch (e) { continue; }
         }
+
+        const productKey = (tableData?.product_name || row.estimator || row.id).toLowerCase().trim();
+        const existing = seenProducts.get(productKey);
+        
+        if (!existing) {
+          seenProducts.set(productKey, { row, tableData });
+        } else {
+          const existingDate = new Date(existing.row.created_at).getTime();
+          const newDate = new Date(row.created_at).getTime();
+          if (newDate > existingDate) {
+            seenProducts.set(productKey, { row, tableData });
+          }
+        }
+      }
+
+      let totalValue = 0;
+      for (const entry of seenProducts.values()) {
+        const { tableData } = entry;
 
         // Logic must handle BOTH Engine-based (with materialLines) and Manual items
         if (tableData.materialLines && tableData.targetRequiredQty !== undefined && tableData.configBasis) {
           // Re-calculate the grandTotal for the Engine item
-          // Note: On server side we might not have computeBoq directly but we can sum materialLines
           const requiredQty = Number(tableData.targetRequiredQty) || 0;
           let itemSubtotal = 0;
           if (Array.isArray(tableData.materialLines)) {
@@ -5293,7 +5330,7 @@ export async function registerRoutes(
             });
           }
         }
-      });
+      }
 
       await query(
         `UPDATE boq_projects SET project_value = $1, updated_at = NOW() WHERE id = $2`,
@@ -5461,7 +5498,7 @@ export async function registerRoutes(
         const archivedIds = archiveService.getArchivedItemIds('boq_items');
         const trashedIds = archiveService.getTrashedItemIds('boq_items');
 
-        const items = result.rows
+        const rawItems = result.rows
           .filter((row: any) => !archivedIds.includes(row.id) && !trashedIds.includes(row.id))
           .map((row: any) => ({
             id: row.id,
@@ -5474,6 +5511,24 @@ export async function registerRoutes(
                 : row.table_data,
             created_at: row.created_at,
           }));
+
+        // Deduplicate by product_name: if the same product appears more than once
+        // (due to past cumulative version copies), keep only the most recently updated entry.
+        const seenProducts = new Map<string, any>();
+        for (const item of rawItems) {
+          const productKey = (item.table_data?.product_name || item.estimator || item.id).toLowerCase().trim();
+          const existing = seenProducts.get(productKey);
+          if (!existing) {
+            seenProducts.set(productKey, item);
+          } else {
+            const existingDate = new Date(existing.created_at).getTime();
+            const newDate = new Date(item.created_at).getTime();
+            if (newDate > existingDate) {
+              seenProducts.set(productKey, item);
+            }
+          }
+        }
+        const items = Array.from(seenProducts.values());
 
         res.json({ items });
       } catch (err) {
