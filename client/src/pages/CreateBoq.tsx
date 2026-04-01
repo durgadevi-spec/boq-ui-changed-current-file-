@@ -479,12 +479,11 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
                 onClick={async () => {
                   if (!confirm("Delete this product and all its items?")) return;
                   try {
-                    // Use action=trash so it shows in the Trash bin
-                    const res = await apiFetch(`/api/boq-items/${boqItem.id}?action=trash`, { method: "DELETE" });
+                    const res = await apiFetch(`/api/boq-items/${boqItem.id}`, { method: "DELETE" });
 
                     if (res.ok) {
                       setBoqItems(prev => prev.filter(i => i.id !== boqItem.id));
-                      toast({ title: "Product Deleted", description: "The product has been moved to Trash." });
+                      toast({ title: "Product Deleted", description: "The product has been deleted permanently." });
 
                       // Finalize state update to ensure and recalculate
                       loadBoqItemsAndEdits();
@@ -966,7 +965,16 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
         <Input
           type="text"
           value={localQty}
-          onChange={(e) => setLocalQty(e.target.value)}
+          onChange={(e) => {
+            const val = e.target.value;
+            setLocalQty(val);
+            const parsed = parseFloat(val);
+            if (!isNaN(parsed)) {
+              updateEditedField(itemKey, "qty", parsed);
+            } else if (val === "") {
+              updateEditedField(itemKey, "qty", 0);
+            }
+          }}
           onBlur={() => updateEditedField(itemKey, "qty", parseFloat(localQty) || 0)}
           className="h-7 w-16 text-xs text-center border-gray-200 focus:border-blue-400"
           disabled={isVersionSubmitted}
@@ -983,7 +991,20 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
         <Input
           type="text"
           value={localRate}
-          onChange={(e) => setLocalRate(e.target.value)}
+          onChange={(e) => {
+            const val = e.target.value;
+            setLocalRate(val);
+            const parsed = parseFloat(val);
+            if (!isNaN(parsed)) {
+              updateEditedField(itemKey, "rate", parsed);
+              updateEditedField(itemKey, "supply_rate", parsed);
+              updateEditedField(itemKey, "install_rate", 0);
+            } else if (val === "") {
+              updateEditedField(itemKey, "rate", 0);
+              updateEditedField(itemKey, "supply_rate", 0);
+              updateEditedField(itemKey, "install_rate", 0);
+            }
+          }}
           onBlur={() => {
             const v = parseFloat(localRate) || 0;
             updateEditedField(itemKey, "rate", v);
@@ -1107,8 +1128,13 @@ export default function CreateBom() {
   const [commentTarget, setCommentTarget] = useState<{ type: 'product' | 'item'; id: string; name: string } | null>(null);
   const [newComment, setNewComment] = useState("");
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [showProposalImportDialog, setShowProposalImportDialog] = useState(false);
+  const [selectedProposalImportIds, setSelectedProposalImportIds] = useState<string[]>([]);
+  const [expandedProposalId, setExpandedProposalId] = useState<string | null>(null);
+  const [proposalItemsPreview, setProposalItemsPreview] = useState<Record<string, any[]>>({});
+  const [loadingPreviewId, setLoadingPreviewId] = useState<string | null>(null);
 
-  // BOM Template state
+  const [approvedProposals, setApprovedProposals] = useState<any[]>([]);
   const [bomTemplates, setBomTemplates] = useState<any[]>([]);
   const [sketchTemplates, setSketchTemplates] = useState<any[]>([]);
   const [showTemplateManager, setShowTemplateManager] = useState(false);
@@ -1285,19 +1311,19 @@ export default function CreateBom() {
     setDeleteConfirm({ isOpen: true, type: 'sketch', id, name: tpl.name || "Sketch Template" });
   };
 
-  const confirmDelete = async (action: 'archive' | 'trash') => {
+  const confirmDelete = async () => {
     if (!deleteConfirm) return;
     const { type, id } = deleteConfirm;
 
     try {
       if (type === 'template') {
-        const resp = await apiFetch(`/api/bom-templates/${id}?action=${action}`, { method: "DELETE" });
+        const resp = await apiFetch(`/api/bom-templates/${id}`, { method: "DELETE" });
         if (resp.ok) {
-          toast({ title: action === 'trash' ? "Template moved to trash" : "Template archived" });
+          toast({ title: "Template deleted permanently" });
           loadTemplates();
         }
       } else if (type === 'version') {
-        const res = await apiFetch(`/api/boq-versions/${encodeURIComponent(id)}?action=${action}`, { method: "DELETE" });
+        const res = await apiFetch(`/api/boq-versions/${encodeURIComponent(id)}`, { method: "DELETE" });
         if (res.ok) {
           const r = await apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId!)}`, { headers: {} });
           if (r.ok) {
@@ -1306,7 +1332,7 @@ export default function CreateBom() {
             const draft = list.find((v: BOMVersion) => v.status === "draft");
             setSelectedVersionId(draft?.id ?? list[0]?.id ?? null);
             setBoqItems([]);
-            toast({ title: action === 'trash' ? "Version moved to trash" : "Version archived" });
+            toast({ title: "Version deleted permanently" });
           }
         }
       } else if (type === 'sketch') {
@@ -1348,6 +1374,8 @@ export default function CreateBom() {
   // Load versions when project changes
   useEffect(() => {
     if (!selectedProjectId) { setVersions([]); setSelectedVersionId(null); setBoqItems([]); return; }
+
+    // Fetch versions
     apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId)}?type=bom`, { headers: {} })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -1361,6 +1389,29 @@ export default function CreateBom() {
         });
       })
       .catch(console.error);
+
+    // Fetch Approved Proposals for this project
+    apiFetch(`/api/proposals?projectId=${encodeURIComponent(selectedProjectId)}&status=approved`, { headers: {} })
+      .then(r => r.ok ? r.json() : [])
+      .then(async d => {
+        const list = Array.isArray(d) ? d : (d.proposals || []);
+        const approved = list.filter((p: any) => p.status === 'approved');
+        setApprovedProposals(approved);
+
+        // Pre-fetch items for all approved proposals to get correct totals upfront
+        for (const prop of approved) {
+          if (!proposalItemsPreview[prop.id]) {
+            try {
+              const res = await apiFetch(`/api/proposals/${prop.id}/items`);
+              if (res.ok) {
+                const items = await res.json();
+                setProposalItemsPreview(prev => ({ ...prev, [prop.id]: items }));
+              }
+            } catch (err) { console.error("Prefetch failed", err); }
+          }
+        }
+      })
+      .catch(err => console.warn("Failed to fetch approved proposals", err));
   }, [selectedProjectId]);
 
   // Load History
@@ -1457,6 +1508,86 @@ export default function CreateBom() {
   useEffect(() => {
     loadUsers();
   }, [loadUsers]);
+
+  const handleImportApprovedProposal = async (proposalId: string) => {
+    if (!selectedVersionId || !selectedProjectId) return;
+
+    const prop = approvedProposals.find((p: any) => p.id === proposalId);
+    if (!prop) return;
+
+    if (!confirm(`Import items from approved proposal "${prop.vendor_name} (V${prop.version_number})"? This will add items to your current BOM draft.`)) return;
+
+    setIsSaving(true);
+    try {
+      // Fetch items for this proposal
+      const res = await apiFetch(`/api/proposals/${proposalId}/items`);
+      if (!res.ok) throw new Error("Failed to load proposal items");
+      const items = await res.json();
+
+      if (!items || items.length === 0) {
+        toast({ title: "No Items", description: "This proposal has no items to import." });
+        setIsSaving(false);
+        return;
+      }
+
+      toast({ title: "Importing Proposal", description: `Adding ${items.length} items from ${prop.vendor_name}...` });
+
+      const batchItems = items.map((item: any) => {
+        return {
+          estimator: "General",
+          table_data: {
+            product_name: item.item_name || "Vendor Item",
+            product_id: null,
+            material_id: item.material_id || null,
+            category: "Vendor Proposal",
+            finalize_description: item.remarks || "",
+            finalize_qty: Number(item.qty) || 1,
+            finalize_rate: Number(item.rate) || 0,
+            unit: item.unit || "nos",
+            is_finalized: true, // Auto-finalize vendor items
+            vendor_id: prop.vendor_id,
+            vendor_name: prop.vendor_name,
+            step11_items: [
+              {
+                s_no: 1,
+                material_id: item.material_id || null,
+                title: item.item_name || "Vendor Item",
+                description: item.remarks || "",
+                unit: item.unit || "nos",
+                qty: Number(item.qty) || 1,
+                supply_rate: Number(item.rate) || 0,
+                install_rate: 0,
+                manual: true
+              }
+            ],
+            created_at: new Date().toISOString()
+          }
+        };
+      });
+
+      const resp = await apiFetch("/api/boq-items/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: selectedProjectId,
+          version_id: selectedVersionId,
+          items: batchItems
+        }),
+      });
+
+      if (resp.ok) {
+        toast({ title: "Success", description: `${items.length} items imported from vendor proposal.` });
+        loadBoqItemsAndEdits();
+      } else {
+        throw new Error("Batch import failed");
+      }
+    } catch (err: any) {
+      console.error("Import proposal error:", err);
+      toast({ title: "Import Failed", description: err.message || "Failed to import vendor proposal", variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const mismatches = useMemo(() => {
     const list: any[] = [];
@@ -2079,6 +2210,122 @@ export default function CreateBom() {
     } catch { toast({ title: "Error", description: "Failed to create version", variant: "destructive" }); }
   };
 
+  const getProposalTotal = (prop: any) => {
+    const items = proposalItemsPreview[prop.id] || [];
+    if (items.length > 0) {
+      return items.reduce((sum, item) => sum + (Number(item.rate) * (Number(item.qty) || 1)), 0);
+    }
+    return Number(prop.total_amount || prop.final_amount || 0);
+  };
+
+  const handleImportApprovedProposals = async () => {
+    if (!selectedVersionId || !selectedProjectId || selectedProposalImportIds.length === 0) return;
+
+    const count = selectedProposalImportIds.length;
+    if (!confirm(`Import items from ${count} approved proposal(s)? This will add all vendor items to your current BOM draft.`)) return;
+
+    setIsSaving(true);
+    try {
+      let totalImported = 0;
+
+      for (const proposalId of selectedProposalImportIds) {
+        const prop = approvedProposals.find((p: any) => p.id === proposalId);
+        if (!prop) continue;
+
+        // Fetch items for this proposal
+        const res = await apiFetch(`/api/proposals/${proposalId}/items`);
+        if (!res.ok) continue;
+        const items = await res.json();
+
+        if (!items || items.length === 0) continue;
+
+        const batchItems = items.map((item: any) => {
+          return {
+            estimator: "General",
+            table_data: {
+              product_name: item.item_name || "Vendor Item",
+              product_id: null,
+              material_id: item.material_id || null,
+              category: "Vendor Proposal",
+              finalize_description: item.remarks || "",
+              finalize_qty: Number(item.qty) || 1,
+              finalize_rate: Number(item.rate) || 0,
+              unit: item.unit || "nos",
+              is_finalized: true,
+              vendor_id: prop.vendor_id,
+              vendor_name: prop.vendor_name,
+              step11_items: [
+                {
+                  s_no: 1,
+                  material_id: item.material_id || null,
+                  title: item.item_name || "Vendor Item",
+                  description: item.remarks || "",
+                  unit: item.unit || "nos",
+                  qty: Number(item.qty) || 1,
+                  supply_rate: Number(item.rate) || 0,
+                  install_rate: 0,
+                  manual: true
+                }
+              ],
+              created_at: new Date().toISOString()
+            }
+          };
+        });
+
+        const resp = await apiFetch("/api/boq-items/batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: selectedProjectId,
+            version_id: selectedVersionId,
+            items: batchItems
+          }),
+        });
+
+        if (resp.ok) totalImported += items.length;
+      }
+
+      if (totalImported > 0) {
+        toast({ title: "Success", description: `${totalImported} items imported from ${count} proposals.` });
+        setShowProposalImportDialog(false);
+        setSelectedProposalImportIds([]);
+        // Direct call to reload and force state update
+        await loadBoqItemsAndEdits();
+        // Force a minor delay then reload again to ensure database replication hasn't lagged
+        setTimeout(() => loadBoqItemsAndEdits(), 500);
+      } else {
+        throw new Error("No items were imported.");
+      }
+    } catch (err: any) {
+      console.error("Import proposals error:", err);
+      toast({ title: "Import Failed", description: err.message || "Failed to import vendor proposals", variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const toggleProposalPreview = async (proposalId: string) => {
+    if (expandedProposalId === proposalId) {
+      setExpandedProposalId(null);
+      return;
+    }
+    setExpandedProposalId(proposalId);
+    if (!proposalItemsPreview[proposalId]) {
+      setLoadingPreviewId(proposalId);
+      try {
+        const res = await apiFetch(`/api/proposals/${proposalId}/items`);
+        if (res.ok) {
+          const items = await res.json();
+          setProposalItemsPreview(prev => ({ ...prev, [proposalId]: items }));
+        }
+      } catch (err) {
+        console.error("Failed to fetch preview items", err);
+      } finally {
+        setLoadingPreviewId(null);
+      }
+    }
+  };
+
   const handleDeleteVersion = async () => {
     if (!selectedVersionId) return;
     setDeleteConfirm({
@@ -2518,111 +2765,81 @@ export default function CreateBom() {
             <CardContent className="p-4 bg-white">
               <div className="flex flex-col gap-4">
                 {/* Top Row: Selectors & Actions */}
+                {/* Row 1: Project Filters */}
+                <div className="flex items-center gap-3 p-1.5 bg-slate-50 rounded-lg border border-slate-200 w-full">
+                  <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-2 whitespace-nowrap">Project Filters:</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PROJECT_STATUSES.map(s => (
+                      <button
+                        key={s.value}
+                        onClick={() => setProjectStatusFilter(s.value)}
+                        className={cn(
+                          "px-2 py-1 text-[9px] font-bold uppercase rounded-md transition-all border border-transparent",
+                          projectStatusFilter === s.value ? "bg-white text-blue-600 shadow-sm border-blue-100 ring-1 ring-blue-50/50" : "text-slate-500 hover:bg-slate-100"
+                        )}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setProjectStatusFilter("all")}
+                      className={cn(
+                        "px-2 py-1 text-[9px] font-bold uppercase rounded-md transition-all border border-transparent",
+                        projectStatusFilter === "all" ? "bg-white text-blue-600 shadow-sm border-blue-100 ring-1 ring-blue-50/50" : "text-slate-500 hover:bg-slate-100"
+                      )}
+                    >
+                      All
+                    </button>
+                  </div>
+                </div>
+
+                {/* Row 2: Select Project & Version Actions */}
                 <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
-                  {/* Container 1: Project Selector */}
-                  <div className="flex-[2] min-w-[350px] space-y-3">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between px-1">
-                        <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Project Filters</Label>
-                      </div>
-
-                      <div className="flex flex-wrap gap-1.5 p-1 bg-slate-50 rounded-lg border border-slate-200">
-                        {PROJECT_STATUSES.map(s => (
-                          <button
-                            key={s.value}
-                            onClick={() => setProjectStatusFilter(s.value)}
-                            className={cn(
-                              "px-2 py-1 text-[9px] font-bold uppercase rounded-md transition-all border border-transparent",
-                              projectStatusFilter === s.value ? "bg-white text-blue-600 shadow-sm border-blue-100 ring-1 ring-blue-50/50" : "text-slate-500 hover:bg-slate-100"
-                            )}
-                          >
-                            {s.label}
-                          </button>
-                        ))}
-                        <button
-                          onClick={() => setProjectStatusFilter("all")}
-                          className={cn(
-                            "px-2 py-1 text-[9px] font-bold uppercase rounded-md transition-all border border-transparent",
-                            projectStatusFilter === "all" ? "bg-white text-blue-600 shadow-sm border-blue-100 ring-1 ring-blue-50/50" : "text-slate-500 hover:bg-slate-100"
-                          )}
-                        >
-                          All
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-1">Select Project</Label>
-                      <Select onValueChange={v => setSelectedProjectId(v || null)} value={selectedProjectId || ""}>
-                        <SelectTrigger className="w-full bg-slate-50 border-slate-200 h-9 px-3 hover:bg-slate-100/50 transition-colors">
-                          <SelectValue placeholder={projects.length === 0 ? "No projects" : "Choose from filtered list..."} />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-[300px] overflow-hidden flex flex-col">
-                          <div className="sticky top-0 z-10 bg-white p-2 border-b border-slate-100">
-                            <div className="relative">
-                              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
-                              <Input
-                                placeholder="Search projects..."
-                                value={projectSearchTerm}
-                                onChange={(e) => setProjectSearchTerm(e.target.value)}
-                                onKeyDown={(e) => e.stopPropagation()}
-                                className="pl-7 h-8 text-[11px] border-slate-200 bg-slate-50 focus:bg-white transition-colors w-full"
-                              />
-                            </div>
+                  <div className="flex-[2] min-w-[350px] space-y-1">
+                    <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-1">Select Project</Label>
+                    <Select onValueChange={v => setSelectedProjectId(v || null)} value={selectedProjectId || ""}>
+                      <SelectTrigger className="w-full bg-slate-50 border-slate-200 h-9 px-3 hover:bg-slate-100/50 transition-colors">
+                        <SelectValue placeholder={projects.length === 0 ? "No projects" : "Choose from filtered list..."} />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[300px] overflow-hidden flex flex-col">
+                        <div className="sticky top-0 z-10 bg-white p-2 border-b border-slate-100">
+                          <div className="relative">
+                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
+                            <Input
+                              placeholder="Search projects..."
+                              value={projectSearchTerm}
+                              onChange={(e) => setProjectSearchTerm(e.target.value)}
+                              onKeyDown={(e) => e.stopPropagation()}
+                              className="pl-7 h-8 text-[11px] border-slate-200 bg-slate-50 focus:bg-white transition-colors w-full"
+                            />
                           </div>
-                          <div className="overflow-y-auto max-h-[250px]">
-                            {projects
-                              .filter(p => {
-                                // Filter by search term
-                                if (projectSearchTerm && !fuzzySearch(projectSearchTerm, [p.name, p.client])) return false;
+                        </div>
+                        <div className="overflow-y-auto max-h-[250px]">
+                          {projects
+                            .filter(p => {
+                              // Filter by search term
+                              if (projectSearchTerm && !fuzzySearch(projectSearchTerm, [p.name, p.client])) return false;
 
-                                // Filter by status
-                                if (projectStatusFilter === "all") return true;
-                                return p.project_status === projectStatusFilter;
-                              })
-                              .map((p: Project) => {
-                                const sm = getProjectStatusMeta(p.project_status);
-                                return (
-                                  <SelectItem value={p.id} key={p.id}>
-                                    <span className="flex items-center gap-2">
-                                      {p.name}
-                                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${sm.color}`}>{sm.label}</span>
-                                    </span>
-                                  </SelectItem>
-                                );
-                              })}
-                          </div>
-                        </SelectContent>
-                      </Select>
-                      {selectedProjectId && (() => {
-                        const selProj = projects.find(p => p.id === selectedProjectId);
-                        return (
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-[10px] text-slate-500 font-bold uppercase">Project Status:</span>
-                            <select
-                              className="text-xs border border-slate-200 rounded px-2 py-1 bg-white font-semibold focus:ring-1 ring-blue-400 outline-none"
-                              value={selProj?.project_status || 'started'}
-                              onChange={async (e) => {
-                                const newStatus = e.target.value;
-                                try {
-                                  await apiFetch(`/api/boq-projects/${selectedProjectId}`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ project_status: newStatus }),
-                                  });
-                                  setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, project_status: newStatus } : p));
-                                } catch (err) { console.error('Failed to update project status', err); }
-                              }}
-                            >
-                              {PROJECT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                            </select>
-                          </div>
-                        );
-                      })()}
-                    </div>
+                              // Filter by status
+                              if (projectStatusFilter === "all") return true;
+                              return p.project_status === projectStatusFilter;
+                            })
+                            .map((p: Project) => {
+                              const sm = getProjectStatusMeta(p.project_status);
+                              return (
+                                <SelectItem value={p.id} key={p.id}>
+                                  <span className="flex items-center gap-2">
+                                    {p.name}
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${sm.color}`}>{sm.label}</span>
+                                  </span>
+                                </SelectItem>
+                              );
+                            })}
+                        </div>
+                      </SelectContent>
+                    </Select>
                   </div>
 
-                  {/* Container 2: Version Selector & Actions */}
                   {selectedProjectId && (
                     <div className="flex-[3] min-w-[500px] space-y-1.5 text-slate-900">
                       <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-1">Version & Actions</Label>
@@ -2674,33 +2891,57 @@ export default function CreateBom() {
                           <Clock className="h-4 w-4" />
                           <span>New Version</span>
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-9 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-blue-600 gap-2 font-semibold"
-                          title="Add Overall Comment"
-                          onClick={() => {
-                            if (!selectedVersionId) return;
-                            setCommentTarget({
-                              type: 'product', // Reusing product type for modal title context
-                              id: selectedVersionId,
-                              name: `Version V${versions.find(v => v.id === selectedVersionId)?.version_number || ''} (Overall)`
-                            });
-                            setShowCommentDialog(true);
-                          }}
-                          disabled={!selectedVersionId}
-                        >
-                          <MessageSquare className="h-4 w-4" />
-                          <span>Comment</span>
-                        </Button>
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* Row 3: Project Status & Actions */}
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
+                  {selectedProjectId && (() => {
+                    const selProj = projects.find(p => p.id === selectedProjectId);
+                    return (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase">Project Status:</span>
+                        <select
+                          className="text-xs border border-slate-200 rounded px-2 py-1 bg-white font-semibold focus:ring-1 ring-blue-400 outline-none"
+                          value={selProj?.project_status || 'started'}
+                          onChange={async (e) => {
+                            const newStatus = e.target.value;
+                            try {
+                              await apiFetch(`/api/boq-projects/${selectedProjectId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ project_status: newStatus }),
+                              });
+                              setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, project_status: newStatus } : p));
+                            } catch (err) { console.error('Failed to update project status', err); }
+                          }}
+                        >
+                          {PROJECT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                        </select>
+                      </div>
+                    );
+                  })()}
 
                   <div className="flex gap-2 h-9 ml-auto">
                     <Button onClick={() => setShowTemplateManager(true)} variant="outline" className="border-slate-200 h-full px-4 text-xs font-bold shadow-sm bg-white flex items-center gap-2" disabled={isVersionSubmitted || !selectedVersionId}>
                       <History className="h-4 w-4" /> Load Template
                     </Button>
+
+                    {approvedProposals.length > 0 && (
+                      <Button
+                        onClick={() => {
+                          setSelectedProposalImportIds([]);
+                          setShowProposalImportDialog(true);
+                        }}
+                        variant="outline"
+                        className="border-emerald-200 h-full px-4 text-xs font-bold shadow-sm bg-white flex items-center gap-2 text-emerald-700 hover:bg-emerald-50"
+                        disabled={isVersionSubmitted || !selectedVersionId}
+                      >
+                        <CheckCircle2 className="h-4 w-4" /> Import Approved Proposals ({approvedProposals.length})
+                      </Button>
+                    )}
                     <Button onClick={handleAddProduct} className="bg-primary text-white h-full px-5 text-xs font-bold shadow-sm" disabled={isVersionSubmitted || !selectedVersionId}>+ Add Product</Button>
                     <Button onClick={handleAddProductManual} variant="outline" className="border-slate-200 h-full px-5 text-xs font-bold shadow-sm bg-white" disabled={isVersionSubmitted || !selectedVersionId}>+ Add Item</Button>
                   </div>
@@ -2758,7 +2999,7 @@ export default function CreateBom() {
                   </div>
                 )}
 
-                {/* Bottom Row: Project Info Summary (if selected) */}
+                {/* Row 4: Project Info Summary & Comment */}
                 {selectedVersion && (
                   <div className="flex flex-wrap items-center gap-x-6 gap-y-2 py-2.5 px-4 bg-slate-50/50 border border-slate-100 rounded-lg overflow-hidden">
                     <div className="flex items-center gap-2 min-w-fit">
@@ -2790,6 +3031,26 @@ export default function CreateBom() {
                     </div>
 
                     <div className="ml-auto flex items-center gap-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-blue-600 gap-2 font-semibold"
+                        title="Add Overall Comment"
+                        onClick={() => {
+                          if (!selectedVersionId) return;
+                          setCommentTarget({
+                            type: 'product', // Reusing product type for modal title context
+                            id: selectedVersionId,
+                            name: `Version V${versions.find(v => v.id === selectedVersionId)?.version_number || ''} (Overall)`
+                          });
+                          setShowCommentDialog(true);
+                        }}
+                        disabled={!selectedVersionId}
+                      >
+                        <MessageSquare className="h-3.5 w-3.5" />
+                        <span className="text-xs">Comment</span>
+                      </Button>
+
                       {selectedVersion.status === "approved" ? (
                         <Badge variant="outline" className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[10px] font-bold px-2 py-0 h-6">
                           <CheckCircle2 className="h-2.5 w-2.5 mr-1" /> APPROVED
@@ -2830,6 +3091,160 @@ export default function CreateBom() {
                 </div>
                 <DialogFooter>
                   <Button onClick={() => setShowHistoryModal(false)}>Close</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={showProposalImportDialog} onOpenChange={setShowProposalImportDialog}>
+              <DialogContent className="sm:max-w-[700px]">
+                <DialogHeader>
+                  <DialogTitle className="text-lg font-bold flex items-center gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                    Finalized Vendor Proposals
+                  </DialogTitle>
+                  <DialogDescription>
+                    Select one or more approved proposals to import their items into your current BOM draft.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="py-4">
+                  <div className="border rounded-md overflow-hidden bg-white">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                          <th className="w-10 px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              className="rounded border-slate-300"
+                              checked={selectedProposalImportIds.length === approvedProposals.length && approvedProposals.length > 0}
+                              onChange={(e) => {
+                                if (e.target.checked) setSelectedProposalImportIds(approvedProposals.map(p => p.id));
+                                else setSelectedProposalImportIds([]);
+                              }}
+                            />
+                          </th>
+                          <th className="px-4 py-3 text-left font-bold text-slate-700">Proposal Details</th>
+                          <th className="px-4 py-3 text-right font-bold text-slate-700">Final Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {approvedProposals.map((prop) => (
+                          <React.Fragment key={prop.id}>
+                            <tr
+                              className={`hover:bg-slate-50 transition-colors cursor-pointer border-t border-slate-100 ${selectedProposalImportIds.includes(prop.id) ? 'bg-emerald-50/20' : ''}`}
+                              onClick={() => {
+                                setSelectedProposalImportIds(prev =>
+                                  prev.includes(prop.id) ? prev.filter(id => id !== prop.id) : [...prev, prop.id]
+                                );
+                              }}
+                            >
+                              <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  className="rounded border-slate-300 h-4 w-4 accent-emerald-600"
+                                  checked={selectedProposalImportIds.includes(prop.id)}
+                                  onChange={(e) => {
+                                    setSelectedProposalImportIds(prev =>
+                                      e.target.checked ? [...prev, prop.id] : prev.filter(id => id !== prop.id)
+                                    );
+                                  }}
+                                />
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-start gap-3">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); toggleProposalPreview(prop.id); }}
+                                    className="mt-1 p-1 hover:bg-slate-200 rounded transition-colors text-slate-400 hover:text-slate-600"
+                                  >
+                                    {expandedProposalId === prop.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                  </button>
+                                  <div className="flex flex-col">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-bold text-slate-900 text-sm">{prop.vendor_name}</span>
+                                      <Badge className="text-[10px] h-4 bg-emerald-100 text-emerald-700 border-emerald-200 font-bold">V{prop.version_number}</Badge>
+                                    </div>
+                                    <span className="text-[11px] text-slate-500 font-bold mt-0.5">Project: {prop.project_name || selectedProject?.name || "Target Project"}</span>
+                                    <div className="flex items-center gap-3 text-[10px] text-slate-400 mt-1 font-medium">
+                                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> Approved: {new Date(prop.updated_at || prop.created_at).toLocaleDateString()}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <span className="font-extrabold text-slate-950 text-sm">
+                                  ₹{getProposalTotal(prop).toLocaleString()}
+                                </span>
+                              </td>
+                            </tr>
+
+                            {/* Expandable Material List Preview */}
+                            {expandedProposalId === prop.id && (
+                              <tr className="bg-slate-50/50">
+                                <td colSpan={3} className="px-4 py-0">
+                                  <div className="p-4 border-l-2 border-emerald-500 my-2 ml-10">
+                                    <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
+                                      <table className="w-full text-[11px]">
+                                        <thead className="bg-slate-100/80 text-slate-600 font-bold uppercase tracking-wider border-b">
+                                          <tr>
+                                            <th className="px-3 py-2 text-left">Item Name</th>
+                                            <th className="px-3 py-2 text-center">Qty</th>
+                                            <th className="px-3 py-2 text-center">Unit</th>
+                                            <th className="px-3 py-2 text-right">Rate</th>
+                                            <th className="px-3 py-2 text-right w-24">Total</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                          {loadingPreviewId === prop.id ? (
+                                            <tr>
+                                              <td colSpan={5} className="px-3 py-4 text-center">
+                                                <div className="flex items-center justify-center gap-2 text-slate-500">
+                                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                                  <span>Loading materials list...</span>
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          ) : (proposalItemsPreview[prop.id]?.length || 0) > 0 ? (
+                                            proposalItemsPreview[prop.id]?.map((item, idx) => (
+                                              <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                                                <td className="px-3 py-2 font-medium text-slate-800">{item.item_name}</td>
+                                                <td className="px-3 py-2 text-center font-bold text-slate-700">{item.qty}</td>
+                                                <td className="px-3 py-2 text-center text-slate-500">{item.unit || "nos"}</td>
+                                                <td className="px-3 py-2 text-right font-medium text-slate-600">₹{Number(item.rate).toLocaleString()}</td>
+                                                <td className="px-3 py-2 text-right font-bold text-slate-900 bg-slate-100/30">₹{(Number(item.rate) * Number(item.qty)).toLocaleString()}</td>
+                                              </tr>
+                                            ))
+                                          ) : (
+                                            <tr>
+                                              <td colSpan={5} className="px-3 py-8 text-center text-slate-400 italic">No materials found in this proposal.</td>
+                                            </tr>
+                                          )}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <DialogFooter className="bg-slate-50 p-4 rounded-b-lg border-t border-slate-200">
+                  <div className="flex items-center justify-between w-full">
+                    <span className="text-xs font-bold text-slate-500">{selectedProposalImportIds.length} proposals selected</span>
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={() => setShowProposalImportDialog(false)}>Cancel</Button>
+                      <Button
+                        disabled={selectedProposalImportIds.length === 0 || isSaving}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                        onClick={handleImportApprovedProposals}
+                      >
+                        {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
+                        Import Selected Items
+                      </Button>
+                    </div>
+                  </div>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -3279,6 +3694,7 @@ export default function CreateBom() {
           onConfirm={confirmDelete}
           itemName={deleteConfirm.name}
           title={deleteConfirm.type === 'template' ? "Delete BOM Template?" : "Delete BOQ Version?"}
+          permanentDelete={true}
         />
       )}
 

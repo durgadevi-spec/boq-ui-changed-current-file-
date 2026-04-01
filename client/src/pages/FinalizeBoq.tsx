@@ -1099,7 +1099,9 @@ export default function FinalizeBoq() {
                 initialGlobal[col.name] = {
                   baseValue: col.baseValue,
                   percentageValue: col.percentageValue,
-                  baseSource: col.baseSource
+                  baseSource: col.baseSource,
+                  operator: col.operator,
+                  multiplierSource: col.multiplierSource
                 };
               });
               setGlobalColSettings(initialGlobal);
@@ -1748,8 +1750,48 @@ export default function FinalizeBoq() {
       };
 
       const updates = boqItems.map(item => {
+        let td = item.table_data || {};
+        if (typeof td === 'string') try { td = JSON.parse(td); } catch { td = {}; }
+        const { itemRate, itemQty } = getItemMetrics(td);
+        const displayQty = parseFloat(productQuantities[item.id] ?? td.finalize_qty ?? itemQty) || 0;
+        const totalVal = itemRate * displayQty;
+        const oRate = parseFloat(overrideRates[item.id] ?? td.finalize_override_rate ?? "0") || 0;
+        
+        let accumulator = 0;
+        let runningTotal = oRate > 0 ? oRate * displayQty : totalVal;
+        const rowVals: Record<string, string> = { ...(customColumnValues[item.id]?.[0] || {}) };
+        const rowCalculated: Record<string, number> = {};
+
+        columns.forEach((col: any) => {
+          if (col.isTotal) {
+            runningTotal += accumulator;
+            accumulator = 0;
+            rowCalculated[col.name] = runningTotal;
+            rowVals[col.name] = runningTotal.toFixed(2);
+          } else {
+            let val = 0;
+            const bSrc = col.baseSource;
+            const op = col.operator || "%";
+            const mSrc = col.multiplierSource || "manual";
+            const mVal = col.percentageValue || 0;
+            if (bSrc && bSrc !== "manual") {
+              const ctx: SrcCtx = { totalVal, rate: itemRate, qty: displayQty, overrideRate: oRate, overrideTotal: oRate * displayQty, rowCalc: rowCalculated, customVals: rowVals };
+              const baseValue = resolveSource(bSrc, ctx);
+              const multiplierValue = mSrc === "manual" ? mVal : resolveSource(mSrc, ctx);
+              val = applyOperator(baseValue, multiplierValue, op);
+            } else {
+              val = parseFloat(rowVals[col.name] || "0") || 0;
+            }
+            rowCalculated[col.name] = val;
+            accumulator += val;
+            rowVals[col.name] = val.toFixed(2);
+          }
+        });
+
+        const nextVals = { 0: rowVals };
         setCustomColumns(prev => ({ ...prev, [item.id]: columns }));
-        return saveItemLayout(item.id, columns);
+        setCustomColumnValues(prev => ({ ...prev, [item.id]: nextVals }));
+        return saveItemLayout(item.id, columns, nextVals);
       });
 
       await Promise.all(updates);
@@ -2558,313 +2600,277 @@ export default function FinalizeBoq() {
         <Card className="border-none shadow-sm bg-slate-50/50">
           <CardContent className="p-2 space-y-2">
             {/* Filter by Status Row */}
-            <div className="flex items-center gap-3 px-3 py-1.5 bg-slate-50/80 rounded-lg border border-slate-100/50 shadow-sm">
-              <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold whitespace-nowrap">Filter Status:</Label>
-              <div className="flex flex-wrap md:flex-nowrap gap-1.5">
-                {PROJECT_STATUSES.map((s) => (
-                  <button
-                    key={s.value}
-                    onClick={() => setProjectStatusFilter(s.value)}
-                    className={cn(
-                      "px-2.5 py-1 text-[9px] font-bold uppercase rounded-md transition-all border border-transparent hover:bg-slate-100",
-                      projectStatusFilter === s.value ? "bg-white text-blue-600 shadow-sm border-blue-100 ring-1 ring-blue-100" : "text-slate-500"
-                    )}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setProjectStatusFilter("all")}
-                  className={cn(
-                    "px-2.5 py-1 text-[9px] font-bold uppercase rounded-md transition-all border border-transparent hover:bg-slate-100",
-                    projectStatusFilter === "all" ? "bg-white text-blue-600 shadow-sm border-blue-100 ring-1 ring-blue-100" : "text-slate-500"
-                  )}
-                >
-                  All
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end pt-1">
-              {/* Project Select */}
-              <div className="md:col-span-4 space-y-1">
-                <Label className="text-[11px] uppercase tracking-wider text-slate-500 font-bold ml-1">Project</Label>
-                <Select onValueChange={(v) => setSelectedProjectId(v || null)} value={selectedProjectId || ""}>
-                  <SelectTrigger className="bg-white border-slate-200">
-                    <SelectValue placeholder="Select project" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[350px] overflow-hidden flex flex-col">
-                    <div className="sticky top-0 z-10 bg-white p-2 border-b border-slate-100">
-                      <div className="relative">
-                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                        <Input
-                          placeholder="Search projects..."
-                          value={projectSearchTerm}
-                          onChange={(e) => setProjectSearchTerm(e.target.value)}
-                          onKeyDown={(e) => e.stopPropagation()}
-                          className="pl-8 h-9 text-xs border-slate-200 bg-slate-50 focus:bg-white transition-colors w-full"
-                        />
-                      </div>
-                    </div>
-                    <div className="overflow-y-auto max-h-[250px]">
-                      {filteredProjects.map((p) => {
-                        const sm = getProjectStatusMeta(p.project_status);
-                        return (
-                          <SelectItem value={p.id} key={p.id}>
-                            <span className="flex items-center gap-2">
-                              {p.name}
-                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${sm.color}`}>{sm.label}</span>
-                            </span>
-                          </SelectItem>
-                        );
-                      })}
-                      {filteredProjects.length === 0 && (
-                        <div className="py-6 text-center text-slate-400 text-xs italic">
-                          No projects found
-                        </div>
+                {/* Row 1: Project Filters */}
+                <div className="flex items-center gap-3 p-1.5 bg-slate-50 rounded-lg border border-slate-200 w-full mb-2">
+                  <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-2 whitespace-nowrap">Project Filters:</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PROJECT_STATUSES.map(s => (
+                      <button
+                        key={s.value}
+                        onClick={() => setProjectStatusFilter(s.value)}
+                        className={cn(
+                          "px-2 py-1 text-[9px] font-bold uppercase rounded-md transition-all border border-transparent",
+                          projectStatusFilter === s.value ? "bg-white text-blue-600 shadow-sm border-blue-100 ring-1 ring-blue-50/50" : "text-slate-500 hover:bg-slate-100"
+                        )}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setProjectStatusFilter("all")}
+                      className={cn(
+                        "px-2 py-1 text-[9px] font-bold uppercase rounded-md transition-all border border-transparent",
+                        projectStatusFilter === "all" ? "bg-white text-blue-600 shadow-sm border-blue-100 ring-1 ring-blue-50/50" : "text-slate-500 hover:bg-slate-100"
                       )}
-                    </div>
-                  </SelectContent>
-                </Select>
-                {selectedProjectId && (() => {
-                  const selProj = projects.find(p => p.id === selectedProjectId);
-                  return (
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] text-slate-500 font-bold uppercase">Project Status:</span>
-                      <select
-                        className="text-xs border border-slate-200 rounded px-2 py-1 bg-white font-semibold focus:ring-1 ring-blue-400 outline-none"
-                        value={selProj?.project_status || 'started'}
-                        onChange={async (e) => {
-                          const newStatus = e.target.value;
-                          try {
-                            await apiFetch(`/api/boq-projects/${selectedProjectId}`, {
-                              method: 'PUT',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ project_status: newStatus }),
-                            });
-                            setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, project_status: newStatus } : p));
-                          } catch (err) { console.error('Failed to update project status', err); }
-                        }}
-                      >
-                        {PROJECT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                      </select>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* BOM Version Select */}
-              {selectedProjectId && (
-                <div className="md:col-span-2 space-y-1">
-                  <Label className="text-[11px] uppercase tracking-wider text-slate-500 font-bold ml-1">BOM Version</Label>
-                  <div className="flex gap-2">
-                    <Select
-                      value={selectedBomVersionId || ""}
-                      onValueChange={(v) => {
-                        setSelectedBomVersionId(v);
-                        setSelectedBoqVersionId(null);
-                      }}
                     >
-                      <SelectTrigger className="bg-white border-slate-200">
-                        <SelectValue placeholder="Select BOM" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-[300px] overflow-y-auto">
-                        {filteredBomVersions.map((v) => (
-                          <SelectItem value={v.id} key={v.id}>
-                            V{v.version_number} ({v.status === "approved" ? "Appr" : v.status === "submitted" ? "Lock" : "Draft"})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 text-slate-400 hover:text-red-600 hover:bg-red-50"
-                      onClick={() => {
-                        if (!selectedBomVersionId) return;
-                        openDeleteConfirm("Delete this BOM version?", "BOM Version", async (action) => {
-                          try {
-                            const resp = await apiFetch(`/api/boq-versions/${encodeURIComponent(selectedBomVersionId)}?action=${action}`, { method: "DELETE" });
-                            if (resp.ok) {
-                              toast({ title: action === 'trash' ? "Moved to Trash" : "Archived", description: "BOM Version removed" });
-                              // Re-load versions
-                              const bomResp = await apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId)}?type=bom`);
-                              if (bomResp.ok) {
-                                const bomData = await bomResp.json();
-                                const bomList = bomData.versions || [];
-                                setBomVersions(bomList);
-                                if (bomList.length > 0) setSelectedBomVersionId(bomList[0].id);
-                                else setSelectedBomVersionId(null);
-                              }
-                            }
-                          } catch (e) {
-                            console.error(e);
-                            toast({ title: "Error", description: "Failed to delete", variant: "destructive" });
-                          }
-                        });
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* BOQ Version Select */}
-              {selectedProjectId && (
-                <div className="md:col-span-3 space-y-1">
-                  <div className="flex justify-between items-center ml-1">
-                    <Label className="text-[11px] uppercase tracking-wider text-slate-500 font-bold">BOQ Version</Label>
-                    <button
-                      onClick={async () => {
-                        if (!confirm("Create a new BOQ version?")) return;
-                        try {
-                          const resp = await apiFetch("/api/boq-versions", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              project_id: selectedProjectId,
-                              type: "boq",
-                              copy_from_version: selectedBoqVersionId || selectedBomVersionId
-                            })
-                          });
-                          if (resp.ok) {
-                            const newVer = await resp.json();
-                            toast({ title: "Success", description: "BOQ Version created" });
-
-                            // Immediately fetch updated version list
-                            const boqResp = await apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId)}?type=boq`);
-                            if (boqResp.ok) {
-                              const boqData = await boqResp.json();
-                              const newVersions = boqData.versions || [];
-                              setBoqVersions(newVersions);
-
-                              // Clear BOM selection and select the new BOQ version
-                              setSelectedBomVersionId(null);
-                              setSelectedBoqVersionId(newVer.id);
-                            }
-                          }
-                        } catch (e) {
-                          console.error(e);
-                          toast({ title: "Error", description: "Failed to create BOQ version", variant: "destructive" });
-                        }
-                      }}
-                      className="text-[10px] text-emerald-600 font-semibold hover:underline"
-                    >
-                      + CREATE NEW BOQ
+                      All
                     </button>
                   </div>
-                  <div className="flex gap-2">
-                    <Select
-                      value={selectedBoqVersionId || ""}
-                      onValueChange={(v) => {
-                        setSelectedBoqVersionId(v);
-                        setSelectedBomVersionId(null);
-                      }}
-                    >
-                      <SelectTrigger className="bg-white border-slate-200">
-                        <SelectValue placeholder="Select BOQ" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-[300px] overflow-y-auto">
-                        {filteredBoqVersions.length === 0 ? (
-                          <div className="p-2 text-xs text-slate-400 text-center">No BOQ versions</div>
-                        ) : (
-                          filteredBoqVersions.map((v) => (
-                            <SelectItem value={v.id} key={v.id}>
-                              BOQ V{v.version_number} ({v.status})
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
-
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 text-slate-400 hover:text-red-600 hover:bg-red-50"
-                      onClick={() => {
-                        if (!selectedBoqVersionId) return;
-                        openDeleteConfirm("Delete this BOQ version?", "BOQ Version", async (action) => {
-                          try {
-                            const resp = await apiFetch(`/api/boq-versions/${encodeURIComponent(selectedBoqVersionId)}?action=${action}`, { method: "DELETE" });
-                            if (resp.ok) {
-                              toast({ title: action === 'trash' ? "Moved to Trash" : "Archived", description: "BOQ Version removed" });
-                              const boqResp = await apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId)}?type=boq`);
-                              if (boqResp.ok) {
-                                const boqData = await boqResp.json();
-                                const boqList = boqData.versions || [];
-                                setBoqVersions(boqList);
-                                if (boqList.length > 0) setSelectedBoqVersionId(boqList[0].id);
-                                else setSelectedBoqVersionId(null);
-                              }
-                            }
-                          } catch (e) {
-                            console.error(e);
-                            toast({ title: "Error", description: "Failed to delete", variant: "destructive" });
-                          }
-                        });
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
                 </div>
-              )}
 
-              {/* Template Select */}
-              {selectedProjectId && (
-                <div className="md:col-span-3 space-y-1">
-                  <div className="flex justify-between items-center ml-1">
-                    <Label className="text-[11px] uppercase tracking-wider text-slate-500 font-bold">Template</Label>
-                    <button
-                      onClick={() => setIsSaveTemplateDialogOpen(true)}
-                      className="text-[10px] text-blue-600 font-semibold hover:underline"
-                    >
-                      SAVE NEW
-                    </button>
-                  </div>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className="w-full justify-between bg-white border-slate-200 font-normal h-9 px-3"
-                      >
-                        <span className="truncate text-sm">
-                          {selectedTemplateId
-                            ? templates.find((t) => t.id === selectedTemplateId)?.name
-                            : "Select template..."}
-                        </span>
-                        <ChevronDown className="h-3 w-3 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[200px] p-0" align="end">
-                      <div className="max-h-[250px] overflow-y-auto">
-                        {templates.length === 0 ? (
-                          <div className="p-3 text-center text-xs text-slate-400">No templates</div>
-                        ) : (
-                          <div className="p-1">
-                            {templates.map((t) => (
-                              <div
-                                key={t.id}
-                                className="flex items-center justify-between p-2 rounded hover:bg-slate-100 cursor-pointer group"
-                                onClick={() => handleApplyTemplate(t.id)}
-                              >
-                                <span className="text-xs truncate">{t.name}</span>
-                                <Trash2
-                                  className="h-3.3 w-3.5 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"
-                                  onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(t.id); }}
-                                />
-                              </div>
-                            ))}
+                {/* Row 2: Selection & Version History */}
+                <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
+                  {/* Container 1: Project */}
+                  <div className="flex-[2] min-w-[320px] space-y-1">
+                    <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-1">Select Project</Label>
+                    <Select onValueChange={(v) => setSelectedProjectId(v || null)} value={selectedProjectId || ""}>
+                      <SelectTrigger className="w-full bg-slate-50 border-slate-200 h-9 px-3 hover:bg-slate-100/50 transition-colors">
+                        <SelectValue placeholder={projects.length === 0 ? "No projects" : "Choose from filtered list..."} />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[350px] overflow-hidden flex flex-col">
+                        <div className="sticky top-0 z-10 bg-white p-2 border-b border-slate-100">
+                          <div className="relative">
+                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
+                            <Input
+                              placeholder="Search projects..."
+                              value={projectSearchTerm}
+                              onChange={(e) => setProjectSearchTerm(e.target.value)}
+                              onKeyDown={(e) => e.stopPropagation()}
+                              className="pl-7 h-8 text-[11px] border-slate-200 bg-slate-50 focus:bg-white transition-colors w-full"
+                            />
                           </div>
-                        )}
+                        </div>
+                        <div className="overflow-y-auto max-h-[250px]">
+                          {filteredProjects.map((p) => {
+                            const sm = getProjectStatusMeta(p.project_status);
+                            return (
+                              <SelectItem value={p.id} key={p.id}>
+                                <span className="flex items-center gap-2">
+                                  {p.name}
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${sm.color}`}>{sm.label}</span>
+                                </span>
+                              </SelectItem>
+                            );
+                          })}
+                        </div>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {selectedProjectId && (
+                    <>
+                      {/* Container 2: BOM Version */}
+                      <div className="flex-[1] min-w-[180px] space-y-1">
+                        <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-1">BOM Version</Label>
+                        <div className="flex gap-1.5">
+                          <Select
+                            value={selectedBomVersionId || ""}
+                            onValueChange={(v) => { setSelectedBomVersionId(v); setSelectedBoqVersionId(null); }}
+                          >
+                            <SelectTrigger className="bg-slate-50 border-slate-200 h-9">
+                              <SelectValue placeholder="Select BOM" />
+                            </SelectTrigger>
+                            <SelectContent className="max-h-[300px] overflow-y-auto">
+                              {filteredBomVersions.map((v) => (
+                                <SelectItem value={v.id} key={v.id}>
+                                  V{v.version_number} ({v.status === "approved" ? "Appr" : v.status === "submitted" ? "Lock" : "Draft"})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-9 w-9 text-slate-400 hover:text-red-500 border border-slate-200 hover:bg-red-50 bg-white shadow-sm shrink-0"
+                            onClick={() => {
+                              if (!selectedBomVersionId) return;
+                              openDeleteConfirm("Delete this BOM version?", "BOM Version", async (action) => {
+                                try {
+                                  const resp = await apiFetch(`/api/boq-versions/${encodeURIComponent(selectedBomVersionId)}?action=${action}`, { method: "DELETE" });
+                                  if (resp.ok) {
+                                    toast({ title: action === 'trash' ? "Moved to Trash" : "Archived", description: "BOM Version removed" });
+                                    const bomResp = await apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId)}?type=bom`);
+                                    if (bomResp.ok) {
+                                      const bomData = await bomResp.json();
+                                      const bomList = bomData.versions || [];
+                                      setBomVersions(bomList);
+                                      if (bomList.length > 0) setSelectedBomVersionId(bomList[0].id);
+                                      else setSelectedBomVersionId(null);
+                                    }
+                                  }
+                                } catch (e) { console.error(e); toast({ title: "Error", description: "Failed to delete", variant: "destructive" }); }
+                              });
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
-                    </PopoverContent>
-                  </Popover>
+
+                      {/* Container 3: BOQ Version */}
+                      <div className="flex-[1] min-w-[200px] space-y-1">
+                        <div className="flex justify-between items-center px-1">
+                          <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">BOQ Version</Label>
+                          <button
+                            onClick={async () => {
+                              if (!confirm("Create a new BOQ version?")) return;
+                              try {
+                                const resp = await apiFetch("/api/boq-versions", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    project_id: selectedProjectId,
+                                    type: "boq",
+                                    copy_from_version: selectedBoqVersionId || selectedBomVersionId
+                                  })
+                                });
+                                if (resp.ok) {
+                                  const newVer = await resp.json();
+                                  toast({ title: "Success", description: "BOQ Version created" });
+                                  const boqResp = await apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId!)}?type=boq`);
+                                  if (boqResp.ok) {
+                                    const boqData = await boqResp.json();
+                                    setBoqVersions(boqData.versions || []);
+                                    setSelectedBomVersionId(null);
+                                    setSelectedBoqVersionId(newVer.id);
+                                  }
+                                }
+                              } catch (e) { console.error(e); toast({ title: "Error", description: "Failed to create BOQ version", variant: "destructive" }); }
+                            }}
+                            className="text-[9px] text-emerald-600 font-bold hover:underline uppercase"
+                          >
+                            + Create
+                          </button>
+                        </div>
+                        <div className="flex gap-1.5">
+                          <Select
+                            value={selectedBoqVersionId || ""}
+                            onValueChange={(v) => { setSelectedBoqVersionId(v); setSelectedBomVersionId(null); }}
+                          >
+                            <SelectTrigger className="bg-slate-50 border-slate-200 h-9">
+                              <SelectValue placeholder="Select BOQ" />
+                            </SelectTrigger>
+                            <SelectContent className="max-h-[300px] overflow-y-auto">
+                              {filteredBoqVersions.map((v) => (
+                                <SelectItem value={v.id} key={v.id}>BOQ V{v.version_number} ({v.status})</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-9 w-9 text-slate-400 hover:text-red-500 border border-slate-200 hover:bg-red-50 bg-white shadow-sm shrink-0"
+                            onClick={() => {
+                              if (!selectedBoqVersionId) return;
+                              openDeleteConfirm("Delete this BOQ version?", "BOQ Version", async (action) => {
+                                try {
+                                  const resp = await apiFetch(`/api/boq-versions/${encodeURIComponent(selectedBoqVersionId)}?action=${action}`, { method: "DELETE" });
+                                  if (resp.ok) {
+                                    toast({ title: action === 'trash' ? "Moved to Trash" : "Archived", description: "BOQ Version removed" });
+                                    const boqResp = await apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId)}?type=boq`);
+                                    if (boqResp.ok) {
+                                      const boqData = await boqResp.json();
+                                      const boqList = boqData.versions || [];
+                                      setBoqVersions(boqList);
+                                      if (boqList.length > 0) setSelectedBoqVersionId(boqList[0].id);
+                                      else setSelectedBoqVersionId(null);
+                                    }
+                                  }
+                                } catch (e) { console.error(e); toast({ title: "Error", description: "Failed to delete", variant: "destructive" }); }
+                              });
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
-              )}
-            </div>
+
+                {/* Row 3: Status & Template Management */}
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
+                  {selectedProjectId && (() => {
+                    const selProj = projects.find(p => p.id === selectedProjectId);
+                    return (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase">Project Status:</span>
+                        <select
+                          className="text-xs border border-slate-200 rounded px-2 py-1 bg-white font-semibold focus:ring-1 ring-blue-400 outline-none"
+                          value={selProj?.project_status || 'started'}
+                          onChange={async (e) => {
+                            const newStatus = e.target.value;
+                            try {
+                              await apiFetch(`/api/boq-projects/${selectedProjectId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ project_status: newStatus }),
+                              });
+                              setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, project_status: newStatus } : p));
+                            } catch (err) { console.error('Failed to update project status', err); }
+                          }}
+                        >
+                          {PROJECT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                        </select>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="flex gap-2 h-9 ml-auto items-center">
+
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="bg-white border-slate-200 font-bold h-full px-4 flex items-center gap-2 text-[11px] shadow-sm">
+                          <LayoutTemplate className="h-4 w-4 text-blue-600" />
+                          <span>{selectedTemplateId ? templates.find(t => t.id === selectedTemplateId)?.name : "Apply Template"}</span>
+                          <ChevronDown className="h-3 w-3 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[200px] p-0" align="end">
+                        <div className="max-h-[250px] overflow-y-auto">
+                          {templates.length === 0 ? (
+                            <div className="p-3 text-center text-xs text-slate-400">No templates</div>
+                          ) : (
+                            <div className="p-1">
+                              {templates.map((t) => (
+                                <div
+                                  key={t.id}
+                                  className="flex items-center justify-between p-2 rounded hover:bg-slate-100 cursor-pointer group"
+                                  onClick={() => handleApplyTemplate(t.id)}
+                                >
+                                  <span className="text-xs font-bold truncate">{t.name}</span>
+                                  <Trash2
+                                    className="h-3.5 w-3.5 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"
+                                    onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(t.id); }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="h-full px-4 border-blue-200 text-blue-700 hover:bg-blue-50 text-[11px] font-bold shadow-sm"
+                      onClick={() => setIsSaveTemplateDialogOpen(true)}
+                    >
+                      SAVE AS TEMPLATE
+                    </Button>
+                  </div>
+                </div>
 
             {/* Compact Summary Bar */}
             {activeVersion && (
@@ -3577,6 +3583,7 @@ export default function FinalizeBoq() {
                               setCustomColumns={setCustomColumns}
                               setCustomColumnValues={setCustomColumnValues}
                               setGlobalColSettings={setGlobalColSettings}
+                              openDeleteConfirm={openDeleteConfirm}
                             />
                           );
                         })}
