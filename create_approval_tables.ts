@@ -69,6 +69,7 @@ async function createTables() {
         base_qty DECIMAL(15, 2),
         wastage_pct DECIMAL(15, 2),
         apply_wastage BOOLEAN,
+        freeze_and_edit BOOLEAN DEFAULT FALSE,
         shop_name TEXT
       )
     `);

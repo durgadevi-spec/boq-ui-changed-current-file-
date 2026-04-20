@@ -30,6 +30,8 @@ export const ALL_SIDEBAR_MODULES = [
   { key: "subscription", label: "Subscription" },
   { key: "user_manual", label: "User Manual" },
   { key: "sketch_plan", label: "Sketch a Plan" },
+  { key: "access_control", label: "Access Control" },
+  { key: "spy", label: "Spy (Activity Log)" },
   // ── Create Product: granular sub-permissions ──────────────────────────────
   { key: "create_product_category", label: "Create Product → Manage Categories (Page Access)" },
   { key: "create_product_category_add", label: "Categories → Add Category" },
@@ -54,7 +56,7 @@ export const ALL_SIDEBAR_MODULES = [
 export const PERMISSION_GROUPS = [
   {
     section: "Overview",
-    keys: ["dashboard", "project_dashboard", "alerts"],
+    keys: ["dashboard", "project_dashboard", "alerts", "access_control", "spy"],
   },
   {
     section: "Create Product",

@@ -40,6 +40,8 @@ interface PurchaseOrder {
     status: string;
     total_amount: string;
     delivery_date: string | null;
+    dc_number: string | null;
+    dc_date: string | null;
     created_at: string;
     project_name?: string;
     vendor_name?: string;
@@ -51,6 +53,12 @@ export default function DeliveryTracker() {
     const [orders, setOrders] = useState<PurchaseOrder[]>([]);
     const [loading, setLoading] = useState(true);
     const [updatingId, setUpdatingId] = useState<string | null>(null);
+
+    // Delivery confirmation dialog state
+    const [isConfirmingDelivery, setIsConfirmingDelivery] = useState(false);
+    const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+    const [dcNumber, setDcNumber] = useState("");
+    const [dcDate, setDcDate] = useState(new Date().toISOString().split('T')[0]);
 
     useEffect(() => {
         fetchOrders();
@@ -94,22 +102,41 @@ export default function DeliveryTracker() {
         }
     };
 
-    const handleMarkDelivered = async (id: string) => {
-        setUpdatingId(id);
+    const handleMarkDeliveredClick = (id: string) => {
+        setSelectedOrderId(id);
+        setIsConfirmingDelivery(true);
+        setDcNumber("");
+        setDcDate(new Date().toISOString().split('T')[0]);
+    };
+
+    const handleConfirmDelivery = async () => {
+        if (!selectedOrderId) return;
+        if (!dcNumber) {
+            toast({ title: "Required", description: "DC Number is mandatory for delivery.", variant: "destructive" });
+            return;
+        }
+
+        setUpdatingId(selectedOrderId);
         try {
-            const res = await apiFetch(`/api/purchase-orders/${id}/status`, {
+            const res = await apiFetch(`/api/purchase-orders/${selectedOrderId}/status`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ status: "delivered" }),
+                body: JSON.stringify({ 
+                    status: "delivered",
+                    dc_number: dcNumber,
+                    dc_date: dcDate
+                }),
             });
             if (res.ok) {
-                toast({ title: "Success", description: "Order marked as delivered." });
+                toast({ title: "Success", description: "Order marked as delivered with DC." });
+                setIsConfirmingDelivery(false);
                 fetchOrders();
             }
         } catch (error) {
             toast({ title: "Error", description: "Failed to update status", variant: "destructive" });
         } finally {
             setUpdatingId(null);
+            setSelectedOrderId(null);
         }
     };
 
@@ -160,6 +187,7 @@ export default function DeliveryTracker() {
                                     <TableHead className="font-bold">PO Number</TableHead>
                                     <TableHead className="font-bold">Project / Vendor</TableHead>
                                     <TableHead className="font-bold">Expected Delivery</TableHead>
+                                    <TableHead className="font-bold">DC info</TableHead>
                                     <TableHead className="font-bold">Status</TableHead>
                                     <TableHead className="text-right font-bold w-[200px]">Actions</TableHead>
                                 </TableRow>
@@ -167,7 +195,7 @@ export default function DeliveryTracker() {
                             <TableBody>
                                 {orders.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={5} className="text-center py-12 text-muted-foreground italic">
+                                        <TableCell colSpan={6} className="text-center py-12 text-muted-foreground italic">
                                             No active orders in transit.
                                         </TableCell>
                                     </TableRow>
@@ -205,6 +233,16 @@ export default function DeliveryTracker() {
                                                 </div>
                                             </TableCell>
                                             <TableCell>
+                                                <div className="text-xs text-slate-500 italic">
+                                                    {po.dc_number ? (
+                                                        <div className="flex flex-col">
+                                                            <span className="font-semibold text-slate-700">DC: {po.dc_number}</span>
+                                                            {po.dc_date && <span>Date: {new Date(po.dc_date).toLocaleDateString()}</span>}
+                                                        </div>
+                                                    ) : "Not issued"}
+                                                </div>
+                                            </TableCell>
+                                            <TableCell>
                                                 <Badge variant="outline" className="bg-indigo-50 text-indigo-600 border-indigo-200">
                                                     <Clock size={12} className="mr-1" /> In Transit
                                                 </Badge>
@@ -217,7 +255,7 @@ export default function DeliveryTracker() {
                                                     <Button
                                                         className="bg-emerald-600 hover:bg-emerald-700 text-white"
                                                         size="sm"
-                                                        onClick={() => handleMarkDelivered(po.id)}
+                                                        onClick={() => handleMarkDeliveredClick(po.id)}
                                                         disabled={updatingId === po.id}
                                                     >
                                                         <CheckCircle2 className="h-4 w-4 mr-1" /> Delivered
@@ -232,6 +270,57 @@ export default function DeliveryTracker() {
                     </CardContent>
                 </Card>
             </div>
+
+            {/* Delivery Confirmation Dialog */}
+            <Dialog open={isConfirmingDelivery} onOpenChange={setIsConfirmingDelivery}>
+                <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-emerald-600">
+                            <CheckCircle2 className="h-5 w-5" />
+                            Confirm Delivery
+                        </DialogTitle>
+                        <DialogDescription>
+                            Please enter the Delivery Challan (DC) details provided at the site.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                        <div className="grid gap-2">
+                            <label htmlFor="dc_number" className="text-sm font-medium">DC Number <span className="text-red-500">*</span></label>
+                            <Input
+                                id="dc_number"
+                                placeholder="Enter DC Number (e.g. DC-2024-001)"
+                                value={dcNumber}
+                                onChange={(e) => setDcNumber(e.target.value)}
+                            />
+                        </div>
+                        <div className="grid gap-2">
+                            <label htmlFor="dc_date" className="text-sm font-medium">DC Date</label>
+                            <Input
+                                id="dc_date"
+                                type="date"
+                                value={dcDate}
+                                onChange={(e) => setDcDate(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsConfirmingDelivery(false)}>Cancel</Button>
+                        <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleConfirmDelivery} disabled={!dcNumber || updatingId !== null}>
+                            {updatingId !== null ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CheckCircle2 className="h-4 w-4 mr-1" />}
+                            Confirm & Mark Delivered
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </Layout>
     );
 }
+
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter
+} from "@/components/ui/dialog";

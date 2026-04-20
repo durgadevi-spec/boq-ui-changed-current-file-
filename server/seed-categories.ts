@@ -104,15 +104,25 @@ export async function seedMaterialCategories(): Promise<void> {
     await query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS sac_code VARCHAR(255) DEFAULT NULL`);
 
     // Migration: Populate hsn_code and sac_code from tax_code_type/value if they are null
+    // Use smaller batch updates to avoid timeouts
+    console.log('[seed-categories] Migrating HSN/SAC codes...');
     await query(`
       UPDATE products 
       SET hsn_code = tax_code_value 
-      WHERE hsn_code IS NULL AND tax_code_type = 'hsn' AND tax_code_value IS NOT NULL
+      WHERE id IN (
+        SELECT id FROM products 
+        WHERE hsn_code IS NULL AND tax_code_type = 'hsn' AND tax_code_value IS NOT NULL
+        LIMIT 1000
+      )
     `);
     await query(`
       UPDATE products 
       SET sac_code = tax_code_value 
-      WHERE sac_code IS NULL AND tax_code_type = 'sac' AND tax_code_value IS NOT NULL
+      WHERE id IN (
+        SELECT id FROM products 
+        WHERE sac_code IS NULL AND tax_code_type = 'sac' AND tax_code_value IS NOT NULL
+        LIMIT 1000
+      )
     `);
 
     console.log('[seed-categories] ✓ products table ready');

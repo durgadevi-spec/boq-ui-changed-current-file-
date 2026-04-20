@@ -425,6 +425,172 @@ export async function sendAuditSummaryEmail(
 }
 
 /**
+ * Send Material Rate Change Notification to Admins
+ */
+export async function sendMaterialRateChangeEmail(
+  adminEmails: string[],
+  changeInfo: {
+    materialName: string;
+    materialCode?: string;
+    category?: string;
+    oldRate: number | string;
+    newRate: number | string;
+    changedBy: string;
+    changedByRole?: string;
+    shopName?: string;
+    materialId: string;
+  }
+) {
+  if (!resend) {
+    console.warn("[EMAIL] Resend not configured — skipping material rate change notification");
+    return;
+  }
+
+  if (!adminEmails || adminEmails.length === 0) {
+    console.warn("[EMAIL] No admin emails provided for rate change notification");
+    return;
+  }
+
+  const {
+    materialName,
+    materialCode,
+    category,
+    oldRate,
+    newRate,
+    changedBy,
+    changedByRole,
+    shopName,
+    materialId,
+  } = changeInfo;
+
+  const oldRateNum = parseFloat(String(oldRate)) || 0;
+  const newRateNum = parseFloat(String(newRate)) || 0;
+  const diff = newRateNum - oldRateNum;
+  const isIncrease = diff > 0;
+  const percentChange = oldRateNum > 0 ? ((Math.abs(diff) / oldRateNum) * 100).toFixed(1) : "N/A";
+  const changeColor = isIncrease ? "#ef4444" : "#10b981";
+  const changeLabel = isIncrease ? "📈 INCREASED" : "📉 DECREASED";
+  const changeArrow = isIncrease ? "▲" : "▼";
+
+  const emailHtml = `
+    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 650px; margin: 0 auto; padding: 0; background-color: #f8fafc;">
+      
+      <!-- Header -->
+      <div style="background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%); padding: 28px 30px; border-radius: 8px 8px 0 0; text-align: center;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: 0.5px;">
+          🔔 Material Rate Change Alert
+        </h1>
+        <p style="color: #bfdbfe; margin: 6px 0 0 0; font-size: 14px;">BOQ Management System — Admin Notification</p>
+      </div>
+
+      <!-- Alert Banner -->
+      <div style="background-color: ${isIncrease ? '#fef2f2' : '#ecfdf5'}; border-left: 5px solid ${changeColor}; padding: 14px 20px; margin: 0;">
+        <p style="margin: 0; color: ${changeColor}; font-weight: 700; font-size: 16px;">
+          ${changeArrow} Rate ${changeLabel} by ₹${Math.abs(diff).toFixed(2)} (${percentChange}%)
+        </p>
+      </div>
+
+      <!-- Material Details Card -->
+      <div style="background-color: #ffffff; padding: 28px 30px; margin: 0; border: 1px solid #e2e8f0;">
+        
+        <h2 style="font-size: 16px; color: #1e40af; border-left: 4px solid #2563eb; padding-left: 12px; margin: 0 0 20px 0;">
+          Material Details
+        </h2>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 24px;">
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 10px 8px; color: #64748b; font-weight: 600; width: 40%;">Material Name</td>
+            <td style="padding: 10px 8px; color: #0f172a; font-weight: 700;">${materialName || "N/A"}</td>
+          </tr>
+          ${materialCode ? `
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 10px 8px; color: #64748b; font-weight: 600;">Material Code</td>
+            <td style="padding: 10px 8px; color: #0f172a;">${materialCode}</td>
+          </tr>` : ""}
+          ${category ? `
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 10px 8px; color: #64748b; font-weight: 600;">Category</td>
+            <td style="padding: 10px 8px; color: #0f172a;">${category}</td>
+          </tr>` : ""}
+          ${shopName ? `
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 10px 8px; color: #64748b; font-weight: 600;">Vendor / Shop</td>
+            <td style="padding: 10px 8px; color: #0f172a;">${shopName}</td>
+          </tr>` : ""}
+        </table>
+
+        <!-- Rate Change Highlight Box -->
+        <div style="background-color: #f8fafc; border-radius: 10px; padding: 20px; border: 1px solid #e2e8f0; text-align: center; margin-bottom: 24px;">
+          <p style="margin: 0 0 16px 0; font-size: 13px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Rate Change Summary</p>
+          <div style="display: inline-table; width: 100%;">
+            <div style="display: table-cell; width: 33%; vertical-align: middle; padding: 10px;">
+              <p style="margin: 0; color: #64748b; font-size: 12px; font-weight: 600; margin-bottom: 6px;">PREVIOUS RATE</p>
+              <p style="margin: 0; color: #475569; font-size: 24px; font-weight: 700;">₹${oldRateNum.toFixed(2)}</p>
+            </div>
+            <div style="display: table-cell; width: 33%; vertical-align: middle; padding: 10px; text-align: center;">
+              <p style="margin: 0; color: ${changeColor}; font-size: 28px; font-weight: 900;">${changeArrow}</p>
+              <p style="margin: 4px 0 0 0; color: ${changeColor}; font-size: 12px; font-weight: 700;">${percentChange !== "N/A" ? percentChange + "%" : ""}</p>
+            </div>
+            <div style="display: table-cell; width: 33%; vertical-align: middle; padding: 10px;">
+              <p style="margin: 0; color: #64748b; font-size: 12px; font-weight: 600; margin-bottom: 6px;">NEW RATE</p>
+              <p style="margin: 0; color: ${changeColor}; font-size: 24px; font-weight: 700;">₹${newRateNum.toFixed(2)}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Changed By Info -->
+        <h2 style="font-size: 16px; color: #1e40af; border-left: 4px solid #2563eb; padding-left: 12px; margin: 0 0 16px 0;">
+          Change Details
+        </h2>
+        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 10px 8px; color: #64748b; font-weight: 600; width: 40%;">Changed By</td>
+            <td style="padding: 10px 8px; color: #0f172a; font-weight: 600;">${changedBy}</td>
+          </tr>
+          ${changedByRole ? `
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 10px 8px; color: #64748b; font-weight: 600;">Role</td>
+            <td style="padding: 10px 8px; color: #0f172a;">${changedByRole}</td>
+          </tr>` : ""}
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 10px 8px; color: #64748b; font-weight: 600;">Timestamp</td>
+            <td style="padding: 10px 8px; color: #0f172a;">${new Date().toLocaleString("en-IN", { dateStyle: "full", timeStyle: "medium" })}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 8px; color: #64748b; font-weight: 600;">Material ID</td>
+            <td style="padding: 10px 8px; color: #94a3b8; font-size: 12px; font-family: monospace;">${materialId}</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Footer -->
+      <div style="background-color: #f1f5f9; padding: 20px 30px; border-radius: 0 0 8px 8px; text-align: center; border: 1px solid #e2e8f0; border-top: none;">
+        <p style="margin: 0; font-size: 13px; color: #64748b;">
+          ⚠️ This is an automated alert from the <strong>BOQ Management System</strong>.
+        </p>
+        <p style="margin: 6px 0 0 0; font-size: 12px; color: #94a3b8;">
+          Please review this change and take action if required. &copy; ${new Date().getFullYear()} Concept Trunk Interiors.
+        </p>
+      </div>
+    </div>
+  `;
+
+  try {
+    const response = await resend.emails.send({
+      from: fromEmail,
+      to: adminEmails,
+      subject: `🔔 Rate Alert: ${materialName} — ₹${oldRateNum.toFixed(2)} → ₹${newRateNum.toFixed(2)} (${isIncrease ? "+" : "-"}${Math.abs(diff).toFixed(2)})`,
+      html: emailHtml,
+    });
+    console.log("[EMAIL] Material rate change notification sent to admins:", adminEmails);
+    return response;
+  } catch (error) {
+    console.error("[EMAIL ERROR] sendMaterialRateChangeEmail:", error);
+    // Don't throw — email failure should not block the rate update
+  }
+}
+
+/**
  * Send Proposal Status Email (Approved/Rejected)
  */
 export async function sendProposalStatusEmail(
@@ -476,5 +642,78 @@ export async function sendProposalStatusEmail(
   } catch (error) {
     console.error("[EMAIL ERROR] sendProposalStatusEmail:", error);
     throw error;
+  }
+}
+
+/**
+ * Send BOM Comment Mention Notification Email
+ * Triggered when a user is tagged (@mentioned) in a BOM comment
+ */
+export async function sendCommentMentionEmail(
+  toEmails: string[],
+  info: {
+    mentionedNames: string[];
+    senderName: string;
+    commentText: string;
+    threadName: string;
+    projectName?: string;
+    versionNumber?: number | string;
+  }
+) {
+  if (!resend) {
+    console.warn("[EMAIL] Resend not configured — skipping comment mention notification");
+    return;
+  }
+  if (!toEmails || toEmails.length === 0) {
+    console.warn("[EMAIL] No recipient emails for comment mention");
+    return;
+  }
+
+  const { mentionedNames, senderName, commentText, threadName, projectName, versionNumber } = info;
+
+  const emailHtml = `
+    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 0; background-color: #f8fafc;">
+      <div style="background: linear-gradient(135deg, #075e54 0%, #128c7e 100%); padding: 24px 28px; border-radius: 8px 8px 0 0; text-align: center;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: 700;">💬 You were mentioned in a BOQ comment</h1>
+        <p style="color: #d1fae5; margin: 6px 0 0 0; font-size: 13px;">BOQ Management System — Discussion Notification</p>
+      </div>
+      <div style="background-color: #ffffff; padding: 28px 28px 20px 28px; border: 1px solid #e2e8f0;">
+        <p style="margin: 0 0 16px 0; font-size: 15px; color: #1e293b;">Hi <strong>${mentionedNames.join(", ")}</strong>,</p>
+        <p style="margin: 0 0 20px 0; font-size: 14px; color: #475569; line-height: 1.6;"><strong>${senderName}</strong> mentioned you in a BOQ discussion.</p>
+        <div style="background-color: #f1f5f9; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px; border: 1px solid #e2e8f0;">
+          <table style="width: 100%; font-size: 13px;">
+            ${projectName ? `<tr><td style="padding: 3px 0; color: #64748b; font-weight: 600; width: 40%;">Project</td><td style="color: #0f172a;">${projectName}</td></tr>` : ""}
+            ${versionNumber ? `<tr><td style="padding: 3px 0; color: #64748b; font-weight: 600;">Version</td><td style="color: #0f172a;">v${versionNumber}</td></tr>` : ""}
+            <tr><td style="padding: 3px 0; color: #64748b; font-weight: 600;">Thread</td><td style="color: #0f172a;">${threadName}</td></tr>
+          </table>
+        </div>
+        <div style="margin-bottom: 24px;">
+          <p style="margin: 0 0 8px 0; font-size: 12px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Message</p>
+          <div style="background-color: #dcf8c6; border-radius: 0 12px 12px 12px; padding: 14px 16px; border: 1px solid #b7eb8f;">
+            <p style="margin: 0 0 6px 0; font-size: 12px; color: #128c7e; font-weight: 700;">${senderName}</p>
+            <p style="margin: 0; font-size: 14px; color: #1e293b; line-height: 1.6;">${commentText}</p>
+            <p style="margin: 6px 0 0 0; font-size: 11px; color: #94a3b8; text-align: right;">${new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</p>
+          </div>
+        </div>
+        <p style="margin: 0; font-size: 13px; color: #64748b; line-height: 1.5;">Please log in to the BOQ Management System to view the full conversation and reply.</p>
+      </div>
+      <div style="background-color: #f1f5f9; padding: 16px 28px; border-radius: 0 0 8px 8px; text-align: center; border: 1px solid #e2e8f0; border-top: none;">
+        <p style="margin: 0; font-size: 12px; color: #94a3b8;">Automated notification from <strong>BOQ Management System</strong>. &copy; ${new Date().getFullYear()} Concept Trunk Interiors.</p>
+      </div>
+    </div>
+  `;
+
+  try {
+    const response = await resend.emails.send({
+      from: fromEmail,
+      to: toEmails,
+      subject: `💬 ${senderName} mentioned you in a BOQ comment — ${threadName}`,
+      html: emailHtml,
+    });
+    console.log("[EMAIL] Comment mention notification sent to:", toEmails);
+    return response;
+  } catch (error) {
+    console.error("[EMAIL ERROR] sendCommentMentionEmail:", error);
+    // Don't throw — email failure should not block the comment
   }
 }

@@ -1,23 +1,29 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useData } from "@/lib/store";
+import { getJSON } from "@/lib/api";
 import {
   MessageSquare,
   Send,
   Trash2,
   Loader2,
   AlertCircle,
+  MoreVertical,
+  Check,
+  CheckCheck,
+  Paperclip,
+  Smile,
+  User,
+  ShieldCheck,
 } from "lucide-react";
 import { SupplierLayout } from "@/components/layout/SupplierLayout";
 import { DeleteConfirmationDialog } from "@/components/ui/DeleteConfirmationDialog";
@@ -27,7 +33,9 @@ interface Message {
   sender_name?: string;
   message: string;
   additional_info?: string;
+  admin_reply?: string;
   submitted_at: string;
+  is_read?: boolean;
 }
 
 export function SupplierSupport({
@@ -38,34 +46,36 @@ export function SupplierSupport({
   shopLocation?: string;
 }) {
   const { toast } = useToast();
-  const { addSupportMessage, deleteMessage, supportMessages } = useData();
+  const { addSupportMessage, deleteMessage, user } = useData();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [name, setName] = useState(user?.fullName || user?.username || "");
+  const [email, setEmail] = useState(user?.username || "");
   const [message, setMessage] = useState("");
   const [deleteDialog, setDeleteDialog] = useState<{ isOpen: boolean; id: string; name: string } | null>(null);
+  
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadMessages();
   }, []);
 
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
   const loadMessages = async () => {
     try {
-      const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/support-messages", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-
-      if (!response.ok) {
-        console.error("Failed to load messages");
-        setLoading(false);
-        return;
-      }
-
-      const data = await response.json();
-      setMessages(data.messages || []);
+      setLoading(true);
+      const data = await getJSON('/support-messages');
+      // Filter messages for this supplier if email is known
+      const filtered = (data.messages || []).filter((m: any) => 
+        !email || m.sender_email === email || m.sender_name === name
+      );
+      setMessages(filtered);
     } catch (error) {
       console.error("Error loading messages:", error);
     } finally {
@@ -73,39 +83,27 @@ export function SupplierSupport({
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
 
-    if (!name.trim()) {
-      toast({
-        title: "Error",
-        description: "Please enter your name",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!message.trim()) {
-      toast({
-        title: "Error",
-        description: "Please enter your message",
-        variant: "destructive",
-      });
-      return;
-    }
+    if (!message.trim()) return;
 
     setSubmitting(true);
     try {
-      await addSupportMessage?.(name, message, email);
-      toast({
-        title: "Success",
-        description:
-          "Your message has been submitted. Our team will respond shortly.",
-      });
-      setName("");
-      setEmail("");
+      const response = await addSupportMessage?.(name || "Vendor", message);
+      
+      // Update local state immediately if response returned a message
+      if (response && typeof response === 'object') {
+        setMessages(prev => [...prev, response]);
+      } else {
+        await loadMessages();
+      }
+      
       setMessage("");
-      await loadMessages();
+      toast({
+        title: "Sent",
+        description: "Message delivered to support team",
+      });
     } catch (error) {
       toast({
         title: "Error",
@@ -118,8 +116,6 @@ export function SupplierSupport({
   };
 
   const handleDeleteMessage = async (id: string) => {
-    const msg = messages.find(m => m.id === id);
-    if (!msg) return;
     setDeleteDialog({
       isOpen: true,
       id: id,
@@ -127,7 +123,7 @@ export function SupplierSupport({
     });
   };
 
-  const confirmDeleteMessage = async (action: 'archive' | 'trash') => {
+  const confirmDeleteMessage = async () => {
     if (!deleteDialog) return;
     const { id } = deleteDialog;
     
@@ -135,8 +131,8 @@ export function SupplierSupport({
       await deleteMessage?.(id);
       setMessages(messages.filter((m) => m.id !== id));
       toast({
-        title: "Success",
-        description: action === 'trash' ? "Message moved to trash" : "Message archived",
+        title: "Deleted",
+        description: "Message removed from history",
       });
     } catch (error) {
       toast({
@@ -151,192 +147,152 @@ export function SupplierSupport({
 
   return (
     <SupplierLayout shopName={shopName} shopLocation={shopLocation} shopApproved={true}>
-      <div className="p-6 lg:p-8 max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-2 mb-2">
-            <MessageSquare size={24} className="text-blue-600" />
-            <h1 className="text-3xl font-bold text-gray-900">
-              Messages & Support
-            </h1>
+      <div className="flex flex-col h-[calc(100vh-64px)] lg:h-screen bg-[#F0F2F5] overflow-hidden">
+        
+        {/* Support Header */}
+        <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-10 shadow-sm">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-100">
+              <ShieldCheck size={24} strokeWidth={2.5} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="font-black text-slate-900 tracking-tight">Software Support Team</h2>
+                <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-[10px] h-5 px-1.5 animate-pulse">ACTIVE</Badge>
+              </div>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                <span className="text-[11px] text-slate-400 font-bold uppercase tracking-widest">Protocol Online</span>
+              </div>
+            </div>
           </div>
-          <p className="text-gray-600 mt-2">
-            Get help from our technical support team. Submit your questions or
-            issues below.
+          <div className="flex items-center gap-4 text-slate-400">
+            <MoreVertical size={20} className="cursor-pointer hover:text-slate-900 transition-colors" />
+          </div>
+        </div>
+
+        {/* Chat Area */}
+        <div 
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto px-4 py-6 space-y-6 scroll-smooth"
+          style={{ backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')", backgroundBlendMode: 'overlay', backgroundColor: '#efe7dd' }}
+        >
+          {loading ? (
+            <div className="flex items-center justify-center h-full">
+              <Loader2 className="animate-spin text-blue-600" />
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="bg-white/90 p-4 rounded-xl shadow-sm max-w-sm mx-auto text-center border border-yellow-100">
+              <p className="text-sm text-gray-600 font-medium">
+                🔒 Messages are end-to-end encrypted. No one outside of this chat, not even BOQ, can read them.
+              </p>
+              <p className="text-xs text-blue-600 mt-2 font-bold uppercase tracking-wider">Start a conversation below</p>
+            </div>
+          ) : (
+            <div className="flex flex-col space-y-4 max-w-3xl mx-auto w-full">
+              {messages.map((msg) => (
+                <div key={msg.id} className="space-y-4">
+                  {/* Supplier Message (Right) */}
+                  <div className="flex justify-end group">
+                    <div className="relative max-w-[85%] lg:max-w-[70%] bg-[#dcf8c6] p-2.5 rounded-2xl rounded-tr-none shadow-sm border-l-4 border-l-green-200">
+                      <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+                        {msg.message}
+                      </p>
+                      <div className="flex items-center justify-end gap-1 mt-1">
+                        <span className="text-[10px] text-gray-500 font-medium whitespace-nowrap">
+                          {new Date(msg.submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        {msg.is_read ? (
+                          <CheckCheck size={14} className="text-blue-500" />
+                        ) : (
+                          <Check size={14} className="text-gray-400" />
+                        )}
+                      </div>
+                      <button 
+                        onClick={() => handleDeleteMessage(msg.id)}
+                        className="absolute -left-8 top-1 opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-all"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Admin Reply (Left) */}
+                  {msg.admin_reply && (
+                    <div className="flex justify-start">
+                      <div className="relative max-w-[85%] lg:max-w-[70%] bg-white p-2.5 rounded-2xl rounded-tl-none shadow-sm border-l-4 border-l-blue-200">
+                        <p className="text-[10px] font-black text-blue-600 uppercase tracking-tighter mb-1">Support Team</p>
+                        <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+                          {msg.admin_reply}
+                        </p>
+                        <div className="flex items-center justify-end mt-1">
+                          <span className="text-[10px] text-gray-400 font-medium">
+                            {new Date(msg.submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Input Bar */}
+        <div className="bg-[#f0f2f5] px-4 py-3 border-t border-gray-200">
+          <div className="flex items-center gap-3 max-w-4xl mx-auto">
+            <div className="flex items-center gap-3 text-gray-500">
+              <Smile size={24} className="cursor-pointer hover:text-gray-700" />
+              <Paperclip size={24} className="cursor-pointer hover:text-gray-700" />
+            </div>
+            
+            <div className="flex-1 relative">
+              <Textarea
+                placeholder="Type a message"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
+                className="min-h-[44px] max-h-32 py-3 px-4 rounded-xl border-none focus:ring-0 resize-none shadow-sm leading-tight bg-white"
+              />
+            </div>
+
+            <Button
+              onClick={() => handleSubmit()}
+              disabled={submitting || !message.trim()}
+              className={`
+                h-11 w-11 rounded-full p-0 flex items-center justify-center transition-all
+                ${message.trim() ? "bg-blue-600 hover:bg-blue-700 shadow-lg scale-100" : "bg-gray-400 opacity-50 scale-90"}
+              `}
+            >
+              {submitting ? (
+                <Loader2 size={20} className="animate-spin text-white" />
+              ) : (
+                <Send size={20} className="text-white ml-0.5" />
+              )}
+            </Button>
+          </div>
+          <p className="text-[10px] text-center text-gray-400 mt-2 font-medium">
+            Shift + Enter for new line
           </p>
         </div>
 
-        {/* Submit Form */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle>Submit a Message</CardTitle>
-            <CardDescription>
-              Tell us how we can help. Our team typically responds within 24
-              hours.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="name">
-                    Name <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="name"
-                    type="text"
-                    placeholder="Your name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                    className="mt-2"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="email">Email (Optional)</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="your.email@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="mt-2"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="message">
-                  Message <span className="text-red-500">*</span>
-                </Label>
-                <Textarea
-                  id="message"
-                  placeholder="Describe your issue or question in detail..."
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  required
-                  className="mt-2 min-h-32"
-                />
-              </div>
-
-              <Button
-                type="submit"
-                disabled={submitting}
-                className="w-full bg-blue-600 hover:bg-blue-700"
-              >
-                {submitting ? (
-                  <>
-                    <Loader2 size={16} className="mr-2 animate-spin" />
-                    Submitting...
-                  </>
-                ) : (
-                  <>
-                    <Send size={16} className="mr-2" />
-                    Send Message
-                  </>
-                )}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        {/* Messages History */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Your Messages</CardTitle>
-            <CardDescription>
-              Track your submitted messages and responses
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-6 h-6 text-blue-600 animate-spin mr-2" />
-                <span className="text-gray-600">Loading messages...</span>
-              </div>
-            ) : messages.length === 0 ? (
-              <div className="py-8 text-center">
-                <MessageSquare className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-600">
-                  No messages yet. Submit one above to get started!
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className="p-4 bg-gray-50 rounded-lg border border-gray-200"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <p className="font-semibold text-gray-900">
-                          {msg.sender_name || "Anonymous"}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {new Date(msg.submitted_at).toLocaleDateString(
-                            "en-US",
-                            {
-                              year: "numeric",
-                              month: "short",
-                              day: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            }
-                          )}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => handleDeleteMessage(msg.id)}
-                        className="p-2 hover:bg-red-100 rounded-lg text-red-600 transition"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-
-                    <p className="text-gray-700 mb-2">{msg.message}</p>
-
-                    {msg.additional_info && (
-                      <div className="p-2 bg-blue-50 rounded border border-blue-200 text-xs text-blue-800">
-                        <strong>Additional Info:</strong> {msg.additional_info}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Info Card */}
-        <Card className="mt-6">
-          <CardContent className="pt-6">
-            <div className="flex gap-3">
-              <AlertCircle className="text-blue-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="font-semibold text-gray-900 mb-1">
-                  Response Time
-                </p>
-                <p className="text-sm text-gray-700">
-                  Our technical support team typically responds to all messages
-                  within 24 business hours. For urgent issues, please mark them
-                  as priority in your message.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {deleteDialog && (
+          <DeleteConfirmationDialog
+            isOpen={deleteDialog.isOpen}
+            onOpenChange={(open) => !open && setDeleteDialog(null)}
+            onConfirm={confirmDeleteMessage}
+            itemName={deleteDialog.name}
+            title="Delete Message?"
+          />
+        )}
       </div>
-
-      {deleteDialog && (
-        <DeleteConfirmationDialog
-          isOpen={deleteDialog.isOpen}
-          onOpenChange={(open) => !open && setDeleteDialog(null)}
-          onConfirm={confirmDeleteMessage}
-          itemName={deleteDialog.name}
-          title="Delete Support Message?"
-        />
-      )}
     </SupplierLayout>
   );
 }
+

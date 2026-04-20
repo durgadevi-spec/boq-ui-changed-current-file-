@@ -32,6 +32,8 @@ interface UserEntry {
   last_active?: string;
 }
 
+import { Layout } from "@/components/layout/Layout";
+
 export default function AdminAccessControl() {
   const { toast } = useToast();
 
@@ -139,189 +141,196 @@ export default function AdminAccessControl() {
   );
 
   return (
-    <div className="min-h-screen bg-background pb-20">
-      {/* HEADER */}
-      <div className="sticky top-0 z-10 border-b bg-white/70 backdrop-blur px-6 py-5">
-        <div className="max-w-7xl mx-auto flex justify-between">
-          <div className="flex items-center gap-4">
-            <div className="h-12 w-12 flex items-center justify-center rounded-xl bg-primary/10">
-              <ShieldCheck className="h-6 w-6 text-primary" />
+    <Layout>
+      <div className="pb-20">
+        {/* HEADER */}
+        <div className="sticky top-0 z-10 border-b bg-white/70 backdrop-blur px-6 py-5 -mx-4 md:-mx-8">
+          <div className="max-w-7xl mx-auto flex justify-between">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 flex items-center justify-center rounded-xl bg-primary/10">
+                <ShieldCheck className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-semibold">User Access Control</h1>
+                <p className="text-sm text-muted-foreground">
+                  Manage permissions and modules
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-semibold">User Access Control</h1>
-              <p className="text-sm text-muted-foreground">
-                Manage permissions and modules
+
+            <Button variant="outline" onClick={() => { fetchPending(); fetchManaged(); }}>
+              <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+            </Button>
+          </div>
+        </div>
+
+        <div className="max-w-7xl mx-auto mt-8 space-y-6">
+
+          {/* ANALYTICS */}
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="p-4 border rounded-xl bg-white shadow-sm">
+              <p className="text-xs text-muted-foreground">Total Users</p>
+              <p className="text-xl font-semibold">
+                {pendingUsers.length + managedUsers.length}
               </p>
             </div>
+            <div className="p-4 border rounded-xl bg-white shadow-sm">
+              <p className="text-xs text-muted-foreground">Pending</p>
+              <p className="text-xl font-semibold">{pendingUsers.length}</p>
+            </div>
+            <div className="p-4 border rounded-xl bg-white shadow-sm">
+              <p className="text-xs text-muted-foreground">Managed</p>
+              <p className="text-xl font-semibold">{managedUsers.length}</p>
+            </div>
           </div>
 
-          <Button variant="outline" onClick={() => { fetchPending(); fetchManaged(); }}>
-            <RefreshCw className="h-4 w-4 mr-2" /> Refresh
-          </Button>
-        </div>
-      </div>
+          <Tabs defaultValue="pending">
+            <TabsList className="rounded-xl bg-muted/50 p-1.5">
+              <TabsTrigger value="pending">Pending</TabsTrigger>
+              <TabsTrigger value="managed">Managed</TabsTrigger>
+            </TabsList>
 
-      <div className="max-w-7xl mx-auto px-6 mt-8 space-y-6">
+            {/* PENDING */}
+            <TabsContent value="pending" className="mt-4">
+              <Input
+                placeholder="Search users..."
+                value={searchPending}
+                onChange={(e) => setSearchPending(e.target.value)}
+                className="mb-4"
+              />
 
-        {/* ANALYTICS */}
-        <div className="grid md:grid-cols-3 gap-4">
-          <div className="p-4 border rounded-xl bg-white">
-            <p className="text-xs text-muted-foreground">Total Users</p>
-            <p className="text-xl font-semibold">
-              {pendingUsers.length + managedUsers.length}
-            </p>
-          </div>
-          <div className="p-4 border rounded-xl bg-white">
-            <p className="text-xs text-muted-foreground">Pending</p>
-            <p className="text-xl font-semibold">{pendingUsers.length}</p>
-          </div>
-          <div className="p-4 border rounded-xl bg-white">
-            <p className="text-xs text-muted-foreground">Managed</p>
-            <p className="text-xl font-semibold">{managedUsers.length}</p>
-          </div>
-        </div>
+              {loadingPending ? (
+                <div className="space-y-3">
+                  {[...Array(5)].map((_, i) => (
+                    <div key={i} className="h-16 bg-muted animate-pulse rounded-xl" />
+                  ))}
+                </div>
+              ) : (
+                <div className="grid gap-4">
+                  {filteredPending.map((user) => (
+                    <div key={user.id} className="flex justify-between p-4 border rounded-xl bg-white shadow-sm">
 
-        <Tabs defaultValue="pending">
-          <TabsList className="rounded-xl bg-muted/50 p-1.5">
-            <TabsTrigger value="pending">Pending</TabsTrigger>
-            <TabsTrigger value="managed">Managed</TabsTrigger>
-          </TabsList>
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedUsers.includes(user.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedUsers([...selectedUsers, user.id]);
+                            } else {
+                              setSelectedUsers(selectedUsers.filter(id => id !== user.id));
+                            }
+                          }}
+                          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        />
 
-          {/* PENDING */}
-          <TabsContent value="pending">
-            <Input
-              placeholder="Search users..."
-              value={searchPending}
-              onChange={(e) => setSearchPending(e.target.value)}
-              className="mb-4"
-            />
-
-            {loadingPending ? (
-              <div className="space-y-3">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-16 bg-muted animate-pulse rounded-xl" />
-                ))}
-              </div>
-            ) : (
-              <div className="grid gap-4">
-                {filteredPending.map((user) => (
-                  <div key={user.id} className="flex justify-between p-4 border rounded-xl bg-white shadow-sm">
-
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="checkbox"
-                        checked={selectedUsers.includes(user.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedUsers([...selectedUsers, user.id]);
-                          } else {
-                            setSelectedUsers(selectedUsers.filter(id => id !== user.id));
-                          }
-                        }}
-                      />
-
-                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        {user.username.charAt(0)}
-                      </div>
-
-                      <div>
-                        <p className="font-medium">{user.username}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Joined {new Date(user.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2 items-center">
-                      <Badge className={roleColor(user.role)}>{user.role}</Badge>
-                      <Button size="sm" onClick={() => openAssignDialog(user)}>
-                        Assign
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </TabsContent>
-
-          {/* MANAGED */}
-          <TabsContent value="managed">
-            <Input
-              placeholder="Search users..."
-              value={searchManaged}
-              onChange={(e) => setSearchManaged(e.target.value)}
-              className="mb-4"
-            />
-
-            {loadingManaged ? (
-              <div className="space-y-3">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-16 bg-muted animate-pulse rounded-xl" />
-                ))}
-              </div>
-            ) : (
-              <div className="grid gap-4">
-                {filteredManaged.map((user) => (
-                  <div key={user.id} className="p-4 border rounded-xl bg-white shadow-sm">
-
-                    <div className="flex justify-between">
-                      <div className="flex gap-4">
-                        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                          {user.username.charAt(0)}
+                        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center font-bold text-primary">
+                          {user.username.charAt(0).toUpperCase()}
                         </div>
+
                         <div>
-                          <p className="font-medium">{user.username}</p>
+                          <p className="font-medium text-slate-900">{user.username}</p>
                           <p className="text-xs text-muted-foreground">
-                            Assigned {user.assigned_at ? new Date(user.assigned_at).toLocaleDateString() : "-"}
+                            Joined {new Date(user.created_at).toLocaleDateString()}
                           </p>
                         </div>
                       </div>
 
-                      <Button size="sm" variant="outline" onClick={() => openAssignDialog(user)}>
-                        Edit
-                      </Button>
+                      <div className="flex gap-2 items-center">
+                        <Badge variant="secondary" className={roleColor(user.role)}>{user.role}</Badge>
+                        <Button size="sm" onClick={() => openAssignDialog(user)}>
+                          Assign Access
+                        </Button>
+                      </div>
                     </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
 
-                    <div className="flex flex-wrap gap-2 mt-3 pl-14">
-                      {user.modules?.map((m) => (
-                        <Badge key={m} className="flex gap-1 text-[10px] items-center py-0.5 px-2">
-                          {moduleIcons[m]}
-                          {getModuleLabel(m)}
-                        </Badge>
-                      ))}
-                      {user.projects && user.projects.length > 0 && (
-                        <Badge variant="outline" className="flex gap-1 text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200 items-center py-0.5 px-2">
-                          <Building2 className="h-3 w-3" />
-                          {user.projects.length} Project{user.projects.length > 1 ? 's' : ''}
-                        </Badge>
-                      )}
+            {/* MANAGED */}
+            <TabsContent value="managed" className="mt-4">
+              <Input
+                placeholder="Search users..."
+                value={searchManaged}
+                onChange={(e) => setSearchManaged(e.target.value)}
+                className="mb-4"
+              />
+
+              {loadingManaged ? (
+                <div className="space-y-3">
+                  {[...Array(5)].map((_, i) => (
+                    <div key={i} className="h-16 bg-muted animate-pulse rounded-xl" />
+                  ))}
+                </div>
+              ) : (
+                <div className="grid gap-4">
+                  {filteredManaged.map((user) => (
+                    <div key={user.id} className="p-4 border rounded-xl bg-white shadow-sm">
+
+                      <div className="flex justify-between items-center">
+                        <div className="flex gap-4 items-center">
+                          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center font-bold text-primary">
+                            {user.username.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="font-medium text-slate-900">{user.username}</p>
+                            <p className="text-xs text-muted-foreground">
+                              Assigned {user.assigned_at ? new Date(user.assigned_at).toLocaleDateString() : "-"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <Button size="sm" variant="outline" onClick={() => openAssignDialog(user)}>
+                          Edit Permissions
+                        </Button>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 mt-4 pl-14">
+                        {user.modules?.map((m) => (
+                          <Badge key={m} variant="outline" className="flex gap-1.5 text-[10px] items-center py-1 px-2.5 bg-slate-50">
+                            {moduleIcons[m]}
+                            {getModuleLabel(m)}
+                          </Badge>
+                        ))}
+                        {user.projects && user.projects.length > 0 && (
+                          <Badge variant="outline" className="flex gap-1.5 text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200 items-center py-1 px-2.5">
+                            <Building2 className="h-3 w-3" />
+                            {user.projects.length} Project{user.projects.length > 1 ? 's' : ''}
+                          </Badge>
+                        )}
+                        {(!user.modules || user.modules.length === 0) && (!user.projects || user.projects.length === 0) && (
+                          <span className="text-xs italic text-muted-foreground">No active permissions</span>
+                        )}
+                      </div>
+
                     </div>
-
-                  </div>
-                ))}
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
-      </div>
-
-      {/* BULK BAR */}
-      {selectedUsers.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white shadow-lg border px-6 py-3 rounded-xl flex gap-4">
-          <span>{selectedUsers.length} selected</span>
-          <Button size="sm">Assign Access</Button>
-          <Button size="sm" variant="outline" onClick={() => setSelectedUsers([])}>
-            Clear
-          </Button>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
         </div>
-      )}
 
-      <PermissionDialog
-        user={dialogUser}
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        onSaved={handleSaved}
-      />
-    </div>
+        {/* BULK BAR */}
+        {selectedUsers.length > 0 && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white shadow-2xl border border-primary/20 px-6 py-4 rounded-2xl flex items-center gap-6 z-50 animate-in fade-in slide-in-from-bottom-4">
+            <span className="font-bold text-sm">{selectedUsers.length} users selected</span>
+            <div className="h-4 w-[1px] bg-slate-200" />
+            <Button size="sm" className="shadow-sm">Assign Access</Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelectedUsers([])}>
+              Clear
+            </Button>
+          </div>
+        )}
+
+        <PermissionDialog
+          user={dialogUser}
+          open={dialogOpen}
+          onClose={() => setDialogOpen(false)}
+          onSaved={handleSaved}
+        />
+      </div>
+    </Layout>
   );
 }

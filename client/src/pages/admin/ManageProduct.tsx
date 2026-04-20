@@ -8,12 +8,15 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Search, Loader2, Plus, ArrowRight, ArrowLeft, Trash2, Edit, Check, XCircle, Layers, Copy, GripVertical, TrendingUp, AlertTriangle, Package } from "lucide-react";
+import { Search, Loader2, Plus, ArrowRight, ArrowLeft, Trash2, Edit, Check, XCircle, Layers, Copy, GripVertical, TrendingUp, TrendingDown, AlertTriangle, Package } from "lucide-react";
 import { Reorder } from "framer-motion";
 import { Textarea } from "@/components/ui/textarea";
+import * as XLSX from "xlsx";
 import apiFetch from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { Layout } from "@/components/layout/Layout";
+import { SupplierLayout } from "@/components/layout/SupplierLayout";
+import { useAuth } from "@/lib/auth-context";
 import { useLocation } from "wouter";
 import { computeBoq, UnitType } from "@/lib/boqCalc";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -22,9 +25,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DeleteConfirmationDialog } from "@/components/ui/DeleteConfirmationDialog";
 
-type Product = { id: string; name: string; subcategory: string; created_at: string; created_by?: string; image?: string };
+type Product = { id: string; name: string; subcategory: string; created_at: string; created_by?: string; image?: string; has_price_updates?: boolean; is_approved?: boolean };
 type Material = { id: string; name: string; unit: string; rate: number; category: string; subcategory: string; description?: string; shop_name?: string; shop_id?: string; shopId?: string; code?: string; hsn_code?: string; sac_code?: string; technicalspecification?: string; technicalSpecification?: string; created_at?: string; brandName?: string; brand_name?: string; modelNumber?: string; model_number?: string };
-type SelectedMaterial = Material & { qty: number; baseQty: number; wastagePct?: number; amount: number; rate: number; supplyRate: number; installRate: number; location: string; applyWastage: boolean; applyRounding: boolean };
+type SelectedMaterial = Material & { qty: number; baseQty: number; wastagePct?: number; amount: number; rate: number; supplyRate: number; installRate: number; location: string; applyWastage: boolean; applyRounding: boolean; freezeAndEdit?: boolean };
 
 const ALL = "__ALL__";
 
@@ -54,6 +57,8 @@ const parseImages = (imageField: string | null | undefined): string[] => {
 };
 
 export default function ManageProduct() {
+    const { user } = useAuth();
+    const isSupplier = user?.role === "supplier";
     const [location] = useLocation();
     const [step, setStep] = useState(1);
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -87,8 +92,9 @@ export default function ManageProduct() {
     const [showTemplateSelector, setShowTemplateSelector] = useState(false);
     const [productForTemplate, setProductForTemplate] = useState<Product | null>(null);
     const [templates, setTemplates] = useState<any[]>([]);
-    const [userRole, setUserRole] = useState<string>("user");
-    const [supplierShops, setSupplierShops] = useState<string[]>([]);
+    const [supplierShops, setSupplierShops] = useState<any[]>([]);
+    const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+    const [isExporting, setIsExporting] = useState(false);
     const { toast } = useToast();
 
     const searchParams = useMemo(() => new URLSearchParams(location.split('?')[1] || ""), [location]);
@@ -149,26 +155,19 @@ export default function ManageProduct() {
         }
     }, [approvalIdParam, productIdParam, productsData, selectedProduct]);
     useEffect(() => {
-        const fetchUserData = async () => {
+        const fetchShops = async () => {
+            if (!isSupplier) return;
             try {
-                const res = await apiFetch("/api/me");
-                if (res.ok) {
-                    const data = await res.json();
-                    setUserRole(data.role || "user");
-                    
-                    if (data.role === "supplier") {
-                        const shopRes = await apiFetch("/api/supplier/my-shops");
-                        if (shopRes.ok) {
-                            const shopData = await shopRes.json();
-                            setSupplierShops((shopData.shops || []).map((s: any) => String(s.id)));
-                        }
-                    }
+                const shopRes = await apiFetch("/api/supplier/my-shops");
+                if (shopRes.ok) {
+                    const shopData = await shopRes.json();
+                    setSupplierShops(shopData.shops || []);
                 }
             } catch (e) {
-                console.error("Failed to fetch user data:", e);
+                console.error("Failed to fetch shops:", e);
             }
         };
-        fetchUserData();
+        fetchShops();
 
         const fetchTemplates = async () => {
             try {
@@ -182,7 +181,7 @@ export default function ManageProduct() {
             }
         };
         fetchTemplates();
-    }, []);
+    }, [isSupplier]);
 
     const updateProductImage = async (productId: string, imageUrl: string) => {
         try {
@@ -220,10 +219,7 @@ export default function ManageProduct() {
         }
     });
 
-    const approvedProductIds = useMemo(() => {
-        if (!allApprovals) return new Set();
-        return new Set((allApprovals as any[]).filter(a => a.status === "approved").map(a => a.product_id));
-    }, [allApprovals]);
+
 
     const pendingProductIds = useMemo(() => {
         if (!allApprovals) return new Set();
@@ -241,8 +237,8 @@ export default function ManageProduct() {
     }, [productsData, productSearch]);
 
     const approvedProducts = useMemo(() => {
-        return filteredProducts.filter(p => approvedProductIds.has(p.id));
-    }, [filteredProducts, approvedProductIds]);
+        return filteredProducts.filter(p => p.is_approved);
+    }, [filteredProducts]);
 
     const allApprovedConfigs = useMemo(() => {
         if (!allApprovals) return [];
@@ -256,8 +252,8 @@ export default function ManageProduct() {
     }, [allApprovedConfigs, cloneSearch]);
 
     const needsWorkProducts = useMemo(() => {
-        return filteredProducts.filter(p => !approvedProductIds.has(p.id));
-    }, [filteredProducts, approvedProductIds]);
+        return filteredProducts.filter(p => !p.is_approved);
+    }, [filteredProducts]);
 
     const { data: categoriesData } = useQuery({
         queryKey: ["/api/material-categories"],
@@ -282,14 +278,13 @@ export default function ManageProduct() {
     });
 
     const { data: materialsData, isLoading: loadingMaterials } = useQuery({
-        queryKey: ["/api/materials", step === 3 ? "step3" : "step2"],
+        queryKey: ["/api/materials"],
         queryFn: async () => {
             const res = await apiFetch("/api/materials");
             if (!res.ok) throw new Error();
             const d = await res.json();
             return ((d.materials || []) as Material[]).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
         },
-        enabled: step === 2 || step === 3,
         staleTime: 0,
         refetchOnMount: "always",
     });
@@ -298,8 +293,8 @@ export default function ManageProduct() {
     const uniqueMaterials = Array.from(new Map(
         rawMaterials
             .filter(m => {
-                if (userRole !== "supplier") return true;
-                return supplierShops.includes(String(m.shop_id || m.shopId));
+                if (!isSupplier) return true;
+                return supplierShops.some(s => String(s.id) === String(m.shop_id || m.shopId) || (s.name && s.name === m.shop_name));
             })
             .map(m => [(m.id || Math.random()).toString(), m])
     ).values());
@@ -338,7 +333,7 @@ export default function ManageProduct() {
                 const ex = existingMap.get(m.id);
                 if (ex) return ex;
                 const rate = Number(m.rate) || 0;
-                return { ...m, qty: 1, baseQty: 1, wastagePct: undefined, amount: rate, rate, supplyRate: rate, installRate: 0, location: m.technicalspecification || m.name || "", description: m.technicalspecification || m.name || "", applyWastage: true, applyRounding: true, shop_id: m.shop_id || m.shopId, shopId: m.shop_id || m.shopId };
+                return { ...m, qty: 1, baseQty: 1, wastagePct: undefined, amount: rate, rate, supplyRate: rate, installRate: 0, location: m.technicalspecification || m.name || "", description: m.technicalspecification || m.name || "", applyWastage: true, applyRounding: true, freezeAndEdit: false, shop_id: m.shop_id || m.shopId, shopId: m.shop_id || m.shopId };
             }));
         }
         setStep(step + 1);
@@ -347,7 +342,7 @@ export default function ManageProduct() {
     const buildPayloadItems = () => boqResults.computed.map(m => ({
         materialId: m.id, materialName: m.name, unit: m.unit, qty: m.roundOffQty, rate: m.rate,
         supplyRate: m.supplyRate, installRate: m.installRate, location: m.location, amount: m.lineTotal,
-        baseQty: m.baseQty, wastagePct: m.wastagePct ?? null, applyWastage: m.applyWastage, applyRounding: m.applyRounding, shop_name: m.shop_name, shop_id: m.shop_id || m.shopId
+        baseQty: m.baseQty, wastagePct: m.wastagePct ?? null, applyWastage: m.applyWastage, applyRounding: m.applyRounding, shop_name: m.shop_name, shop_id: m.shop_id || m.shopId, freeze_and_edit: m.freezeAndEdit
     }));
 
     const buildPayload = (extra?: object) => ({
@@ -396,12 +391,13 @@ export default function ManageProduct() {
         id: item.material_id, name: item.material_name, unit: item.unit,
         qty: Number(item.qty || 0), baseQty: Number(item.base_qty ?? item.qty ?? 0),
         wastagePct: item.wastage_pct != null ? Number(item.wastage_pct) : undefined,
-        rate: Number(item.rate), supplyRate: Number(item.supply_rate || item.rate || 0),
+        rate: Number(item.rate), supplyRate: Number(item.supply_rate != null ? item.supply_rate : item.rate || 0),
         install_rate: Number(item.install_rate || 0), installRate: Number(item.install_rate || 0),
         location: item.location || "Main Area", amount: Number(item.amount),
         rejection_reason: item.rejection_reason || null,
         applyWastage: item.apply_wastage !== undefined ? Boolean(item.apply_wastage) : (item.applyWastage !== undefined ? Boolean(item.applyWastage) : true),
         applyRounding: item.apply_rounding !== undefined ? Boolean(item.apply_rounding) : (item.applyRounding !== undefined ? Boolean(item.applyRounding) : true),
+        freezeAndEdit: (item.freeze_and_edit === true || item.freeze_and_edit === "true" || item.freeze_and_edit === 1 || item.freezeAndEdit === true || item.freezeAndEdit === "true" || item.freezeAndEdit === 1),
         shop_name: item.shop_name, shop_id: item.shop_id || item.shopId, shopId: item.shop_id || item.shopId, category: "", subcategory: ""
     }));
 
@@ -497,8 +493,8 @@ export default function ManageProduct() {
         setIsCloneDialogOpen(true);
     };
 
-    const confirmDeleteConfig = async (action: 'archive' | 'trash') => {
-        if (!genericDelete) return;
+    const confirmDeleteConfig = async (action?: 'archive' | 'trash') => {
+        if (!genericDelete || !action) return;
         const configId = genericDelete.id;
         try {
             const res = await apiFetch(`/api/step11-products/config/${configId}?action=${action}`, { method: "DELETE" });
@@ -515,27 +511,45 @@ export default function ManageProduct() {
     const toggleMaterial = (m: Material) =>
         setSelectedMaterials(prev => prev.find(x => x.id === m.id) ? prev.filter(x => x.id !== m.id) : [...prev, m]);
 
-    const updateConfig = (id: string, field: keyof SelectedMaterial, value: any) =>
+    const updateConfig = (id: string | number, field: keyof SelectedMaterial, value: any) =>
         setConfigMaterials(prev => prev.map(m => {
-            if (m.id !== id) return m;
+            if (String(m.id) !== String(id)) return m;
             const u = { ...m, [field]: value };
             if (field === "supplyRate" || field === "installRate") u.rate = (Number(u.supplyRate) || 0) + (Number(u.installRate) || 0);
             return u;
         }));
 
-    const removeConfigMaterial = (id: string) => {
-        setSelectedMaterials(prev => prev.filter(m => m.id !== id));
-        setConfigMaterials(prev => prev.filter(m => m.id !== id));
+    const removeConfigMaterial = (id: string | number) => {
+        const sid = String(id);
+        setSelectedMaterials(prev => prev.filter(m => String(m.id) !== sid));
+        setConfigMaterials(prev => prev.filter(m => String(m.id) !== sid));
     };
 
     useEffect(() => {
         if (step === 2) {
-            const existingMap = new Map(configMaterials.map(m => [m.id, m]));
+            const existingMap = new Map(configMaterials.map(m => [String(m.id), m]));
             setConfigMaterials(selectedMaterials.map(m => {
-                const ex = existingMap.get(m.id);
+                const ex = existingMap.get(String(m.id));
                 if (ex) return ex;
                 const rate = Number(m.rate) || 0;
-                return { ...m, qty: 1, baseQty: 1, wastagePct: undefined, amount: rate, rate, supplyRate: rate, installRate: 0, location: m.technicalspecification || m.name || "", description: m.technicalspecification || m.name || "", applyWastage: true, applyRounding: true, shop_id: m.shop_id || m.shopId, shopId: m.shop_id || m.shopId } as SelectedMaterial;
+                const sm = m as any;
+                return { 
+                    ...m, 
+                    qty: sm.qty ?? 1, 
+                    baseQty: sm.baseQty ?? 1, 
+                    wastagePct: sm.wastagePct, 
+                    amount: sm.amount ?? rate, 
+                    rate, 
+                    supplyRate: sm.supplyRate ?? rate, 
+                    installRate: sm.installRate ?? 0, 
+                    location: sm.location || sm.technicalspecification || m.name || "", 
+                    description: sm.description || sm.technicalspecification || m.name || "", 
+                    applyWastage: (sm.applyWastage === true || sm.apply_wastage === true || sm.applyWastage === undefined), 
+                    applyRounding: (sm.applyRounding === true || sm.apply_rounding === true || sm.applyRounding === undefined), 
+                    freezeAndEdit: (sm.freezeAndEdit === true || sm.freeze_and_edit === true), 
+                    shop_id: m.shop_id || m.shopId, 
+                    shopId: m.shop_id || m.shopId 
+                } as SelectedMaterial;
             }));
         }
     }, [selectedMaterials, step]);
@@ -546,17 +560,58 @@ export default function ManageProduct() {
     // Build a map from materialId -> latest library rate for fast lookup
     const materialsById = useMemo(() => {
         const map: Record<string, Material> = {};
-        (materialsData || []).forEach(m => { map[m.id] = m; });
+        (materialsData || []).forEach(m => { map[String(m.id)] = m; });
         return map;
     }, [materialsData]);
 
-    // Detect mismatches: library rate is higher than what's saved in config
+    const getConfigCurrentTotal = (configWrapper: any) => {
+        if (!configWrapper.items || !configWrapper.product || Object.keys(materialsById).length === 0) return null;
+
+        const mappedItems = mapItems(configWrapper.items);
+        const updatedItems = mappedItems.map((m: any) => {
+            const latest = materialsById[String(m.id)];
+            if (latest) {
+                return { ...m, supplyRate: latest.rate, rate: latest.rate + (m.installRate || 0) };
+            }
+            return m;
+        });
+
+        const basis = {
+            requiredUnitType: configWrapper.product.required_unit_type || "Sqft",
+            baseRequiredQty: Number(configWrapper.product.base_required_qty || 100),
+            wastagePctDefault: Number(configWrapper.product.wastage_pct_default || 0),
+        };
+
+        const res = computeBoq(basis, updatedItems, basis.baseRequiredQty);
+        return res.grandTotal;
+    };
+
+    const getConfigPriceMismatches = (configWrapper: any) => {
+        if (!configWrapper.items || !configWrapper.product || Object.keys(materialsById).length === 0) return [];
+
+        const mappedItems = mapItems(configWrapper.items);
+        const mismatches: Array<{ name: string, oldRate: number, newRate: number }> = [];
+
+        mappedItems.forEach((m: any) => {
+            const latest = materialsById[String(m.id)];
+            if (latest) {
+                const savedRate = m.supplyRate || 0;
+                if (Math.abs(savedRate - latest.rate) > 0.01) {
+                    mismatches.push({ name: m.name, oldRate: savedRate, newRate: latest.rate });
+                }
+            }
+        });
+
+        return mismatches;
+    };
+
+    // Detect mismatches: library rate is different from what's saved in config
     const mismatches = useMemo(() => {
         const list: Array<{ index: number; materialId: string; name: string; oldRate: number; newRate: number }> = [];
         configMaterials.forEach((cm, idx) => {
-            const latest = materialsById[cm.id!];
-            if (latest && latest.rate > (cm.supplyRate || 0)) {
-                list.push({ index: idx, materialId: cm.id!, name: cm.name, oldRate: cm.supplyRate || 0, newRate: latest.rate });
+            const latest = materialsById[String(cm.id)];
+            if (latest && Math.abs(latest.rate - (cm.supplyRate || 0)) > 0.01) {
+                list.push({ index: idx, materialId: String(cm.id), name: cm.name, oldRate: cm.supplyRate || 0, newRate: latest.rate });
             }
         });
         return list;
@@ -573,8 +628,8 @@ export default function ManageProduct() {
         setConfigMaterials(prev => prev.map((cm, idx) => {
             const mismatch = activeMismatches.find(m => m.index === idx);
             if (mismatch) {
-                const newSupply = mismatch.newRate;
-                return { ...cm, supplyRate: newSupply, rate: newSupply + (cm.installRate || 0) };
+                const newSupply = Number(mismatch.newRate);
+                return { ...cm, supplyRate: newSupply, rate: newSupply + Number(cm.installRate || 0) };
             }
             return cm;
         }));
@@ -583,11 +638,30 @@ export default function ManageProduct() {
         setIsUpdatingRates(false);
     };
 
+    // Trigger notification if there are price changes
+    useEffect(() => {
+        if (selectedProduct && previousConfigs.length > 0 && Object.keys(materialsById).length > 0) {
+            const hasUpdates = previousConfigs.some(cd => {
+                const mismatches = getConfigPriceMismatches(cd);
+                const savedCost = Number(cd.product.total_cost || 0);
+                const currentCost = getConfigCurrentTotal(cd);
+                return mismatches.length > 0 || (currentCost !== null && Math.abs(savedCost - currentCost) > 0.01);
+            });
+            if (hasUpdates) {
+                toast({
+                    title: "Price Updates Detected",
+                    description: "Some existing configurations for this product have updated material rates.",
+                    variant: "default",
+                });
+            }
+        }
+    }, [selectedProduct, previousConfigs, materialsById]);
+
     const handleUpdateSingleRate = (mismatch: typeof mismatches[0]) => {
         setConfigMaterials(prev => prev.map((cm, idx) => {
             if (idx === mismatch.index) {
-                const newSupply = mismatch.newRate;
-                return { ...cm, supplyRate: newSupply, rate: newSupply + (cm.installRate || 0) };
+                const newSupply = Number(mismatch.newRate);
+                return { ...cm, supplyRate: newSupply, rate: newSupply + Number(cm.installRate || 0) };
             }
             return cm;
         }));
@@ -608,10 +682,95 @@ export default function ManageProduct() {
         }
     }, [selectedProduct, configName, selectedCategory, selectedSubcategory, totalCost, requiredUnitType, baseRequiredQty, wastagePctDefault, dimA, dimB, dimC, productDescription, configMaterials, step]);
 
+    const handleExportExcel = async () => {
+        if (selectedProductIds.size === 0) return;
+        setIsExporting(true);
+        try {
+            const workbook = XLSX.utils.book_new();
+            const exportData: any[] = [
+                ["Product Name", "Category", "Material Name", "Unit", "Rate", "Quantity", "Total Amount"]
+            ];
+
+            // Fetch data for each selected product
+            for (const productId of Array.from(selectedProductIds)) {
+                const product = productsData?.find(p => p.id === productId);
+                const res = await apiFetch(`/api/step11-products/${productId}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const configurations = data.configurations || [];
+                    // Use the first configuration (usually the latest or approved)
+                    if (configurations.length > 0) {
+                        const config = configurations[0];
+                        const items = config.items || [];
+                        items.forEach((item: any, idx: number) => {
+                            exportData.push([
+                                idx === 0 ? (product?.name || "") : "",
+                                idx === 0 ? (product?.subcategory || "") : "",
+                                item.material_name || "",
+                                item.unit || "",
+                                item.rate || 0,
+                                item.qty || 0,
+                                (Number(item.rate) || 0) * (Number(item.qty) || 0)
+                            ]);
+                        });
+                    } else {
+                        // If no configuration, just add the product row
+                        exportData.push([product?.name || "", product?.subcategory || "", "No materials configured", "", "", "", ""]);
+                    }
+                }
+            }
+
+            const worksheet = XLSX.utils.aoa_to_sheet(exportData);
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Products and Materials");
+            XLSX.writeFile(workbook, `Products_Export_${format(new Date(), "yyyy-MM-dd_HHmm")}.xlsx`);
+            toast({ title: "Success", description: `Exported ${selectedProductIds.size} products to Excel.` });
+        } catch (error) {
+            console.error("Export error:", error);
+            toast({ title: "Error", description: "Failed to export to Excel.", variant: "destructive" });
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const toggleSelectProduct = (id: string) => {
+        setSelectedProductIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleSelectEverything = () => {
+        if (!productsData) return;
+        if (selectedProductIds.size === productsData.length) {
+            setSelectedProductIds(new Set());
+        } else {
+            setSelectedProductIds(new Set(productsData.map(p => p.id)));
+        }
+    };
+
+    const toggleSelectAll = (products: Product[]) => {
+        const productIds = products.map(p => p.id);
+        const allSelected = productIds.every(id => selectedProductIds.has(id));
+        
+        setSelectedProductIds(prev => {
+            const next = new Set(prev);
+            if (allSelected) {
+                productIds.forEach(id => next.delete(id));
+            } else {
+                productIds.forEach(id => next.add(id));
+            }
+            return next;
+        });
+    };
+
     const selectProduct = (product: Product) => { setSelectedProduct(product); resetSelection(); loadExistingConfig(product); };
 
+    const LayoutComponent = isSupplier ? SupplierLayout : Layout;
+
     return (
-        <Layout>
+        <LayoutComponent>
             <div className="container mx-auto py-8 px-4">
                 <Card className="max-w-6xl mx-auto shadow-xl border-none">
                     <CardHeader className="bg-primary/5 border-b pb-6">
@@ -619,6 +778,28 @@ export default function ManageProduct() {
                             <CardTitle className="flex items-center gap-4">
                                 <span className="text-3xl font-extrabold tracking-tight">Manage Product</span>
                                 {selectedProduct && <Badge variant="outline" className="text-sm font-semibold py-1.5 px-4 bg-primary/10 border-primary/20">{selectedProduct.name}</Badge>}
+                                {productsData && productsData.length > 0 && (
+                                    <div className="flex items-center gap-2 ml-4">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={toggleSelectEverything}
+                                            className="h-9 font-bold border-primary/20 hover:bg-primary/5"
+                                        >
+                                            {selectedProductIds.size === productsData.length ? "Deselect All" : "Select All Products"}
+                                        </Button>
+                                        {selectedProductIds.size > 0 && (
+                                            <Button
+                                                onClick={handleExportExcel}
+                                                disabled={isExporting}
+                                                className="bg-green-600 hover:bg-green-700 text-white font-bold gap-2 h-9"
+                                            >
+                                                {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Layers className="h-4 w-4" />}
+                                                Export as Excel ({selectedProductIds.size})
+                                            </Button>
+                                        )}
+                                    </div>
+                                )}
                             </CardTitle>
                             {step === 2 && (
                                 <div className="flex flex-wrap items-center gap-4 animate-in fade-in duration-300">
@@ -732,7 +913,12 @@ export default function ManageProduct() {
                                                 <Table>
                                                     <TableHeader className="bg-muted/30 sticky top-0 z-10">
                                                         <TableRow>
-                                                            <TableHead className="w-[60px]"></TableHead>
+                                                            <TableHead className="w-[60px]">
+                                                                <Checkbox
+                                                                    checked={needsWorkProducts.length > 0 && needsWorkProducts.every(p => selectedProductIds.has(p.id))}
+                                                                    onCheckedChange={() => toggleSelectAll(needsWorkProducts)}
+                                                                />
+                                                            </TableHead>
                                                             <TableHead className="font-bold">Product Name</TableHead>
                                                             <TableHead className="font-bold">Created Date</TableHead>
                                                             <TableHead className="font-bold text-center w-[120px]">Status</TableHead>
@@ -743,12 +929,15 @@ export default function ManageProduct() {
                                                         {needsWorkProducts.length === 0 ? (
                                                             <TableRow><TableCell colSpan={5} className="text-center py-10 text-muted-foreground">No products currently need work.</TableCell></TableRow>
                                                         ) : needsWorkProducts.map(product => {
-                                                            const isPending = pendingProductIds.has(product.id);
-                                                            const isRejected = rejectedProductIds.has(product.id);
+                                                            const isPending = (allApprovals as any[] || []).some(a => a.product_id === product.id && a.status === "pending");
+                                                            const isRejected = (allApprovals as any[] || []).some(a => a.product_id === product.id && a.status === "rejected");
                                                             return (
-                                                                <TableRow key={product.id} className={`hover:bg-muted/20 transition-colors cursor-pointer ${selectedProduct?.id === product.id ? "bg-primary/5 hover:bg-primary/10" : ""}`} onClick={() => selectProduct(product)}>
+                                                                <TableRow key={product.id} className={`transition-colors cursor-pointer ${selectedProduct?.id === product.id ? "bg-primary/5 hover:bg-primary/10" : product.has_price_updates ? "bg-amber-200/70 hover:bg-amber-200/90" : "hover:bg-muted/20"}`} onClick={() => selectProduct(product)}>
                                                                     <TableCell onClick={e => e.stopPropagation()}>
-                                                                        <Checkbox checked={selectedProduct?.id === product.id} onCheckedChange={checked => checked ? selectProduct(product) : setSelectedProduct(null)} />
+                                                                        <Checkbox
+                                                                            checked={selectedProductIds.has(product.id)}
+                                                                            onCheckedChange={() => toggleSelectProduct(product.id)}
+                                                                        />
                                                                     </TableCell>
                                                                     <TableCell className="font-semibold text-base py-4">
                                                                         <div className="flex items-center gap-3">
@@ -773,7 +962,15 @@ export default function ManageProduct() {
                                                                                 )}
                                                                             </div>
                                                                             <div className="flex flex-col gap-1">
-                                                                                <span>{product.name}</span>
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <span>{product.name}</span>
+                                                                                    {product.has_price_updates && (
+                                                                                        <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200 text-[8px] h-4 px-1.5 font-bold uppercase flex items-center gap-1 w-fit">
+                                                                                            <ArrowRight className="h-3 w-3" />
+                                                                                            Price Update
+                                                                                        </Badge>
+                                                                                    )}
+                                                                                </div>
                                                                                 <div className="flex gap-2">
                                                                                     {isPending && <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200 text-[8px] h-4 px-1.5 font-bold uppercase flex items-center gap-1 w-fit"><Loader2 className="h-2 w-2 animate-spin" /> Pending Approval</Badge>}
                                                                                     {isRejected && <Badge variant="outline" className="bg-red-100 text-red-700 border-red-200 text-[8px] h-4 px-1.5 font-bold uppercase flex items-center gap-1 w-fit"><XCircle className="h-2 w-2" /> Rejected</Badge>}
@@ -815,7 +1012,12 @@ export default function ManageProduct() {
                                                 <Table>
                                                     <TableHeader className="bg-muted/30 sticky top-0 z-10">
                                                         <TableRow>
-                                                            <TableHead className="w-[60px]"></TableHead>
+                                                            <TableHead className="w-[60px]">
+                                                                <Checkbox
+                                                                    checked={approvedProducts.length > 0 && approvedProducts.every(p => selectedProductIds.has(p.id))}
+                                                                    onCheckedChange={() => toggleSelectAll(approvedProducts)}
+                                                                />
+                                                            </TableHead>
                                                             <TableHead className="font-bold">Product Name</TableHead>
                                                             <TableHead className="font-bold">Created Date</TableHead>
                                                             <TableHead className="font-bold text-center w-[120px]">Status</TableHead>
@@ -828,9 +1030,12 @@ export default function ManageProduct() {
                                                         ) : approvedProducts.map(product => {
                                                             const isPendingRevision = pendingProductIds.has(product.id);
                                                             return (
-                                                                <TableRow key={product.id} className={`hover:bg-muted/20 transition-colors cursor-pointer ${selectedProduct?.id === product.id ? "bg-primary/5 hover:bg-primary/10" : ""} bg-green-50/50`} onClick={() => selectProduct(product)}>
+                                                                <TableRow key={product.id} className={`transition-colors cursor-pointer ${selectedProduct?.id === product.id ? "bg-primary/5 hover:bg-primary/10" : product.has_price_updates ? "bg-amber-200/70 hover:bg-amber-200/90" : "bg-green-50/50 hover:bg-green-100"}`} onClick={() => selectProduct(product)}>
                                                                     <TableCell onClick={e => e.stopPropagation()}>
-                                                                        <Checkbox checked={selectedProduct?.id === product.id} onCheckedChange={checked => checked ? selectProduct(product) : setSelectedProduct(null)} />
+                                                                        <Checkbox
+                                                                            checked={selectedProductIds.has(product.id)}
+                                                                            onCheckedChange={() => toggleSelectProduct(product.id)}
+                                                                        />
                                                                     </TableCell>
                                                                     <TableCell className="font-semibold text-base py-4">
                                                                         <div className="flex items-center gap-3">
@@ -855,7 +1060,15 @@ export default function ManageProduct() {
                                                                                 )}
                                                                             </div>
                                                                             <div className="flex flex-col gap-1">
-                                                                                <span>{product.name}</span>
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <span>{product.name}</span>
+                                                                                    {product.has_price_updates && (
+                                                                                        <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200 text-[8px] h-4 px-1.5 font-bold uppercase flex items-center gap-1 w-fit">
+                                                                                            <ArrowRight className="h-3 w-3" />
+                                                                                            Price Update
+                                                                                        </Badge>
+                                                                                    )}
+                                                                                </div>
                                                                                 {isPendingRevision && <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200 text-[8px] h-4 px-1.5 font-bold uppercase flex items-center gap-1 w-fit"><Loader2 className="h-2 w-2 animate-spin" /> Revision Pending</Badge>}
                                                                             </div>
                                                                         </div>
@@ -930,18 +1143,55 @@ export default function ManageProduct() {
                                                 </div>
                                                 <div className="space-y-3 min-h-[100px] max-h-[500px] overflow-y-auto pr-2">
                                                     {previousConfigs.filter(c => c.product.status === "approved").length > 0 ? (
-                                                        previousConfigs.filter(c => c.product.status === "approved").map(cd => (
-                                                            <div key={cd.product.id} className="flex items-center justify-between p-4 bg-white rounded-xl border-2 border-green-50 shadow-sm hover:border-green-200 hover:shadow-md transition-all group">
-                                                                <div className="space-y-1">
-                                                                    <div className="font-bold text-sm text-slate-800">{cd.product.config_name || "Unnamed Config"}</div>
-                                                                    <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Approved: {new Date(cd.product.updated_at).toLocaleDateString()} • {cd.items?.length || 0} Materials</div>
+                                                        previousConfigs.filter(c => c.product.status === "approved").map(cd => {
+                                                            const savedPrice = Number(cd.product.total_cost || 0);
+                                                            const currentPrice = getConfigCurrentTotal(cd);
+                                                            const priceMismatches = getConfigPriceMismatches(cd);
+                                                            const hasChanged = priceMismatches.length > 0 || (currentPrice !== null && Math.abs(savedPrice - currentPrice) > 0.01);
+                                                            return (
+                                                                <div key={cd.product.id} className="flex flex-col p-4 bg-white rounded-xl border-2 border-green-50 shadow-sm hover:border-green-200 hover:shadow-md transition-all group">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <div className="space-y-1">
+                                                                            <div className="font-bold text-sm text-slate-800">{cd.product.config_name || "Unnamed Config"}</div>
+                                                                            <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Approved: {new Date(cd.product.updated_at).toLocaleDateString()} • {cd.items?.length || 0} Materials</div>
+                                                                            {hasChanged && currentPrice !== null ? (
+                                                                                <div className="flex items-center mt-1">
+                                                                                    <Badge variant="outline" className={`flex items-center gap-1.5 px-2 py-0.5 shadow-sm text-[10px] ${currentPrice > savedPrice ? "bg-amber-100/50 text-amber-700 border-amber-300" : "bg-green-100/50 text-green-700 border-green-300"}`}>
+                                                                                        {currentPrice > savedPrice ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                                                                                        <span className="line-through opacity-70">₹{savedPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                                                        <ArrowRight className="h-3 w-3" />
+                                                                                        <span className="font-bold">₹{currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                                                    </Badge>
+                                                                                </div>
+                                                                            ) : (
+                                                                                savedPrice > 0 && <div className="text-[10px] text-slate-500 font-bold mt-1">₹{savedPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2 shrink-0">
+                                                                            <Button variant="ghost" size="sm" onClick={() => loadSpecificConfig(cd)} className="h-8 text-green-700 hover:text-green-800 hover:bg-green-100 font-bold px-3"><Edit className="h-3.5 w-3.5 mr-1" /> Load</Button>
+                                                                            <Button variant="ghost" size="sm" onClick={() => requestDeleteConfig(cd.product.id)} className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                                                                        </div>
+                                                                    </div>
+                                                                    {hasChanged && priceMismatches.length > 0 && (
+                                                                        <div className="mt-4 pt-3 border-t border-amber-100/50">
+                                                                            <div className="text-[10px] font-black uppercase tracking-widest text-amber-600 mb-2">Material Prices Updated:</div>
+                                                                            <div className="grid grid-cols-1 gap-1.5">
+                                                                                {priceMismatches.map((pm, idx) => (
+                                                                                    <div key={idx} className="flex items-center justify-between bg-amber-50/50 px-2.5 py-1.5 rounded-md border border-amber-100/50">
+                                                                                        <span className="text-[11px] font-semibold text-slate-700 truncate pr-2">{pm.name}</span>
+                                                                                        <div className="flex items-center gap-1.5 shrink-0 text-[11px]">
+                                                                                            <span className="text-slate-400 line-through">₹{pm.oldRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                                                            <ArrowRight className={`h-3 w-3 ${pm.newRate > pm.oldRate ? "text-amber-400" : "text-green-400"}`} />
+                                                                                            <span className={`font-bold ${pm.newRate > pm.oldRate ? "text-amber-700" : "text-green-700"}`}>₹{pm.newRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
-                                                                <div className="flex items-center gap-2">
-                                                                    <Button variant="ghost" size="sm" onClick={() => loadSpecificConfig(cd)} className="h-8 text-green-700 hover:text-green-800 hover:bg-green-100 font-bold px-3"><Edit className="h-3.5 w-3.5 mr-1" /> Load</Button>
-                                                                    <Button variant="ghost" size="sm" onClick={() => requestDeleteConfig(cd.product.id)} className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
-                                                                </div>
-                                                            </div>
-                                                        ))
+                                                            );
+                                                        })
                                                     ) : !isLoadingConfigs && (
                                                         <div className="flex flex-col items-center justify-center py-10 px-4 text-center border-2 border-dashed border-green-100/50 rounded-xl bg-green-50/5 italic text-muted-foreground text-xs font-medium">
                                                             No approved configurations found for this product.
@@ -956,18 +1206,44 @@ export default function ManageProduct() {
                                                 <div className="space-y-3 p-5 bg-amber-50/20 rounded-2xl border border-amber-100 shadow-sm animate-in fade-in slide-in-from-right-4 duration-500">
                                                     <h3 className="text-sm font-black uppercase tracking-widest text-amber-600 flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin-slow" /> Pending Review</h3>
                                                     <div className="space-y-3 max-h-[250px] overflow-y-auto pr-2">
-                                                        {pendingConfigs.length > 0 ? pendingConfigs.map(config => (
-                                                            <div key={config.id} className="flex items-center justify-between p-4 bg-white rounded-xl border-2 border-amber-50 shadow-sm hover:border-amber-200 transition-all">
-                                                                <div className="space-y-1">
-                                                                    <div className="font-bold text-sm text-slate-800">{config.config_name || "Unnamed Config"}</div>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-[10px] text-muted-foreground font-medium uppercase">{new Date(config.created_at).toLocaleDateString()}</span>
-                                                                        <Badge variant="outline" className="h-4 text-[8px] uppercase px-1.5 font-black bg-amber-100 text-amber-700 border-amber-200">Pending</Badge>
+                                                        {pendingConfigs.length > 0 ? pendingConfigs.map(config => {
+                                                            const priceMismatches = getConfigPriceMismatches(config);
+                                                            const hasChanged = priceMismatches.length > 0;
+                                                            return (
+                                                                <div key={config.id} className="flex flex-col p-4 bg-white rounded-xl border-2 border-amber-50 shadow-sm hover:border-amber-200 transition-all">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <div className="space-y-1">
+                                                                            <div className="font-bold text-sm text-slate-800">{config.config_name || "Unnamed Config"}</div>
+                                                                            <div className="flex items-center gap-2">
+                                                                                <span className="text-[10px] text-muted-foreground font-medium uppercase">{new Date(config.created_at).toLocaleDateString()}</span>
+                                                                                <Badge variant="outline" className="h-4 text-[8px] uppercase px-1.5 font-black bg-amber-100 text-amber-700 border-amber-200">Pending</Badge>
+                                                                            </div>
+                                                                            {hasChanged && (
+                                                                                <div className="flex items-center gap-1.5 mt-1 text-amber-600">
+                                                                                    <AlertTriangle className="h-3 w-3" />
+                                                                                    <span className="text-[10px] font-bold">Price Update Available</span>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                        <Button variant="outline" size="sm" onClick={() => loadApprovalConfig(config, "Pending")} className="h-8 text-[10px] font-black uppercase tracking-tight border-amber-200 hover:bg-amber-50 text-amber-600 px-3">View / Load</Button>
                                                                     </div>
+                                                                    {hasChanged && (
+                                                                        <div className="mt-3 space-y-2 pt-2 border-t border-amber-50">
+                                                                            {priceMismatches.map((pm, idx) => (
+                                                                                <div key={idx} className="flex items-center justify-between text-[11px] bg-amber-50/50 p-2 rounded">
+                                                                                    <span className="font-semibold text-slate-700 truncate pr-2">{pm.name}</span>
+                                                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                                                        <span className="text-slate-400 line-through">₹{pm.oldRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                                                        <ArrowRight className={`h-3 w-3 ${pm.newRate > pm.oldRate ? "text-amber-400" : "text-green-400"}`} />
+                                                                                        <span className={`font-bold ${pm.newRate > pm.oldRate ? "text-amber-700" : "text-green-700"}`}>₹{pm.newRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
                                                                 </div>
-                                                                <Button variant="outline" size="sm" onClick={() => loadApprovalConfig(config, "Pending")} className="h-8 text-[10px] font-black uppercase tracking-tight border-amber-200 hover:bg-amber-50 text-amber-600 px-3">View / Load</Button>
-                                                            </div>
-                                                        )) : (
+                                                            );
+                                                        }) : (
                                                             <div className="py-4 text-center border border-dashed border-amber-100 rounded-lg bg-amber-50/50 italic text-muted-foreground text-[10px] font-medium">No configurations pending review.</div>
                                                         )}
                                                     </div>
@@ -978,15 +1254,41 @@ export default function ManageProduct() {
                                                     <div className="space-y-3 p-5 bg-red-50/30 rounded-2xl border border-red-100 shadow-sm animate-in fade-in slide-in-from-right-4 duration-500">
                                                         <h3 className="text-sm font-black uppercase tracking-widest text-red-600 flex items-center gap-2"><XCircle className="h-4 w-4" /> Rejected</h3>
                                                         <div className="space-y-3 max-h-[250px] overflow-y-auto pr-2">
-                                                            {rejectedConfigs.map(config => (
-                                                                <div key={config.id} className="flex items-center justify-between p-4 bg-white rounded-xl border-2 border-red-50 shadow-sm hover:border-red-200 transition-all">
-                                                                    <div className="space-y-1">
-                                                                        <div className="font-bold text-sm text-slate-800">{config.config_name || "Unnamed Config"}</div>
-                                                                        <div className="text-[10px] text-red-600 font-bold italic line-clamp-1">{config.rejection_reason || "Check feedback"}</div>
+                                                            {rejectedConfigs.map(config => {
+                                                                const priceMismatches = getConfigPriceMismatches(config);
+                                                                const hasChanged = priceMismatches.length > 0;
+                                                                return (
+                                                                    <div key={config.id} className="flex flex-col p-4 bg-white rounded-xl border-2 border-red-50 shadow-sm hover:border-red-200 transition-all">
+                                                                        <div className="flex items-center justify-between">
+                                                                            <div className="space-y-1">
+                                                                                <div className="font-bold text-sm text-slate-800">{config.config_name || "Unnamed Config"}</div>
+                                                                                <div className="text-[10px] text-red-600 font-bold italic line-clamp-1">{config.rejection_reason || "Check feedback"}</div>
+                                                                                {hasChanged && (
+                                                                                    <div className="flex items-center gap-1.5 mt-1 text-red-600">
+                                                                                        <AlertTriangle className="h-3 w-3" />
+                                                                                        <span className="text-[10px] font-bold">Rates Changed Since Rejection</span>
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                            <Button variant="outline" size="sm" onClick={() => loadApprovalConfig(config, "Rejected")} className="h-8 text-[10px] font-black uppercase tracking-tight border-red-200 hover:bg-red-50 text-red-600 px-3">Resubmit</Button>
+                                                                        </div>
+                                                                        {hasChanged && (
+                                                                            <div className="mt-3 space-y-2 pt-2 border-t border-red-50">
+                                                                                {priceMismatches.map((pm, idx) => (
+                                                                                    <div key={idx} className="flex items-center justify-between text-[11px] bg-red-50/50 p-2 rounded">
+                                                                                        <span className="font-semibold text-slate-700 truncate pr-2">{pm.name}</span>
+                                                                                        <div className="flex items-center gap-1.5 shrink-0">
+                                                                                            <span className="text-slate-400 line-through">₹{pm.oldRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                                                            <ArrowRight className={`h-3 w-3 ${pm.newRate > pm.oldRate ? "text-amber-400" : "text-green-400"}`} />
+                                                                                            <span className={`font-bold ${pm.newRate > pm.oldRate ? "text-amber-700" : "text-green-700"}`}>₹{pm.newRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
                                                                     </div>
-                                                                    <Button variant="outline" size="sm" onClick={() => loadApprovalConfig(config, "Rejected")} className="h-8 text-[10px] font-black uppercase tracking-tight border-red-200 hover:bg-red-50 text-red-600 px-3">Resubmit</Button>
-                                                                </div>
-                                                            ))}
+                                                                );
+                                                            })}
                                                         </div>
                                                     </div>
                                                 )}
@@ -996,18 +1298,55 @@ export default function ManageProduct() {
                                                     <h3 className="text-sm font-black uppercase tracking-widest text-blue-600 flex items-center gap-2"><Layers className="h-4 w-4" /> Recent Drafts</h3>
                                                     <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
                                                         {previousConfigs.filter(c => c.product.status === "draft").length > 0 ? (
-                                                            previousConfigs.filter(c => c.product.status === "draft").map(cd => (
-                                                                <div key={cd.product.id} className="flex items-center justify-between p-4 bg-white rounded-xl border-2 border-blue-50 shadow-sm hover:border-blue-200 hover:shadow-md transition-all group">
-                                                                    <div className="space-y-1">
-                                                                        <div className="font-bold text-sm text-slate-800">{cd.product.config_name || "Unnamed Draft"}</div>
-                                                                        <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Edited: {new Date(cd.product.updated_at).toLocaleDateString()}</div>
+                                                            previousConfigs.filter(c => c.product.status === "draft").map(cd => {
+                                                                const savedPrice = Number(cd.product.total_cost || 0);
+                                                                const currentPrice = getConfigCurrentTotal(cd);
+                                                                const priceMismatches = getConfigPriceMismatches(cd);
+                                                                const hasChanged = priceMismatches.length > 0 || (currentPrice !== null && Math.abs(savedPrice - currentPrice) > 0.01);
+                                                                return (
+                                                                    <div key={cd.product.id} className="flex flex-col p-4 bg-white rounded-xl border-2 border-blue-50 shadow-sm hover:border-blue-200 hover:shadow-md transition-all group">
+                                                                        <div className="flex items-center justify-between">
+                                                                            <div className="space-y-1">
+                                                                                <div className="font-bold text-sm text-slate-800">{cd.product.config_name || "Unnamed Draft"}</div>
+                                                                                <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Edited: {new Date(cd.product.updated_at).toLocaleDateString()}</div>
+                                                                                {hasChanged && currentPrice !== null ? (
+                                                                                    <div className="flex items-center mt-1">
+                                                                                        <Badge variant="outline" className={`flex items-center gap-1.5 px-2 py-0.5 shadow-sm text-[10px] ${currentPrice > savedPrice ? "bg-amber-100/50 text-amber-700 border-amber-300" : "bg-green-100/50 text-green-700 border-green-300"}`}>
+                                                                                            {currentPrice > savedPrice ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                                                                                            <span className="line-through opacity-70">₹{savedPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                                                            <ArrowRight className="h-3 w-3" />
+                                                                                            <span className="font-bold">₹{currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                                                        </Badge>
+                                                                                    </div>
+                                                                                ) : (
+                                                                                    savedPrice > 0 && <div className="text-[10px] text-slate-500 font-bold mt-1">₹{savedPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                                                                )}
+                                                                            </div>
+                                                                            <div className="flex items-center gap-2 shrink-0">
+                                                                                <Button variant="ghost" size="sm" onClick={() => loadSpecificConfig(cd)} className="h-8 text-blue-700 hover:text-blue-800 hover:bg-blue-100 font-bold px-3">Continue</Button>
+                                                                                <Button variant="ghost" size="sm" onClick={() => requestDeleteConfig(cd.product.id)} className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                                                                            </div>
+                                                                        </div>
+                                                                        {hasChanged && priceMismatches.length > 0 && (
+                                                                            <div className="mt-4 pt-3 border-t border-amber-100/50">
+                                                                                <div className="text-[10px] font-black uppercase tracking-widest text-amber-600 mb-2">Material Prices Updated:</div>
+                                                                                <div className="grid grid-cols-1 gap-1.5">
+                                                                                    {priceMismatches.map((pm, idx) => (
+                                                                                        <div key={idx} className="flex items-center justify-between bg-amber-50/50 px-2.5 py-1.5 rounded-md border border-amber-100/50">
+                                                                                            <span className="text-[11px] font-semibold text-slate-700 truncate pr-2">{pm.name}</span>
+                                                                                            <div className="flex items-center gap-1.5 shrink-0 text-[11px]">
+                                                                                                <span className="text-slate-400 line-through">₹{pm.oldRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                                                                <ArrowRight className={`h-3 w-3 ${pm.newRate > pm.oldRate ? "text-amber-400" : "text-green-400"}`} />
+                                                                                                <span className={`font-bold ${pm.newRate > pm.oldRate ? "text-amber-700" : "text-green-700"}`}>₹{pm.newRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
                                                                     </div>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <Button variant="ghost" size="sm" onClick={() => loadSpecificConfig(cd)} className="h-8 text-blue-700 hover:text-blue-800 hover:bg-blue-100 font-bold px-3">Continue</Button>
-                                                                        <Button variant="ghost" size="sm" onClick={() => requestDeleteConfig(cd.product.id)} className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
-                                                                    </div>
-                                                                </div>
-                                                            ))
+                                                                );
+                                                            })
                                                         ) : (
                                                             <div className="py-8 text-center border-2 border-dashed border-blue-100/50 rounded-xl bg-blue-50/5 italic text-muted-foreground text-xs font-medium">No local drafts found.</div>
                                                         )}
@@ -1264,7 +1603,7 @@ export default function ManageProduct() {
                                                                                 onClick={() => {
                                                                                     if (configMaterials.some(m => m.id === material.id)) { toast({ title: "Already Added", description: "This material is already in your configuration.", variant: "destructive" }); return; }
                                                                                     const rate = Number(material.rate) || 0;
-                                                                                    const newItem: SelectedMaterial = { ...material, qty: 1, baseQty: 1, wastagePct: wastagePctDefault, amount: rate, rate, supplyRate: rate, installRate: 0, location: material.technicalspecification || material.name || "", description: material.technicalspecification || material.name || "", applyWastage: true, applyRounding: true, shop_id: material.shop_id || material.shopId, shopId: material.shop_id || material.shopId };
+                                                                                    const newItem: SelectedMaterial = { ...material, qty: 1, baseQty: 1, wastagePct: wastagePctDefault, amount: rate, rate, supplyRate: rate, installRate: 0, location: material.technicalspecification || material.name || "", description: material.technicalspecification || material.name || "", applyWastage: true, applyRounding: true, freezeAndEdit: false, shop_id: material.shop_id || material.shopId, shopId: material.shop_id || material.shopId };
                                                                                     setConfigMaterials(prev => [...prev, newItem]);
                                                                                     setSelectedMaterials(prev => [...prev, material]);
                                                                                     toast({ title: "Material Added", description: `${material.name} added to configuration.` });
@@ -1310,6 +1649,11 @@ export default function ManageProduct() {
                                                             <TableHead className="w-[90px] font-bold">Total Qty</TableHead>
                                                         </>
                                                     )}
+                                                    <TableHead className="w-[80px] font-bold">
+                                                        <div className="flex flex-col items-center gap-1">
+                                                            <span className="text-[10px] text-center leading-tight">Freeze &<br/>Edit</span>
+                                                        </div>
+                                                    </TableHead>
                                                     <TableHead className="w-[90px] font-bold">Final Amount</TableHead>
                                                     {!compactMode && <TableHead className="w-[90px] font-bold">Per {requiredUnitType} Qty</TableHead>}
                                                 </TableRow>
@@ -1317,8 +1661,9 @@ export default function ManageProduct() {
                                             <Reorder.Group as="tbody" axis="y" values={configMaterials} onReorder={setConfigMaterials}>
                                                 {boqResults.computed.map((m, idx) => {
                                                     const baseAmt = m.baseQty * (m.supplyRate + m.installRate);
+                                                    const isFreezed = !!m.freezeAndEdit;
                                                     return (
-                                                        <Reorder.Item key={m.id} value={configMaterials.find(cm => cm.id === m.id) || m} as="tr" className="hover:bg-muted/5 transition-colors cursor-default bg-white border-b">
+                                                        <Reorder.Item key={m.id} value={configMaterials.find(cm => cm.id === m.id) || m} as="tr" className={`hover:bg-muted/5 transition-colors cursor-default border-b ${isFreezed ? 'bg-cyan-100 border-cyan-200' : 'bg-white'}`}>
                                                             <TableCell className="text-center cursor-grab active:cursor-grabbing">
                                                                 <GripVertical className="h-4 w-4 text-muted-foreground/40" />
                                                             </TableCell>
@@ -1346,25 +1691,28 @@ export default function ManageProduct() {
                                                             {!compactMode && (
                                                                 <>
                                                                     <TableCell className="text-[10px] font-bold">₹{baseAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-                                                                    <TableCell className="text-center"><Checkbox checked={m.applyWastage} onCheckedChange={checked => updateConfig(m.id!, "applyWastage", checked)} /></TableCell>
-                                                                    <TableCell className="text-center"><Checkbox checked={m.applyRounding} onCheckedChange={checked => updateConfig(m.id!, "applyRounding", checked)} /></TableCell>
+                                                                    <TableCell className="text-center"><Checkbox checked={!!m.applyWastage} onCheckedChange={checked => updateConfig(m.id!, "applyWastage", !!checked)} /></TableCell>
+                                                                    <TableCell className="text-center"><Checkbox checked={!!m.applyRounding} onCheckedChange={checked => updateConfig(m.id!, "applyRounding", !!checked)} /></TableCell>
                                                                     <TableCell><Input type="number" value={m.wastagePct ?? ""} onChange={e => updateConfig(m.id!, "wastagePct", e.target.value ? Number(e.target.value) : undefined)} placeholder="Global" className="h-8 border-orange-200 text-[10px] px-2 font-bold w-full" /></TableCell>
                                                                     <TableCell className="text-[10px] font-bold text-orange-600">{m.wastageQty.toFixed(2)}</TableCell>
                                                                     <TableCell className="text-[10px] font-bold">{m.roundOffQty.toFixed(2)}</TableCell>
                                                                 </>
                                                             )}
+                                                            <TableCell className="text-center">
+                                                                <Checkbox checked={!!m.freezeAndEdit} onCheckedChange={checked => updateConfig(m.id!, "freezeAndEdit", !!checked)} />
+                                                            </TableCell>
                                                             <TableCell className="text-[10px] font-bold text-blue-600">₹{m.lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                                                             {!compactMode && <TableCell className="text-[10px] font-bold text-primary">{m.perUnitQty.toFixed(4)}</TableCell>}
                                                         </Reorder.Item>
                                                     );
                                                 })}
                                                 <TableRow className="bg-muted/20 font-black">
-                                                    <TableCell colSpan={compactMode ? 9 : 15} className="text-right py-3 pr-4">Total (Incl. Wastage)</TableCell>
+                                                    <TableCell colSpan={compactMode ? 10 : 16} className="text-right py-3 pr-4">Total (Incl. Wastage)</TableCell>
                                                     <TableCell className="text-[11px] text-primary">₹{totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                                                     {!compactMode && <TableCell></TableCell>}
                                                 </TableRow>
                                                 <TableRow className="bg-primary/5 font-black border-t-2 border-primary/20">
-                                                    <TableCell colSpan={compactMode ? 9 : 15} className="text-right py-4 pr-4 text-primary uppercase tracking-widest text-xs">Rate per {requiredUnitType}</TableCell>
+                                                    <TableCell colSpan={compactMode ? 10 : 16} className="text-right py-4 pr-4 text-primary uppercase tracking-widest text-xs">Rate per {requiredUnitType}</TableCell>
                                                     <TableCell className="text-sm text-primary font-black underline decoration-primary decoration-2 underline-offset-8">₹{(totalCost / (baseRequiredQty || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                                                     {!compactMode && <TableCell></TableCell>}
                                                 </TableRow>
@@ -1377,7 +1725,7 @@ export default function ManageProduct() {
                                         <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-1.5">
                                             <div className="flex items-center justify-between gap-3">
                                                 <div className="flex items-center gap-1.5">
-                                                    <TrendingUp className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                                                    <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
                                                     <span className="text-[11px] font-bold text-amber-800">Price Update Available — {activeMismatches.length} material{activeMismatches.length > 1 ? 's' : ''} updated in library</span>
                                                 </div>
                                                 <button onClick={handleUpdateAllRates} disabled={isUpdatingRates} className="flex items-center gap-1 px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded transition-colors disabled:opacity-50 shrink-0">
@@ -1563,6 +1911,6 @@ export default function ManageProduct() {
                     </div>
                 </DialogContent>
             </Dialog>
-        </Layout>
+        </LayoutComponent>
     );
 }

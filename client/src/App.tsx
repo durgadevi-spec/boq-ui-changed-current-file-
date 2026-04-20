@@ -28,9 +28,13 @@ import ManageCategories from "@/pages/admin/ManageCategories";
 import BulkMaterialUpload from "@/pages/admin/BulkMaterialUpload";
 import ProductApprovals from "@/pages/admin/ProductApprovals";
 import BomApprovals from "@/pages/admin/BomApprovals";
+import PurchaseTeamBomApprovals from "@/pages/admin/PurchaseTeamBomApprovals";
+import ProposalApprovals from "@/pages/admin/ProposalApprovals";
 import AdminAccessControl from "@/pages/admin/AdminAccessControl";
 import Archive from "@/pages/admin/Archive";
 import Trash from "@/pages/admin/Trash";
+import SpyDashboard from "@/pages/admin/SpyDashboard";
+import BoqApprovals from "@/pages/admin/BoqApprovals";
 import GeneratePO from "@/pages/GeneratePO";
 
 
@@ -39,6 +43,7 @@ import GeneratePO from "@/pages/GeneratePO";
 import Subscription from "@/pages/Subscription";
 import BoqReview from "@/pages/BoqReview";
 import CreateBoq from "@/pages/CreateBoq";
+import Proposal from "@/pages/Proposal";
 import FinalizeBoq from "@/pages/FinalizeBoq";
 import CreateProject from "@/pages/CreateProject";
 import ProjectDashboard from "@/pages/ProjectDashboard";
@@ -94,6 +99,7 @@ function Router() {
       <Route path="/finalize-bom" component={FinalizeBoq} />
       <Route path="/project-dashboard" component={ProjectDashboard} />
       <Route path="/bom-review" component={BoqReview} />
+      <Route path="/proposal/:projectId?" component={Proposal} />
       <Route path="/user-manual" component={UserManual} />
 
       {/* ================= SKETCH A PLAN ================= */}
@@ -124,9 +130,13 @@ function Router() {
       <Route path="/admin/vendor-categories" component={VendorCategories} />
       <Route path="/admin/product-approvals" component={ProductApprovals} />
       <Route path="/admin/bom-approvals" component={BomApprovals} />
+      <Route path="/admin/boq-approvals" component={BoqApprovals} />
+      <Route path="/admin/purchase-team-bom-approvals" component={PurchaseTeamBomApprovals} />
+      <Route path="/admin/proposal-approvals" component={ProposalApprovals} />
       <Route path="/admin/access-control" component={AdminAccessControl} />
       <Route path="/admin/archive" component={Archive} />
       <Route path="/admin/trash" component={Trash} />
+      <Route path="/admin/spy" component={SpyDashboard} />
       <Route path="/generate-po" component={GeneratePO} />
 
       {/* ✅ Supplier Approval (MAIN) */}
@@ -157,6 +167,35 @@ function Router() {
   );
 }
 
+import { useLocation } from "wouter";
+import { useAuth } from "./lib/auth-context";
+import { useEffect } from "react";
+import apiFetch from "./lib/api";
+
+function NavigationLogger() {
+  const [location] = useLocation();
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (user && location !== "/login" && location !== "/signup" && location !== "/") {
+      // Small delay to ensure we don't log rapid transitions too aggressively
+      const timer = setTimeout(() => {
+        apiFetch("/api/audit/navigate", {
+          method: "POST",
+          body: JSON.stringify({
+            page: location,
+            module: location.split("/")[1]?.toUpperCase() || "HOME",
+            details: `User navigated to ${location}`
+          })
+        }).catch(() => {});
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [location, !!user]);
+
+  return null;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -164,6 +203,7 @@ function App() {
         <DataProvider>
           <TooltipProvider>
             <Toaster />
+            <NavigationLogger />
             <Router />
           </TooltipProvider>
         </DataProvider>

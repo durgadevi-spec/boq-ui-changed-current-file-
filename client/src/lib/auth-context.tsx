@@ -17,6 +17,7 @@ export type UserRole =
   | "contractor"
   | "product_manager"
   | "site_engineer"
+  | "finance_team"
   | null;
 
 interface User {

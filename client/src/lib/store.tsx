@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, ReactNode, useEffect } from
 import { getJSON, postJSON, apiFetch } from "./api";
 import { useAuth } from "./auth-context";
 
-export type Role = "admin" | "supplier" | "user" | "purchase_team" | "software_team" | "pre_sales" | "contractor" | "product_manager" | "site_engineer";
+export type Role = "admin" | "supplier" | "user" | "purchase_team" | "software_team" | "pre_sales" | "contractor" | "product_manager" | "site_engineer" | "finance_team";
 
 export interface User {
   id: string;
@@ -52,7 +52,8 @@ interface DataContextType {
   rejectShop?: (id: string, reason?: string | null) => Promise<any>;
   approveMaterial?: (id: string, source?: string) => Promise<any>;
   rejectMaterial?: (id: string, reason?: string | null, source?: string) => Promise<any>;
-  addSupportMessage?: (senderName: string, message: string, info?: string) => Promise<void>;
+  addSupportMessage?: (senderName: string, message: string, info?: string, admin_reply?: string) => Promise<any>;
+  updateSupportMessage?: (id: string, updates: { info?: string, admin_reply?: string, is_read?: boolean }) => Promise<any>;
   deleteMessage?: (id: string) => Promise<void>;
   refreshMaterials: () => Promise<void>;
   refreshPendingApprovals: () => Promise<void>;
@@ -231,7 +232,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       await refreshPendingApprovals();
       // load support messages
       try {
-        const sm = await getJSON('/messages');
+        const sm = await getJSON('/support-messages');
         if (mounted && sm?.messages) setSupportMessages(sm.messages);
       } catch (e) { console.warn('load support messages failed', e); }
     })();
@@ -470,15 +471,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
     throw new Error('Rejection failed');
   };
 
-  const addSupportMessage = async (senderName: string, message: string, info?: string) => {
+  const addSupportMessage = async (senderName: string, message: string, info?: string, admin_reply?: string) => {
     try {
-      const data = await postJSON('/messages', {
+      const data = await postJSON('/support-messages', {
         senderName,
         message,
         info: info || null,
+        admin_reply: admin_reply || null,
       });
       if (data?.message) {
         setSupportMessages((p) => [data.message, ...p]);
+        return data.message;
       }
     } catch (e) {
       console.warn('addSupportMessage failed', e);
@@ -486,9 +489,29 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateSupportMessage = async (id: string, updates: { info?: string, admin_reply?: string, is_read?: boolean }) => {
+    try {
+      const res = await apiFetch(`/api/support-messages/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const updated = data.message || data;
+        setSupportMessages((p) => p.map((m: any) => m.id === id ? updated : m));
+        return updated;
+      }
+      throw new Error('Failed to update message');
+    } catch (e) {
+      console.warn('updateSupportMessage failed', e);
+      throw e;
+    }
+  };
+
   const deleteMessage = async (id: string) => {
     try {
-      const res = await apiFetch(`/messages/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/support-messages/${id}`, { method: 'DELETE' });
       if (res.ok) {
         setSupportMessages((p) => p.filter((m: any) => m.id !== id));
         return;
@@ -525,6 +548,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     submitShopForApproval,
     submitMaterialForApproval,
     addSupportMessage,
+    updateSupportMessage,
     deleteMessage,
     refreshMaterials,
     refreshPendingApprovals,

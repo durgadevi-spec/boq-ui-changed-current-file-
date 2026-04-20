@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { Layout } from "@/components/layout/Layout";
+import { SupplierLayout } from "@/components/layout/SupplierLayout";
+import { useAuth } from "@/lib/auth-context";
 import {
   Card,
   CardContent,
@@ -19,7 +21,21 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, Plus } from "lucide-react";
+import { Building2, Plus, Check, ChevronsUpDown, X, Store, MapPin, Phone, Globe, FileText, IndianRupee } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 
 const COUNTRY_CODES = [
   { code: "+91", country: "India" },
@@ -41,14 +57,16 @@ const INDIAN_STATES = [
   "Delhi", "Jammu and Kashmir", "Ladakh", "Lakshadweep", "Puducherry"
 ];
 
-const Required = () => <span className="text-red-500 ml-1">*</span>;
+const Required = () => <span className="text-red-500 ml-0.5 text-xs">*</span>;
 
 export default function SupplierShops() {
   const { toast } = useToast();
   const [shops, setShops] = useState<any[]>([]);
+  const [dbCategories, setDbCategories] = useState<any[]>([]);
   const [loadingShops, setLoadingShops] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [editingShopId, setEditingShopId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -62,12 +80,26 @@ export default function SupplierShops() {
     gstNo: "",
     new_location: "",
     terms_and_conditions: "",
+    vendor_category: [] as string[],
   });
 
-  // Load supplier's shops on mount
+  // Load supplier's shops and categories on mount
   useEffect(() => {
     loadSupplierShops();
+    fetchCategories();
   }, []);
+
+  const fetchCategories = async () => {
+    try {
+      const response = await fetch("/api/vendor-categories");
+      if (response.ok) {
+        const data = await response.json();
+        setDbCategories(data.categories || []);
+      }
+    } catch (error) {
+      console.error("Error fetching categories:", error);
+    }
+  };
 
   const loadSupplierShops = async () => {
     try {
@@ -76,7 +108,6 @@ export default function SupplierShops() {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!response.ok) {
-        console.error("load shops failed", response.status);
         setShops([]);
         return;
       }
@@ -94,306 +125,360 @@ export default function SupplierShops() {
     e.preventDefault();
 
     if (!formData.name.trim()) {
-      toast({
-        title: "Error",
-        description: "Shop name is required",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Shop name is required", variant: "destructive" });
       return;
     }
 
     if (!formData.location.trim() || !formData.city.trim()) {
-      toast({
-        title: "Error",
-        description: "Location and city are required",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "City and Address are required", variant: "destructive" });
       return;
     }
 
     if (!formData.contactNumber.trim()) {
-      toast({
-        title: "Error",
-        description: "Contact number is required",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Contact number is required", variant: "destructive" });
       return;
     }
 
     setSubmitting(true);
     try {
       const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/shops", {
-        method: "POST",
+      const url = editingShopId ? `/api/shops/${editingShopId}` : "/api/shops";
+      const method = editingShopId ? "PUT" : "POST";
+      
+      const payload = {
+        ...formData,
+        vendor_category: formData.vendor_category.join(", "),
+        vendorCategory: formData.vendor_category.join(", "), // For PUT route mapping
+      };
+
+      const response = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
           ...(token ? { "Authorization": `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
-        const text = await response.text();
-        console.error("submit shop failed", response.status, text);
         throw new Error(`Failed to submit shop (${response.status})`);
       }
 
-      const data = await response.json();
       toast({
         title: "Success",
-        description: "Shop submitted for approval. Admin will review and approve it.",
+        description: editingShopId ? "Shop updated successfully." : "Shop submitted successfully.",
       });
 
-      // Reset form
-      setFormData({
-        name: "",
-        location: "",
-        city: "",
-        phoneCountryCode: "+91",
-        contactNumber: "",
-        state: "Tamil Nadu",
-        country: "India",
-        pincode: "",
-        gstNo: "",
-        new_location: "",
-        terms_and_conditions: "",
-      });
-      setShowForm(false);
-
-      // Reload shops
+      resetForm();
       loadSupplierShops();
     } catch (error) {
       console.error("Error submitting shop:", error);
-      toast({
-        title: "Error",
-        description: "Failed to submit shop",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to submit shop", variant: "destructive" });
     } finally {
       setSubmitting(false);
     }
   };
 
-  return (
-    <Layout>
-      <div className="container mx-auto py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">My Shops</h1>
-          <p className="text-gray-600">
-            Add and manage your shops. Submit for approval to appear in the system.
-          </p>
-        </div>
+  const resetForm = () => {
+    setFormData({
+      name: "",
+      location: "",
+      city: "",
+      phoneCountryCode: "+91",
+      contactNumber: "",
+      state: "Tamil Nadu",
+      country: "India",
+      pincode: "",
+      gstNo: "",
+      new_location: "",
+      terms_and_conditions: "",
+      vendor_category: [],
+    });
+    setEditingShopId(null);
+    setShowForm(false);
+  };
 
-        <div className="grid gap-8">
-          {/* Add Shop Button */}
-          {!showForm && (
-            <Button
-              onClick={() => setShowForm(true)}
-              className="w-fit bg-blue-600 hover:bg-blue-700"
-            >
-              <Plus className="mr-2 h-4 w-4" /> Add New Shop
-            </Button>
-          )}
+  const startEdit = (shop: any) => {
+    setFormData({
+      name: shop.name || "",
+      location: shop.location || "",
+      city: shop.city || "",
+      phoneCountryCode: shop.phoneCountryCode || "+91",
+      contactNumber: shop.contactNumber || "",
+      state: shop.state || "Tamil Nadu",
+      country: shop.country || "India",
+      pincode: shop.pincode || "",
+      gstNo: shop.gstNo || shop.gstno || "",
+      new_location: shop.new_location || "",
+      terms_and_conditions: shop.terms_and_conditions || "",
+      vendor_category: shop.vendor_category ? shop.vendor_category.split(",").map((s: string) => s.trim()) : [],
+    });
+    setEditingShopId(shop.id);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
-          {/* Shop Form */}
+    const { user } = useAuth();
+    const isSupplier = user?.role === "supplier";
+    const shopName = shops[0]?.name || "";
+    const shopLocation = shops[0]?.location || "";
+    const LayoutComponent = isSupplier ? SupplierLayout : Layout;
+
+    return (
+      <LayoutComponent {...(isSupplier ? { shopName, shopLocation, shopApproved: true } : {})}>
+      <div className="min-h-screen bg-[#FDFDFD]">
+        <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-8">
+          <div className="bg-white p-8 rounded-3xl shadow-[0_2px_15px_rgba(0,0,0,0.03)] border border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-2">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-[10px] font-bold uppercase tracking-wider">
+                Retail Outlets
+              </div>
+              <h1 className="text-3xl font-black tracking-tight text-slate-900">
+                Shop Management
+              </h1>
+              <p className="text-slate-500 max-w-2xl text-sm font-medium leading-relaxed">
+                Register and update your commercial outlets. Ensure all registration details are accurate for verification.
+              </p>
+            </div>
+            {!showForm && (
+              <Button
+                onClick={() => setShowForm(true)}
+                className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-6 h-12 shadow-lg shadow-slate-200 rounded-xl flex items-center gap-2 group transition-all"
+              >
+                <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-300" /> 
+                Add New Shop
+              </Button>
+            )}
+          </div>
+
+        <div className="grid gap-10">
           {showForm && (
-            <Card className="border-blue-200 bg-blue-50">
-              <CardHeader>
-                <CardTitle className="text-blue-900 flex items-center gap-2">
-                  <Building2 className="h-5 w-5" /> Add New Shop
-                </CardTitle>
-                <CardDescription className="text-blue-800">
-                  Fill in your shop details and submit for approval
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleSubmitShop} className="space-y-6">
-                  {/* Shop Name */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>
-                        Shop Name <Required />
-                      </Label>
-                      <Input
-                        placeholder="Enter shop name"
-                        value={formData.name}
-                        onChange={(e) =>
-                          setFormData({ ...formData, name: e.target.value })
-                        }
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>
-                        Address <Required />
-                      </Label>
-                      <Input
-                        placeholder="Enter address"
-                        value={formData.location}
-                        onChange={(e) =>
-                          setFormData({ ...formData, location: e.target.value })
-                        }
-                      />
-                    </div>
-                  </div>
-
-                  {/* New Location and City */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Location</Label>
-                      <Input
-                        placeholder="Enter location"
-                        value={formData.new_location}
-                        onChange={(e) =>
-                          setFormData({ ...formData, new_location: e.target.value })
-                        }
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>
-                        City <Required />
-                      </Label>
-                      <Input
-                        placeholder="Enter city"
-                        value={formData.city}
-                        onChange={(e) =>
-                          setFormData({ ...formData, city: e.target.value })
-                        }
-                      />
+            <Card className="border-slate-200 shadow-xl overflow-hidden rounded-xl animate-in fade-in slide-in-from-top-4 duration-500">
+              <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                    {editingShopId ? "Edit Regional Outlet" : "Register New Shop Outlet"}
+                  </h2>
+                  <p className="text-xs text-slate-500">All fields marked with <Required /> are mandatory</p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={resetForm} className="text-slate-400 hover:text-slate-600">
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+              <CardContent className="p-8">
+                <form onSubmit={handleSubmitShop} className="space-y-8">
+                  {/* Basic Information */}
+                  <div className="space-y-6">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 border-b pb-2">Technical Information</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                      <div className="space-y-2.5">
+                        <Label className="text-xs font-bold text-slate-700">Official Shop Name <Required /></Label>
+                        <Input
+                          placeholder="e.g. Galaxy Hardware & Logistics"
+                          value={formData.name}
+                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                          className="h-11 border-slate-200 focus:border-slate-400 focus:ring-0 rounded-lg"
+                        />
+                      </div>
+                      <div className="space-y-2.5">
+                        <Label className="text-xs font-bold text-slate-700">Primary Contact Number <Required /></Label>
+                        <div className="flex gap-2">
+                          <Select
+                            value={formData.phoneCountryCode}
+                            onValueChange={(val) => setFormData({ ...formData, phoneCountryCode: val })}
+                          >
+                            <SelectTrigger className="w-[100px] h-11 border-slate-200 rounded-lg">
+                              <SelectValue placeholder="+91" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {COUNTRY_CODES.map((c) => (
+                                <SelectItem key={c.code} value={c.code}>{c.code}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Input
+                            placeholder="98765 43210"
+                            value={formData.contactNumber}
+                            onChange={(e) => setFormData({ ...formData, contactNumber: e.target.value })}
+                            type="tel"
+                            className="flex-1 h-11 border-slate-200 focus:border-slate-400 focus:ring-0 rounded-lg"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
 
-                  {/* State and Country */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>State</Label>
-                      <Select
-                        value={formData.state}
-                        onValueChange={(value) =>
-                          setFormData({ ...formData, state: value })
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select state" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {INDIAN_STATES.map((state) => (
-                            <SelectItem key={state} value={state}>
-                              {state}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Country</Label>
-                      <Input
-                        placeholder="Enter country"
-                        value={formData.country}
-                        onChange={(e) =>
-                          setFormData({ ...formData, country: e.target.value })
-                        }
-                      />
-                    </div>
-                  </div>
-
-                  {/* Pincode */}
-                  <div className="space-y-2">
-                    <Label>Pincode</Label>
-                    <Input
-                      placeholder="Enter pincode"
-                      value={formData.pincode}
-                      onChange={(e) =>
-                        setFormData({ ...formData, pincode: e.target.value })
-                      }
-                    />
-                  </div>
-
-                  {/* Phone Number */}
-                  <div className="space-y-2">
-                    <Label>
-                      Phone Number <Required />
-                    </Label>
-                    <div className="flex gap-2">
-                      <Select
-                        value={formData.phoneCountryCode}
-                        onValueChange={(value) =>
-                          setFormData({
-                            ...formData,
-                            phoneCountryCode: value,
-                          })
-                        }
-                      >
-                        <SelectTrigger className="w-28">
-                          <SelectValue placeholder="+91" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {COUNTRY_CODES.map((c) => (
-                            <SelectItem key={c.code} value={c.code}>
-                              {c.code}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Input
-                        placeholder="Enter phone number"
-                        value={formData.contactNumber}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            contactNumber: e.target.value,
-                          })
-                        }
-                        type="tel"
-                        className="flex-1"
-                      />
+                  {/* Vendor Categories */}
+                  <div className="space-y-6">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 border-b pb-2">Scope of Operations</h3>
+                    <div className="space-y-2.5">
+                      <Label className="text-xs font-bold text-slate-700">Vendor Categories <Required /></Label>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className="w-full h-11 justify-between border-slate-200 hover:border-slate-300 rounded-lg text-slate-600 bg-white"
+                          >
+                            <div className="flex flex-wrap gap-1 items-center">
+                              {formData.vendor_category.length > 0 ? (
+                                formData.vendor_category.map((cat) => (
+                                  <Badge key={cat} variant="secondary" className="bg-slate-100 text-slate-700 hover:bg-slate-200 border-none px-2 rounded-md h-6 flex items-center gap-1">
+                                    {cat}
+                                    <X 
+                                      className="h-3 w-3 cursor-pointer" 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setFormData(prev => ({
+                                          ...prev,
+                                          vendor_category: prev.vendor_category.filter(c => c !== cat)
+                                        }));
+                                      }}
+                                    />
+                                  </Badge>
+                                ))
+                              ) : (
+                                <span className="text-slate-400 font-normal">Select areas of expertise...</span>
+                              )}
+                            </div>
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[400px] p-0 shadow-2xl rounded-xl border-slate-200" align="start">
+                          <Command className="rounded-xl">
+                            <CommandInput placeholder="Search categories..." className="h-11" />
+                            <CommandList className="max-h-[300px]">
+                              <CommandEmpty>No category found.</CommandEmpty>
+                              <CommandGroup>
+                                {dbCategories.map((category) => (
+                                  <CommandItem
+                                    key={category.id}
+                                    onSelect={() => {
+                                      const isSelected = formData.vendor_category.includes(category.name);
+                                      setFormData(prev => ({
+                                        ...prev,
+                                        vendor_category: isSelected 
+                                          ? prev.vendor_category.filter(c => c !== category.name)
+                                          : [...prev.vendor_category, category.name]
+                                      }));
+                                    }}
+                                    className="flex items-center justify-between py-3 px-4 cursor-pointer hover:bg-slate-50"
+                                  >
+                                    <span className="text-sm font-medium">{category.name}</span>
+                                    {formData.vendor_category.includes(category.name) && (
+                                      <Check className="h-4 w-4 text-slate-900" />
+                                    )}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
                     </div>
                   </div>
 
-                  {/* GST and Terms */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>GST Number</Label>
-                      <Input
-                        placeholder="Enter GST number"
-                        value={formData.gstNo}
-                        onChange={(e) =>
-                          setFormData({ ...formData, gstNo: e.target.value })
-                        }
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Terms and Conditions</Label>
-                      <Input
-                        placeholder="Enter terms and conditions"
-                        value={formData.terms_and_conditions}
-                        onChange={(e) =>
-                          setFormData({ ...formData, terms_and_conditions: e.target.value })
-                        }
-                      />
+                  {/* Location Details */}
+                  <div className="space-y-6">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 border-b pb-2">Geographic Presence</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                      <div className="space-y-2.5">
+                        <Label className="text-xs font-bold text-slate-700">Detailed Address <Required /></Label>
+                        <Input
+                          placeholder="No. 42, Main Street, Industrial Zone"
+                          value={formData.location}
+                          onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                          className="h-11 border-slate-200 rounded-lg"
+                        />
+                      </div>
+                      <div className="space-y-2.5">
+                        <Label className="text-xs font-bold text-slate-700">Landmark / Sub-locality</Label>
+                        <Input
+                          placeholder="Near Central Metro Station"
+                          value={formData.new_location}
+                          onChange={(e) => setFormData({ ...formData, new_location: e.target.value })}
+                          className="h-11 border-slate-200 rounded-lg"
+                        />
+                      </div>
+                      <div className="space-y-2.5">
+                        <Label className="text-xs font-bold text-slate-700">City <Required /></Label>
+                        <Input
+                          placeholder="e.g. Chennai"
+                          value={formData.city}
+                          onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                          className="h-11 border-slate-200 rounded-lg"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2.5">
+                          <Label className="text-xs font-bold text-slate-700">State <Required /></Label>
+                          <Select
+                            value={formData.state}
+                            onValueChange={(val) => setFormData({ ...formData, state: val })}
+                          >
+                            <SelectTrigger className="h-11 border-slate-200 rounded-lg">
+                              <SelectValue placeholder="State" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {INDIAN_STATES.map((s) => (
+                                <SelectItem key={s} value={s}>{s}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2.5">
+                          <Label className="text-xs font-bold text-slate-700">Pincode <Required /></Label>
+                          <Input
+                            placeholder="600001"
+                            value={formData.pincode}
+                            onChange={(e) => setFormData({ ...formData, pincode: e.target.value })}
+                            className="h-11 border-slate-200 rounded-lg"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Submit Buttons */}
-                  <div className="flex gap-3">
+                  {/* Legal Information */}
+                  <div className="space-y-6">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 border-b pb-2">Compliance & Policy</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                      <div className="space-y-2.5">
+                        <Label className="text-xs font-bold text-slate-700">GST Registration Number</Label>
+                        <Input
+                          placeholder="33AAAAA0000A1Z5"
+                          value={formData.gstNo}
+                          onChange={(e) => setFormData({ ...formData, gstNo: e.target.value })}
+                          className="h-11 border-slate-200 rounded-lg px-4"
+                        />
+                      </div>
+                      <div className="space-y-2.5">
+                        <Label className="text-xs font-bold text-slate-700">Operations Terms & Conditions</Label>
+                        <Input
+                          placeholder="Standard billing and return policies"
+                          value={formData.terms_and_conditions}
+                          onChange={(e) => setFormData({ ...formData, terms_and_conditions: e.target.value })}
+                          className="h-11 border-slate-200 rounded-lg px-4"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-8 border-t flex flex-col sm:flex-row gap-4">
                     <Button
                       type="submit"
                       disabled={submitting}
-                      className="bg-blue-600 hover:bg-blue-700"
+                      className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-12 px-8 rounded-lg shadow-lg flex-1 transition-all active:scale-95"
                     >
-                      {submitting ? "Submitting..." : "Submit for Approval"}
+                      {submitting ? "Processing Request..." : (editingShopId ? "Synchronize Changes" : "Register Shop Configuration")}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => setShowForm(false)}
+                      onClick={resetForm}
                       disabled={submitting}
+                      className="border-slate-300 text-slate-600 font-semibold h-12 px-8 rounded-lg"
                     >
-                      Cancel
+                      Discard
                     </Button>
                   </div>
                 </form>
@@ -401,69 +486,107 @@ export default function SupplierShops() {
             </Card>
           )}
 
-          {/* My Shops List */}
-          {!loadingShops && shops.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>My Shops ({shops.length})</CardTitle>
-                <CardDescription>
-                  List of your submitted and approved shops
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {shops.map((shop: any) => (
-                    <div
-                      key={shop.id}
-                      className="p-4 border rounded-lg flex items-start justify-between"
-                    >
-                      <div>
-                        <h3 className="font-semibold text-sm">{shop.name}</h3>
-                        <p className="text-xs text-muted-foreground">
-                          {shop.location}, {shop.city}
-                          {shop.state && `, ${shop.state}`}
-                          {shop.country && `, ${shop.country}`}
-                        </p>
-                        {shop.new_location && (
-                          <p className="text-xs text-muted-foreground italic">
-                            Alt Location: {shop.new_location}
+          {/* Shops List */}
+          <div className="space-y-6">
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+              Our Registered Establishments 
+              {!loadingShops && <Badge variant="secondary" className="bg-slate-100 text-slate-600 ml-2">{shops.length}</Badge>}
+            </h2>
+            
+            {loadingShops ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[1, 2, 3].map(i => (
+                  <Card key={i} className="h-64 animate-pulse bg-slate-50 border-slate-200 rounded-xl" />
+                ))}
+              </div>
+            ) : shops.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {shops.map((shop) => (
+                  <Card key={shop.id} className="group border-slate-200 hover:border-slate-300 hover:shadow-xl transition-all duration-300 rounded-xl overflow-hidden bg-white">
+                    <div className="relative h-2 bg-slate-100 group-hover:bg-slate-900 transition-colors" />
+                    <CardHeader className="pb-4">
+                      <div className="flex justify-between items-start">
+                        <div className="space-y-1">
+                          <CardTitle className="text-lg font-extrabold text-slate-900 transition-colors">{shop.name}</CardTitle>
+                          <Badge 
+                            variant={shop.approved ? "default" : "secondary"}
+                            className={cn(
+                              "text-[10px] uppercase font-black px-2 py-0.5 border-none",
+                              shop.approved ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                            )}
+                          >
+                            {shop.approved ? "Active" : "Pending Verification"}
+                          </Badge>
+                        </div>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-8 w-8 p-0 text-slate-400 hover:text-slate-900 rounded-full"
+                          onClick={() => startEdit(shop)}
+                        >
+                          <FileText className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      <div className="space-y-3">
+                        <div className="flex items-start gap-2.5">
+                          <MapPin className="h-3.5 w-3.5 text-slate-400 mt-0.5 shrink-0" />
+                          <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                            {shop.location}, {shop.city}, {shop.state} - {shop.pincode}
                           </p>
-                        )}
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {shop.phoneCountryCode} {shop.contactNumber}
-                        </p>
-                        {shop.gstNo && (
-                          <p className="text-xs text-muted-foreground">
-                            GST: {shop.gstNo}
+                        </div>
+                        <div className="flex items-center gap-2.5">
+                          <Phone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                          <p className="text-xs text-slate-600 font-bold tracking-tight">
+                            {shop.phoneCountryCode} {shop.contactNumber}
                           </p>
-                        )}
-                        {shop.terms_and_conditions && (
-                          <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
-                             T&C: {shop.terms_and_conditions}
-                          </p>
+                        </div>
+                        {shop.vendor_category && (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {shop.vendor_category.split(",").slice(0, 3).map((cat: string) => (
+                              <Badge key={cat} variant="outline" className="text-[9px] bg-slate-50 border-slate-200 text-slate-500 font-bold px-1.5 py-0 h-4">
+                                {cat.trim()}
+                              </Badge>
+                            ))}
+                            {shop.vendor_category.split(",").length > 3 && (
+                              <span className="text-[9px] text-slate-400 font-bold">+{shop.vendor_category.split(",").length - 3}</span>
+                            )}
+                          </div>
                         )}
                       </div>
-                      <Badge variant={shop.approved ? "default" : "secondary"}>
-                        {shop.approved ? "Approved" : "Pending"}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
 
-          {!loadingShops && shops.length === 0 && !showForm && (
-            <Card>
-              <CardContent className="pt-6">
-                <div className="text-center text-gray-500">
-                  No shops submitted yet. Click "Add New Shop" to get started.
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                      <div className="pt-4 border-t border-slate-50 flex items-center justify-between">
+                         <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black uppercase text-slate-400 tracking-tighter">GST COMPLIANCE:</span>
+                            <span className="text-[10px] font-bold text-slate-700">{shop.gstNo || shop.gstno || "Not Specified"}</span>
+                         </div>
+                         <Button 
+                          variant="link" 
+                          size="sm" 
+                          className="text-slate-900 font-bold text-xs p-0 h-auto hover:no-underline"
+                          onClick={() => startEdit(shop)}
+                         >
+                           CONFIGURE →
+                         </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-20 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                <Store className="h-12 w-12 text-slate-200 mx-auto mb-4" />
+                <p className="text-slate-500 font-medium">No shops found in our records.</p>
+                <Button variant="link" onClick={() => setShowForm(true)} className="text-slate-900 font-bold mt-2">
+                  Launch Your First Outlet
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </Layout>
+    </div>
+    </LayoutComponent>
   );
 }

@@ -25,6 +25,7 @@ export type MaterialLine = {
     installRate: number;
     applyWastage?: boolean;
     applyRounding?: boolean;
+    freezeAndEdit?: boolean;
     [key: string]: any; // Preserve extra fields like shop_name, description
 };
 
@@ -78,6 +79,7 @@ export function computeBoq(
         const wastagePctUsed = applyW ? (rowW !== undefined ? rowW : defaultW) : 0;
 
         const wastageQty = baseQty * wastagePctUsed;
+        const isFrozenQty = (l.freezeAndEdit === true || (l as any).freezeAndEdit === "true" || (l as any).freezeAndEdit === 1 || l.freeze_and_edit === true || l.freeze_and_edit === "true" || l.freeze_and_edit === 1);
         const effectiveQtyAtBasis = baseQty + wastageQty;
 
         // Excel Logic: The rounding happens at the "Basis" level (the recipe).
@@ -87,8 +89,8 @@ export function computeBoq(
         const roundedQtyAtBasis = applyR ? Math.ceil(effectiveQtyAtBasis) : effectiveQtyAtBasis;
         const perUnitQty = base > 0 ? roundedQtyAtBasis / base : 0;
 
-        const scaledQty = perUnitQty * target;
-        const roundOffQty = applyR ? Math.ceil(scaledQty) : scaledQty;
+        const scaledQty = isFrozenQty ? roundedQtyAtBasis : perUnitQty * target;
+        const roundOffQty = isFrozenQty ? roundedQtyAtBasis : (applyR ? Math.ceil(scaledQty) : scaledQty);
 
         const supplyRate = Number(l.supplyRate) || 0;
         const installRate = Number(l.installRate) || 0;
@@ -155,6 +157,7 @@ export function linesFromTableData(tableData: any): MaterialLine[] {
             shop_id: l.shop_id || l.shopId,
             applyWastage: l.apply_wastage !== undefined ? Boolean(l.apply_wastage) : (l.applyWastage !== undefined ? Boolean(l.applyWastage) : true),
             applyRounding: l.apply_rounding !== undefined ? Boolean(l.apply_rounding) : (l.applyRounding !== undefined ? Boolean(l.applyRounding) : true),
+            freezeAndEdit: (l.freeze_and_edit === true || l.freeze_and_edit === "true" || l.freeze_and_edit === 1 || l.freezeAndEdit === true || l.freezeAndEdit === "true" || l.freezeAndEdit === 1),
             description: l.description || l.technicalspecification || l.name,
             technicalspecification: l.technicalspecification
         }));
@@ -172,7 +175,8 @@ export function linesFromTableData(tableData: any): MaterialLine[] {
             supplyRate: Number(item.supply_rate ?? 0),
             installRate: Number(item.install_rate ?? 0),
             shop_name: item.shop_name || item.shopName,
-            shop_id: item.shop_id || item.shopId
+            shop_id: item.shop_id || item.shopId,
+            freezeAndEdit: (item.freeze_and_edit === true || item.freeze_and_edit === "true" || item.freeze_and_edit === 1 || item.freezeAndEdit === true || item.freezeAndEdit === "true" || item.freezeAndEdit === 1)
         }));
     }
     return [];

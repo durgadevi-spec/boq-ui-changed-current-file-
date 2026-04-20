@@ -31,6 +31,7 @@ interface MaterialSubmission {
   unit: string;
   brandname: string;
   modelnumber: string;
+  category: string;
   subcategory: string;
   technicalspecification: string;
   approved: boolean | null;
@@ -242,6 +243,12 @@ export default function MaterialSubmissionApproval() {
                       <div>
                         <p className="text-sm text-gray-600">Model Number</p>
                         <p className="font-semibold">{submission.modelnumber}</p>
+                      </div>
+                    )}
+                    {submission.category && (
+                      <div>
+                        <p className="text-sm text-gray-600">Category</p>
+                        <p className="font-semibold">{submission.category}</p>
                       </div>
                     )}
                     {submission.subcategory && (

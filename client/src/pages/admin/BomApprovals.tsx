@@ -53,7 +53,11 @@ export default function BomApprovals() {
             const res = await apiFetch("/api/bom-approvals");
             if (res.ok) {
                 const data = await res.json();
-                setApprovals(data.approvals || []);
+                // Strictly filter for BOM type to separate from BOQ approvals
+                const filtered = (data.approvals || []).filter((a: any) => 
+                    (a.type === 'bom' || !a.type)
+                );
+                setApprovals(filtered);
             }
         } catch (err) {
             console.error("Failed to load BOM approvals:", err);
@@ -95,7 +99,10 @@ export default function BomApprovals() {
         setActionLoading(id);
         try {
             const url = isEditRequest ? `/api/bom-approvals/${id}/approve-edit` : `/api/bom-approvals/${id}/approve`;
-            const res = await apiFetch(url, { method: "POST" });
+            const res = await apiFetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" }
+            });
             if (res.ok) {
                 toast({ title: "Approved", description: isEditRequest ? "Edit request approved." : "BOM version approved." });
                 fetchApprovals();
@@ -478,7 +485,7 @@ export default function BomApprovals() {
                                                             disabled={actionLoading === approval.id || isEditingBOM === approval.id}
                                                         >
                                                             Reject
-                                                        </Button>
+                                                        </Button> 
                                                     </>
                                                 ) : null}
                                             </div>

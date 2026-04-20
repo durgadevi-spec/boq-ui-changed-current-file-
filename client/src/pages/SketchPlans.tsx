@@ -4,15 +4,17 @@ import { Layout } from "@/components/layout/Layout";
 import { SupplierLayout } from "@/components/layout/SupplierLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Trash2, Edit2, FileText, Calendar, MapPin, Layers, Lock, AlertCircle, Check, X, GitBranch, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Edit2, FileText, Calendar, MapPin, Layers, Lock, AlertCircle, Check, X, GitBranch, ChevronDown, Copy } from "lucide-react";
 import apiFetch from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { useAuth } from "@/lib/auth-context";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { DeleteConfirmationDialog } from "@/components/ui/DeleteConfirmationDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 // Group plans by their root (parent_plan_id or id)
 interface PlanGroup {
@@ -77,6 +79,12 @@ export default function SketchPlans() {
   // Per-group selected version id
   const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({});
   const [creatingVersion, setCreatingVersion] = useState<string | null>(null);
+  const [showTasksMode, setShowTasksMode] = useState(false);
+  const [assignedTasks, setAssignedTasks] = useState<any[]>([]);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [cloneDialog, setCloneDialog] = useState<{ isOpen: boolean; sourceId: string; name: string; projectId: string; versions: any[] } | null>(null);
+  const [isCloning, setIsCloning] = useState(false);
 
   useEffect(() => {
     if (isSupplier) {
@@ -111,8 +119,53 @@ export default function SketchPlans() {
     }
   };
 
+  const loadAssignedTasks = async () => {
+    try {
+      setLoadingTasks(true);
+      const res = await apiFetch("/api/sketch-plans/assigned-tasks");
+      if (res.ok) {
+        const data = await res.json();
+        setAssignedTasks(data.tasks || []);
+      }
+    } catch (err) {
+      console.error("Failed to load tasks", err);
+    } finally {
+      setLoadingTasks(false);
+    }
+  };
+
+  const loadProjects = async () => {
+    try {
+      const res = await apiFetch("/api/boq-projects");
+      if (res.ok) {
+        const data = await res.json();
+        setProjects(data.projects || []);
+      }
+    } catch (err) {
+      console.error("Failed to load projects", err);
+    }
+  };
+
+  const updateTaskStatus = async (taskId: string, status: string) => {
+    try {
+      const res = await apiFetch(`/api/sketch-plans/assigned-tasks/${taskId}/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status })
+      });
+      if (res.ok) {
+        toast({ title: "Success", description: `Task marked as ${status}` });
+        loadAssignedTasks();
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to update task", variant: "destructive" });
+    }
+  };
+
   useEffect(() => {
     loadPlans();
+    loadAssignedTasks();
+    loadProjects();
   }, []);
 
   // Init selected version to latest per group
@@ -176,6 +229,41 @@ export default function SketchPlans() {
     }
   };
 
+  const handleClonePlan = async () => {
+    if (!cloneDialog || !cloneDialog.sourceId) return;
+    setIsCloning(true);
+    try {
+      const res = await apiFetch(`/api/sketch-plans/${cloneDialog.sourceId}/clone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: cloneDialog.name,
+          projectId: cloneDialog.projectId === "none" ? null : cloneDialog.projectId
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        toast({ title: "Plan Cloned", description: `"${cloneDialog.name}" has been created as a new plan.` });
+        setCloneDialog(null);
+        await loadPlans();
+        // Redirect to edit the new plan
+        setLocation(`/edit-sketch-plan/${data.id}`);
+      } else {
+        const data = await res.json();
+        toast({
+          title: "Error",
+          description: data.details ? `Failed: ${data.details}` : (data.message || "Failed to clone plan"),
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to clone plan", variant: "destructive" });
+    } finally {
+      setIsCloning(false);
+    }
+  };
+
   const handleEditRequest = async (planId: string, action: 'approve' | 'reject') => {
     try {
       const res = await apiFetch(`/api/sketch-plans/${planId}/handle-unlock`, {
@@ -231,6 +319,16 @@ export default function SketchPlans() {
               )}
               {!isSupplier && (
                 <>
+                  <Button
+                    variant={showTasksMode ? "default" : "outline"}
+                    onClick={() => setShowTasksMode(!showTasksMode)}
+                    className={`flex items-center gap-2 ${showTasksMode ? 'bg-indigo-600 text-white' : ''}`}
+                  >
+                    <Check className="w-4 h-4" /> Assigned Tasks
+                    {assignedTasks.filter(t => t.user_task_status !== 'completed').length > 0 && (
+                      <Badge className="ml-1 bg-red-500">{assignedTasks.filter(t => t.user_task_status !== 'completed').length}</Badge>
+                    )}
+                  </Button>
                   <Button variant="outline" onClick={() => setLocation("/sketch-templates")} className="flex items-center gap-2">
                     <Layers className="w-4 h-4" /> Manage Templates
                   </Button>
@@ -253,8 +351,69 @@ export default function SketchPlans() {
         </div>
 
         <div className="space-y-4">
-          {loading ? (
-            <div className="py-20 text-center text-muted-foreground italic">Loading plans...</div>
+          {loading || loadingTasks ? (
+            <div className="py-20 text-center text-muted-foreground italic">Loading...</div>
+          ) : showTasksMode ? (
+            <div className="space-y-4">
+              {assignedTasks.length === 0 ? (
+                <div className="py-20 border border-dashed rounded-xl text-center text-muted-foreground">No tasks assigned to you.</div>
+              ) : (
+                assignedTasks.map((task) => (
+                  <Card key={task.id} className={`border rounded-xl shadow-sm overflow-hidden ${task.user_task_status === 'completed' ? 'opacity-70 bg-slate-50' : 'bg-white'}`}>
+                    <CardHeader className="py-3 px-4 bg-slate-50/50 border-b flex flex-row items-center justify-between">
+                      <div>
+                        <CardTitle className="text-sm font-bold flex items-center gap-2">
+                          {task.user_task_status === 'completed' ? <Check className="w-4 h-4 text-green-500" /> : <Layers className="w-4 h-4 text-indigo-500" />}
+                          {task.item_name}
+                        </CardTitle>
+                        <p className="text-[11px] text-slate-500 font-medium">Plan: <span className="text-indigo-600">{task.plan_name}</span></p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {task.user_task_status !== 'completed' ? (
+                          <Button
+                            size="sm"
+                            className="h-7 text-[10px] bg-green-600 hover:bg-green-700 text-white font-bold"
+                            onClick={() => updateTaskStatus(task.id, 'completed')}
+                          >
+                            Mark as Complete
+                          </Button>
+                        ) : (
+                          <Badge className="bg-green-100 text-green-700 border-green-200">Completed</Badge>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[10px]"
+                          onClick={() => setLocation(`/edit-sketch-plan/${task.plan_id}`)}
+                        >
+                          View Plan
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-4">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div>
+                          <p className="text-[10px] uppercase font-bold text-slate-400">Dimensions</p>
+                          <p className="text-xs font-medium">
+                            {task.length || 0} x {task.width || 0} x {task.height || 0} {task.unit}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] uppercase font-bold text-slate-400">Quantity</p>
+                          <p className="text-xs font-bold text-indigo-600">{task.qty} {task.unit}</p>
+                        </div>
+                        {task.description && (
+                          <div className="col-span-2">
+                            <p className="text-[10px] uppercase font-bold text-slate-400">Notes/Instructions</p>
+                            <p className="text-xs italic text-slate-600">"{task.description}"</p>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
           ) : filteredGroups.length === 0 ? (
             <div className="py-20 border border-dashed rounded-xl text-center text-muted-foreground">No matching plans found.</div>
           ) : (
@@ -340,6 +499,25 @@ export default function SketchPlans() {
                         </Button>
                       )}
 
+                      {!isSupplier && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[11px] gap-1 text-amber-600 border-amber-200 hover:bg-amber-50"
+                          onClick={() => setCloneDialog({
+                            isOpen: true,
+                            sourceId: selectedPlan.id,
+                            name: `${selectedPlan.name} (Clone)`,
+                            projectId: selectedPlan.project_id || "none",
+                            versions: group.versions
+                          })}
+                          title="Clone this plan as a new root plan"
+                        >
+                          <Copy className="w-3 h-3" />
+                          Clone
+                        </Button>
+                      )}
+
                       <Button
                         variant="outline"
                         size="sm"
@@ -370,11 +548,10 @@ export default function SketchPlans() {
                         <button
                           key={v.id}
                           onClick={() => setSelectedVersions(prev => ({ ...prev, [group.rootId]: v.id }))}
-                          className={`text-[10px] px-2 py-0.5 rounded-full font-bold border transition-all whitespace-nowrap ${
-                            v.id === selectedId
-                              ? 'bg-indigo-600 text-white border-indigo-600'
-                              : 'bg-white text-slate-500 border-slate-200 hover:bg-indigo-50 hover:text-indigo-600'
-                          }`}
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-bold border transition-all whitespace-nowrap ${v.id === selectedId
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-slate-500 border-slate-200 hover:bg-indigo-50 hover:text-indigo-600'
+                            }`}
                         >
                           V{v.version_number || 1}
                           {v.is_locked ? ' 🔒' : v.version_status === 'approved' ? ' ✅' : ''}
@@ -434,6 +611,77 @@ export default function SketchPlans() {
           title="Delete Sketch Plan?"
         />
       )}
+
+      {/* Clone Plan Dialog */}
+      <Dialog open={!!cloneDialog?.isOpen} onOpenChange={(open) => !open && setCloneDialog(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Copy className="w-5 h-5 text-amber-500" />
+              Clone Sketch Plan
+            </DialogTitle>
+            <DialogDescription>
+              Create a new standalone copy of this plan. You can change the name and project.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="clone-name">Plan Name</Label>
+              <Input
+                id="clone-name"
+                value={cloneDialog?.name || ""}
+                onChange={(e) => setCloneDialog(prev => prev ? { ...prev, name: e.target.value } : null)}
+                placeholder="Enter new plan name..."
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="clone-version">Source Version</Label>
+              <Select
+                value={cloneDialog?.sourceId || ""}
+                onValueChange={(val) => setCloneDialog(prev => prev ? { ...prev, sourceId: val } : null)}
+              >
+                <SelectTrigger id="clone-version">
+                  <SelectValue placeholder="Select version to clone" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[200px] overflow-y-auto">
+                  {cloneDialog?.versions?.map((v: any) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      Version {v.version_number} ({v.version_status || 'Draft'})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="clone-project">Target Project</Label>
+              <Select
+                value={cloneDialog?.projectId || "none"}
+                onValueChange={(val) => setCloneDialog(prev => prev ? { ...prev, projectId: val } : null)}
+              >
+                <SelectTrigger id="clone-project">
+                  <SelectValue placeholder="Select a project" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[300px] overflow-y-auto">
+                  <SelectItem value="none">No Project</SelectItem>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCloneDialog(null)} disabled={isCloning}>Cancel</Button>
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={handleClonePlan}
+              disabled={isCloning || !cloneDialog?.name}
+            >
+              {isCloning ? "Cloning..." : "Confirm Clone"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </LayoutComponent>
   );
 }

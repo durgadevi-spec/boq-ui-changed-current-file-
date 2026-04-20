@@ -2,13 +2,13 @@ import { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, AlertCircle, Package, TrendingUp } from "lucide-react";
+import { CheckCircle2, AlertCircle, Package, TrendingUp, MessagesSquare, ArrowUpRight, Clock, Ban, ChevronRight } from "lucide-react";
 import { SupplierLayout } from "@/components/layout/SupplierLayout";
+import { cn } from "@/lib/utils";
 
 interface ActivityStats {
   submitted: number;
@@ -42,13 +42,11 @@ export function SupplierDashboardPage({
     try {
       const token = localStorage.getItem("authToken");
 
-      // Get material submissions
       const response = await fetch("/api/supplier/my-submissions", {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
 
       if (!response.ok) {
-        console.error("Failed to load stats");
         setLoading(false);
         return;
       }
@@ -56,24 +54,12 @@ export function SupplierDashboardPage({
       const data = await response.json();
       const submissions = data.submissions || [];
 
-      // Calculate stats
       const submitted = submissions.length;
-      const approved = submissions.filter(
-        (s: any) => s.status === "approved"
-      ).length;
-      const rejected = submissions.filter(
-        (s: any) => s.status === "rejected"
-      ).length;
-      const pending = submissions.filter(
-        (s: any) => s.status === "pending"
-      ).length;
+      const approved = submissions.filter((s: any) => s.status === "approved").length;
+      const rejected = submissions.filter((s: any) => s.status === "rejected").length;
+      const pending = submissions.filter((s: any) => s.status === "pending").length;
 
-      setStats({
-        submitted,
-        approved,
-        rejected,
-        pending,
-      });
+      setStats({ submitted, approved, rejected, pending });
     } catch (error) {
       console.error("Error loading stats:", error);
     } finally {
@@ -85,156 +71,211 @@ export function SupplierDashboardPage({
     title,
     value,
     icon: Icon,
-    color,
+    colorClass,
+    subtitle,
   }: {
     title: string;
     value: number;
     icon: any;
-    color: string;
-  }) => (
-    <Card>
-      <CardContent className="pt-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm text-gray-500 font-medium">{title}</p>
-            <p className="text-3xl font-bold text-gray-900 mt-2">{value}</p>
+    colorClass: string;
+    subtitle: string;
+  }) => {
+    const colorMap: Record<string, string> = {
+      "bg-blue-500": "text-blue-600 bg-blue-50",
+      "bg-emerald-500": "text-emerald-600 bg-emerald-50",
+      "bg-amber-500": "text-amber-600 bg-amber-50",
+      "bg-rose-500": "text-rose-600 bg-rose-50",
+    };
+    
+    const colors = colorMap[colorClass] || "text-slate-600 bg-slate-50";
+
+    return (
+      <Card className="shadow-[0_2px_10px_rgba(0,0,0,0.04)] border-slate-200/60 bg-white group hover:border-blue-200 transition-all duration-300 rounded-2xl">
+        <CardContent className="p-6">
+          <div className="flex items-start justify-between">
+            <div className="space-y-1">
+              <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">{title}</p>
+              <h3 className="text-3xl font-black text-slate-900 tracking-tight">{value}</h3>
+              <p className="text-[11px] font-semibold text-slate-500/80">{subtitle}</p>
+            </div>
+            <div className={cn("p-3 rounded-xl transition-all duration-300 group-hover:scale-110", colors)}>
+              <Icon size={22} strokeWidth={2.5} />
+            </div>
           </div>
-          <div className={`p-3 rounded-full ${color}`}>
-            <Icon size={24} className="text-white" />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
+        </CardContent>
+      </Card>
+    );
+  };
 
   return (
     <SupplierLayout shopName={shopName} shopLocation={shopLocation} shopApproved={true}>
-      <div className="p-6 lg:p-8 max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600 mt-2">
-            Welcome back! Here's your supplier activity overview.
-          </p>
-        </div>
-
-        {/* Stats Grid */}
-        {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            {[1, 2, 3, 4].map((i) => (
-              <Card key={i}>
-                <CardContent className="pt-6">
-                  <div className="h-20 bg-gray-200 rounded animate-pulse" />
-                </CardContent>
-              </Card>
-            ))}
+      <div className="min-h-screen bg-[#FDFDFD]">
+        <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-8">
+          
+          {/* Hero Section */}
+          <div className="bg-white p-8 rounded-3xl shadow-[0_2px_15px_rgba(0,0,0,0.03)] border border-slate-100">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
+              <div className="space-y-3">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-[10px] font-bold uppercase tracking-wider">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
+                  Live Monitoring
+                </div>
+                <h1 className="text-3xl font-black tracking-tight text-slate-900">
+                  Vendor Dashboard
+                </h1>
+                <p className="text-slate-500 max-w-md text-sm font-medium leading-relaxed">
+                  Monitor your operations, manage material catalogue, and track submissions in real-time.
+                </p>
+              </div>
+              
+              <div className="flex items-center gap-6 md:border-l md:border-slate-100 md:pl-8">
+                <div className="text-left md:text-right">
+                  <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1">Active Outlet</p>
+                  <p className="text-lg font-bold text-slate-900 leading-tight">{shopName}</p>
+                  <p className="text-sm font-semibold text-blue-600 mt-0.5">{shopLocation}</p>
+                </div>
+                <div className="h-12 w-12 rounded-2xl bg-slate-900 flex items-center justify-center text-white shadow-lg shadow-slate-200">
+                  <Package size={24} />
+                </div>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+
+          {/* Stats Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             <StatCard
-              title="Total Submitted"
+              title="Catalog Size"
               value={stats.submitted}
               icon={Package}
-              color="bg-blue-500"
+              colorClass="bg-blue-500"
+              subtitle="Total items submitted"
             />
             <StatCard
-              title="Approved Materials"
+              title="Verified"
               value={stats.approved}
               icon={CheckCircle2}
-              color="bg-green-500"
+              colorClass="bg-emerald-500"
+              subtitle="Published to shop"
             />
             <StatCard
-              title="Pending Review"
+              title="Awaiting"
               value={stats.pending}
-              icon={AlertCircle}
-              color="bg-yellow-500"
+              icon={Clock}
+              colorClass="bg-amber-500"
+              subtitle="Pending admin review"
             />
             <StatCard
-              title="Rejected"
+              title="Adjustments"
               value={stats.rejected}
-              icon={AlertCircle}
-              color="bg-red-500"
+              icon={Ban}
+              colorClass="bg-rose-500"
+              subtitle="Requires revision"
             />
           </div>
-        )}
 
-        {/* Recent Activity Section */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp size={20} />
-              Quick Summary
-            </CardTitle>
-            <CardDescription>
-              Overview of your materials and approvals
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <div>
-                  <p className="font-semibold text-gray-900">Success Rate</p>
-                  <p className="text-sm text-gray-600">
-                    {stats.submitted > 0
-                      ? `${Math.round(
-                          (stats.approved / stats.submitted) * 100
-                        )}% approved`
-                      : "No submissions yet"}
-                  </p>
-                </div>
-                <Badge className="bg-blue-600">
-                  {stats.approved}/{stats.submitted}
-                </Badge>
-              </div>
-
-              {stats.pending > 0 && (
-                <div className="flex items-center justify-between p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                  <div>
-                    <p className="font-semibold text-gray-900">
-                      Pending Review
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      {stats.pending} material(s) awaiting approval
-                    </p>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Quick Summary Section */}
+            <Card className="lg:col-span-2 shadow-[0_2px_15px_rgba(0,0,0,0.03)] border-slate-100 bg-white rounded-3xl overflow-hidden">
+              <CardHeader className="border-b border-slate-50 p-6 bg-[#FCFDFF]">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-blue-50 rounded-xl text-blue-600">
+                      <TrendingUp size={20} strokeWidth={2.5} />
+                    </div>
+                    <div>
+                      <CardTitle className="text-xl font-bold text-slate-900">Operational Summary</CardTitle>
+                      <p className="text-xs font-semibold text-slate-400 mt-0.5">Real-time performance analytics</p>
+                    </div>
                   </div>
-                  <Badge className="bg-yellow-600">{stats.pending}</Badge>
-                </div>
-              )}
-
-              {stats.rejected > 0 && (
-                <div className="flex items-center justify-between p-4 bg-red-50 rounded-lg border border-red-200">
-                  <div>
-                    <p className="font-semibold text-gray-900">
-                      Rejected Materials
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      {stats.rejected} material(s) need revision
-                    </p>
+                  <div className="p-2 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer text-slate-400">
+                    <ArrowUpRight size={20} />
                   </div>
-                  <Badge className="bg-red-600">{stats.rejected}</Badge>
                 </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+              </CardHeader>
+              <CardContent className="p-8">
+                <div className="space-y-6">
+                  <div className="group flex items-center justify-between p-6 bg-[#F8FAFF] rounded-2xl border border-blue-50 hover:border-blue-100 transition-all">
+                    <div className="flex items-center gap-5">
+                      <div className="h-14 w-14 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600 shadow-sm shadow-blue-100 group-hover:scale-105 transition-transform">
+                        <ArrowUpRight size={28} />
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-900 text-base mb-0.5">Review Velocity</p>
+                        <p className="text-xs text-slate-500 font-semibold tracking-tight italic">Approval to Submission ratio</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-3xl font-black text-slate-900 tracking-tighter">
+                        {stats.submitted > 0 ? `${Math.round((stats.approved / stats.submitted) * 100)}%` : "0%"}
+                      </p>
+                      <Badge className="bg-slate-900 text-white text-[10px] font-bold px-2 py-0.5 rounded-md mt-1">METRICS</Badge>
+                    </div>
+                  </div>
 
-        {/* Info Section */}
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Need Help?</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-gray-600 mb-4">
-              Have questions about your submissions or need technical support?
-              Visit the Messages/Support section or contact our team.
-            </p>
-            <div className="text-sm text-gray-500 space-y-1">
-              <p>• Submit materials using the "Manage Materials" section</p>
-              <p>• Review approval status for each submission</p>
-              <p>• Contact support for urgent issues</p>
-            </div>
-          </CardContent>
-        </Card>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+                    <div className="p-5 bg-emerald-50/40 rounded-2xl border border-emerald-100/50 flex items-center gap-4 group hover:bg-emerald-50/60 transition-colors">
+                      <div className="p-3 bg-white rounded-xl text-emerald-600 border border-emerald-100 shadow-sm shadow-emerald-50">
+                        <CheckCircle2 size={18} strokeWidth={2.5} />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-800/50">Live Items</p>
+                        <p className="text-xl font-black text-emerald-900">{stats.approved}</p>
+                      </div>
+                    </div>
+                    <div className="p-5 bg-amber-50/40 rounded-2xl border border-amber-100/50 flex items-center gap-4 group hover:bg-amber-50/60 transition-colors">
+                      <div className="p-3 bg-white rounded-xl text-amber-600 border border-amber-100 shadow-sm shadow-amber-50">
+                        <Clock size={18} strokeWidth={2.5} />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-amber-800/50">In Pipeline</p>
+                        <p className="text-xl font-black text-amber-900">{stats.pending}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Support/Help Section */}
+            <Card className="shadow-[0_2px_15px_rgba(0,0,0,0.03)] border-slate-100 bg-white rounded-3xl overflow-hidden">
+              <CardHeader className="p-8 pb-4">
+                <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 mb-6 shadow-sm shadow-blue-50">
+                  <MessagesSquare size={24} strokeWidth={2.5} />
+                </div>
+                <CardTitle className="text-xl font-bold text-slate-900">Need Assistance?</CardTitle>
+                <p className="text-sm text-slate-500 font-semibold mt-1">Our support protocols are live</p>
+              </CardHeader>
+              <CardContent className="space-y-6 px-8 pb-8 pt-4">
+                <p className="text-sm text-slate-500 font-medium leading-relaxed">
+                  Connect with our procurement experts for catalogue optimization or commercial inquiries.
+                </p>
+                
+                <div className="space-y-3">
+                  {[
+                    { label: "Material Catalogue Guidance", icon: Package },
+                    { label: "Technical Account Support", icon: MessagesSquare },
+                    { label: "Commercial Terms Help", icon: TrendingUp }
+                  ].map((item, idx) => (
+                    <div key={idx} className="flex items-center justify-between px-4 py-4 bg-[#F8FAFF] border border-blue-50 rounded-2xl hover:border-blue-200 transition-all cursor-pointer group">
+                      <div className="flex items-center gap-3">
+                        <item.icon size={18} className="text-blue-400 group-hover:text-blue-600 transition-colors" />
+                        <span className="text-xs font-bold text-slate-700 tracking-tight">{item.label}</span>
+                      </div>
+                      <ChevronRight size={14} className="text-blue-200 group-hover:text-blue-400 transition-all group-hover:translate-x-1" />
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-6 border-t border-slate-50">
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Response SLA</p>
+                    <p className="text-[11px] text-blue-600/70 font-bold italic">Standard Window: 2-4 hours</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
     </SupplierLayout>
   );

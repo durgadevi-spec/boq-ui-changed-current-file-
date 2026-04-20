@@ -7,16 +7,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Save, ArrowLeft, Camera, Pencil, Layers, X, GripVertical, FileText, Search, MessageSquare, Image as ImageIcon, Move, Lock, Unlock, ShieldAlert, Cloud, Check, AlertTriangle, FileUp, FileSpreadsheet, Download, Paperclip, ArrowUp, ArrowDown, ArrowUpToLine, ArrowDownToLine, GitBranch, Store } from "lucide-react";
+import { Plus, Trash2, Save, ArrowLeft, Camera, Pencil, Layers, X, GripVertical, FileText, Search, MessageSquare, Image as ImageIcon, Move, Lock, Unlock, ShieldAlert, Cloud, Check, AlertTriangle, FileUp, FileSpreadsheet, Download, Paperclip, ArrowUp, ArrowDown, ArrowUpToLine, ArrowDownToLine, GitBranch, Store, ChevronDown, ArrowUpDown, ArrowDownAz, Users, Copy } from "lucide-react";
 import { Reorder, useDragControls } from "framer-motion";
 import { SketchPad } from "@/components/SketchPad";
 import apiFetch from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -49,12 +50,16 @@ interface PlanItem {
   unit: string;
   dimension_unit: "feet" | "mm" | "inch" | "cm" | "meter" | "sqft" | "sqmt" | "rft" | "rmt" | "nos" | "pcs" | "kg" | "litre" | "set" | "ls";
   remarks: string;
+  dimensions?: { id: string; length: string; width: string; height: string; note?: string }[];
   preImages: PlanImage[]; // PRE-work images
   postImages: PlanImage[]; // POST-work images
   images?: PlanImage[]; // Legacy field for compatibility
   category?: string; // NEW
   assigned_vendor_id?: string;
   vendor_name?: string;
+  assigned_user_id?: string;
+  assigned_user_name?: string;
+  user_task_status?: string;
 }
 
 const parseImages = (imageField: any): string[] => {
@@ -204,14 +209,18 @@ const PhotoColumn = ({
 // Row Component for Drag and Drop
 const SketchPlanRow = ({
   item, idx, itemsLength, updateItem, removeItem, moveItemToPosition, selectMaterial,
-  searchResults, searching, loadMaterials, setMaterialSearch,
+  searchResults, searching, loadMaterials, materialSearch, setMaterialSearch,
   openPopoverIdx, setOpenPopoverIdx, renameRowImage, removeRowImage,
   handleRowImageUpload, isLocked, isCompact, setPreviewImage,
   setSketchTarget, setSketchInitialData, lastSketchItemIdxRef, toast, setSketchDialogOpen,
-  isSelected, toggleSelect, userRole, onImageDragStart, onImageDrop
+  isSelected, toggleSelect, userRole, onImageDragStart, onImageDrop,
+  addDimension, removeDimension, updateDimension, cloneItem, categories
 }: any) => {
+  const [itemSearchTab, setItemSearchTab] = useState<"all" | "material" | "product">("all");
   const dragControls = useDragControls();
   const isSupplier = userRole === "supplier";
+
+  const dims = item.dimensions?.length ? item.dimensions : [{ id: "def", length: item.length, width: item.width, height: item.height, note: item.description }];
 
   return (
     <Reorder.Item
@@ -273,26 +282,150 @@ const SketchPlanRow = ({
             </Tooltip>
           </TooltipProvider>
 
-          <DialogContent className="z-[110]">
-            <DialogHeader>
+          <DialogContent className="sm:max-w-[750px] max-h-[90vh] flex flex-col p-0">
+            <DialogHeader className="p-6 pb-2">
               <DialogTitle>Notes for {item.item_name || `Item ${idx + 1}`}</DialogTitle>
             </DialogHeader>
-            <div className="py-4">
-              <Textarea
-                value={item.description}
-                onChange={(e) => updateItem(idx, "description", e.target.value)}
-                placeholder="Enter detailed site notes or specifications..."
-                className="min-h-[200px]"
-                disabled={isLocked}
-              />
+            <div className="flex-1 overflow-y-auto p-6 pt-2 custom-scrollbar space-y-4">
+              <div>
+                <Label className="text-xs font-bold uppercase text-slate-500 mb-2 block">Main Item Notes (Site Specifications)</Label>
+                <Textarea
+                  value={item.description}
+                  onChange={(e) => updateItem(idx, "description", e.target.value)}
+                  placeholder="Enter detailed site notes or specifications..."
+                  className="min-h-[120px] resize-none"
+                  disabled={isLocked}
+                />
+              </div>
+
+              <div className="border-t pt-4">
+                <div className="flex justify-between items-center mb-3">
+                  <Label className="text-xs font-bold uppercase text-slate-500">Sub-Notes (Per Dimension Row)</Label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[10px] bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
+                    onClick={() => addDimension(idx)}
+                    disabled={isLocked}
+                  >
+                    <Plus className="w-3 h-3 mr-1" /> Add Sub Note
+                  </Button>
+                </div>
+
+                <div className="space-y-4">
+                  {dims.map((dim: any, dIdx: number) => (
+                    <div key={dim.id} className="flex gap-3 items-start bg-slate-50 p-3 rounded-lg border border-slate-100 shadow-sm">
+                      <div className="flex-1">
+                        <Label className="text-[10px] text-slate-400 font-bold mb-1.5 block uppercase tracking-tight">
+                          {dIdx === 0 ? "Linked to Main Notes" : `Sub Note #${dIdx}`}
+                        </Label>
+                        <Input
+                          value={dIdx === 0 ? item.description : (dim.note || "")}
+                          onChange={(e) => {
+                            if (dIdx === 0) {
+                              updateItem(idx, "description", e.target.value);
+                            } else {
+                              updateDimension(idx, dIdx, "note" as any, e.target.value);
+                            }
+                          }}
+                          placeholder={dIdx === 0 ? "Main notes..." : "Enter sub-note for this dimension..."}
+                          className="h-9 text-xs bg-white"
+                          disabled={isLocked}
+                        />
+                      </div>
+                      <div className="w-[180px] shrink-0">
+                        <Label className="text-[10px] text-slate-400 font-bold mb-1.5 block text-center uppercase tracking-tight">Dimensions (L / W / H)</Label>
+                        <div className="flex gap-1 px-1">
+                          <Input
+                            value={dim.length}
+                            onChange={(e) => updateDimension(idx, dIdx, "length", e.target.value)}
+                            placeholder="L"
+                            className="h-9 text-[11px] text-center px-0.5 font-bold bg-white border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                            disabled={isLocked}
+                          />
+                          <div className="flex items-center text-slate-300 px-0.5">/</div>
+                          <Input
+                            value={dim.width}
+                            onChange={(e) => updateDimension(idx, dIdx, "width", e.target.value)}
+                            placeholder="W"
+                            className="h-9 text-[11px] text-center px-0.5 font-bold bg-white border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                            disabled={isLocked}
+                          />
+                          <div className="flex items-center text-slate-300 px-0.5">/</div>
+                          <Input
+                            value={dim.height}
+                            onChange={(e) => updateDimension(idx, dIdx, "height", e.target.value)}
+                            placeholder="H"
+                            className="h-9 text-[11px] text-center px-0.5 font-bold bg-white border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                            disabled={isLocked}
+                          />
+                        </div>
+                      </div>
+                      {dIdx > 0 && (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-9 w-9 text-red-400 mt-5 hover:bg-red-50 hover:text-red-500 rounded-md"
+                          onClick={() => removeDimension(idx, dIdx)}
+                          disabled={isLocked}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-            <DialogFooter>
+            <DialogFooter className="p-6 border-t bg-slate-50/50">
               <DialogTrigger asChild>
-                <Button className="bg-indigo-600 text-white">Save Notes</Button>
+                <Button className="bg-indigo-600 text-white hover:bg-indigo-700 h-10 px-8 text-sm font-bold shadow-lg shadow-indigo-100">Save Changes</Button>
               </DialogTrigger>
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      </td>
+      <td className={cn("px-1", isCompact ? "py-0 w-[80px] min-w-[80px]" : "py-2 w-[100px] min-w-[100px] max-w-[100px]")}>
+        <Popover>
+          <PopoverTrigger asChild>
+            <div className={cn("bg-slate-50 border border-slate-200 rounded px-1.5 flex items-center h-8 cursor-pointer hover:border-indigo-400", isCompact ? "h-6" : "h-8")}>
+              <span className={cn("truncate font-bold italic text-slate-500", isCompact ? "text-[8px]" : "text-[10px]")}>
+                {item.category || "-"}
+              </span>
+            </div>
+          </PopoverTrigger>
+          <PopoverContent className="p-0 w-[200px]" align="start">
+            <Command>
+              <CommandInput placeholder="Search category..." className="h-8 text-xs" />
+              <CommandList className="max-h-[200px]">
+                <CommandEmpty>No category found.</CommandEmpty>
+                <CommandGroup heading="Existing Categories">
+                  {categories.map((catName: string, cIdx: number) => (
+                    <CommandItem
+                      key={cIdx}
+                      onSelect={() => {
+                        updateItem(idx, "category", catName);
+                      }}
+                      className="text-xs cursor-pointer"
+                    >
+                      {catName}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+            <div className="p-2 border-t bg-slate-50">
+              <Input
+                placeholder="Manual entry..."
+                className="h-8 text-xs"
+                value={item.category || ""}
+                onChange={(e) => updateItem(idx, "category", e.target.value)}
+              />
+            </div>
+          </PopoverContent>
+        </Popover>
       </td>
       <td className={cn("px-2", isCompact ? "py-0 w-[120px] min-w-[120px] max-w-[120px]" : "py-2 w-[160px] min-w-[160px] max-w-[160px]")}>
         <Dialog open={openPopoverIdx === idx} onOpenChange={(open) => {
@@ -320,33 +453,71 @@ const SketchPlanRow = ({
             </DialogHeader>
             <Command shouldFilter={false}>
               <CommandInput
-                placeholder="Search materials, templates, products..."
+                placeholder="Search materials, products..."
+                value={materialSearch}
                 onValueChange={setMaterialSearch}
                 className="h-10"
               />
+              <div className="flex border-b">
+                <button
+                  onClick={() => setItemSearchTab("all")}
+                  className={cn(
+                    "flex-1 py-1 text-[10px] font-bold uppercase tracking-wider transition-all border-b-2",
+                    itemSearchTab === "all" ? "border-indigo-600 text-indigo-600 bg-indigo-50/50" : "border-transparent text-slate-400 hover:bg-slate-50"
+                  )}
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => setItemSearchTab("material")}
+                  className={cn(
+                    "flex-1 py-1 text-[10px] font-bold uppercase tracking-wider transition-all border-b-2",
+                    itemSearchTab === "material" ? "border-indigo-600 text-indigo-600 bg-indigo-50/50" : "border-transparent text-slate-400 hover:bg-slate-50"
+                  )}
+                >
+                  Materials
+                </button>
+                <button
+                  onClick={() => setItemSearchTab("product")}
+                  className={cn(
+                    "flex-1 py-1 text-[10px] font-bold uppercase tracking-wider transition-all border-b-2",
+                    itemSearchTab === "product" ? "border-indigo-600 text-indigo-600 bg-indigo-50/50" : "border-transparent text-slate-400 hover:bg-slate-50"
+                  )}
+                >
+                  Products
+                </button>
+              </div>
               <CommandList className="max-h-[280px]">
                 {searching && <CommandEmpty>Loading...</CommandEmpty>}
                 {!searching && searchResults.length === 0 && <CommandEmpty>No items found.</CommandEmpty>}
                 {!searching && searchResults.length > 0 && (
-                  <CommandGroup heading={`All Items (${searchResults.length})`}>
-                    {searchResults.map((m: any) => (
-                      <CommandItem
-                        key={`${m.type}-${m.id}`}
-                        onSelect={() => { selectMaterial(idx, m); setOpenPopoverIdx(null); }}
-                        className="cursor-pointer"
-                      >
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-sm">{m.name}</span>
-                            <Badge variant="outline" className="text-[10px] scale-90">{m.type}</Badge>
+                  <CommandGroup heading={`${itemSearchTab === 'all' ? 'All Items' : itemSearchTab === 'material' ? 'Materials' : 'Products'} (${searchResults.filter((m: any) => (itemSearchTab === 'all' && m.type !== 'Template') || (itemSearchTab === 'material' && m.type === 'Material') || (itemSearchTab === 'product' && m.type === 'Product')).length})`}>
+                    {searchResults
+                      .filter((m: any) => {
+                        if (itemSearchTab === "all") return m.type !== "Template";
+                        if (itemSearchTab === "material") return m.type === "Material";
+                        if (itemSearchTab === "product") return m.type === "Product";
+                        return true;
+                      })
+                      .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""))
+                      .map((m: any) => (
+                        <CommandItem
+                          key={`${m.type}-${m.id}`}
+                          onSelect={() => { selectMaterial(idx, m); setOpenPopoverIdx(null); }}
+                          className="cursor-pointer"
+                        >
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-sm">{m.name}</span>
+                              <Badge variant="outline" className="text-[10px] scale-90">{m.type}</Badge>
+                            </div>
+                            <div className="flex gap-2 text-[10px] text-slate-500">
+                              {m.code && <span>Code: {m.code}</span>}
+                              {m.category && <span>Category: {m.category}</span>}
+                            </div>
                           </div>
-                          <div className="flex gap-2 text-[10px] text-slate-500">
-                            {m.code && <span>Code: {m.code}</span>}
-                            {m.category && <span>Category: {m.category}</span>}
-                          </div>
-                        </div>
-                      </CommandItem>
-                    ))}
+                        </CommandItem>
+                      ))}
                   </CommandGroup>
                 )}
               </CommandList>
@@ -391,24 +562,114 @@ const SketchPlanRow = ({
           </SelectContent>
         </Select>
       </td>
-      <td className={cn("px-1", isCompact ? "py-0" : "py-2")}>
-        <Input value={item.length} onChange={(e) => updateItem(idx, "length", e.target.value)} className={cn("px-1", isCompact ? "h-5 text-[10px]" : "h-8 text-xs")} placeholder="0" disabled={isLocked} />
+      <td className={cn("px-2 align-top border-l w-[110px] min-w-[110px] max-w-[110px]", isCompact ? "py-1" : "py-2")}>
+        <div className="flex flex-col gap-1 w-full h-[calc(100%-4px)] relative justify-center">
+          <div className={cn("relative flex items-center justify-center w-full", isCompact ? "h-5 text-[10px]" : "h-8 text-xs")}>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button type="button" variant="outline" size="sm" className={cn("w-full justify-between px-2 text-slate-500 hover:text-indigo-600 bg-slate-50 relative top-1", isCompact ? "h-5 text-[9px]" : "h-8 text-[11px]", dims.length > 1 && "bg-indigo-100 text-indigo-700 border-indigo-200 font-bold")}>
+                  <span className="truncate">
+                    {dims[0].length || dims[0].width || dims[0].height ? `${dims[0].length || '-'} × ${dims[0].width || '-'} × ${dims[0].height || '-'}` + (dims.length > 1 ? ` (+${dims.length - 1})` : '') : "Add Dims"}
+                  </span>
+                  <ChevronDown className="w-3 h-3 ml-1 shrink-0" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[300px] p-3 shadow-xl z-[200]">
+                <div className="flex justify-between items-center mb-3 border-b pb-2">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                    <span className="font-bold text-[10px] uppercase text-slate-500 tracking-wider">Site Measurements</span>
+                  </div>
+                  {!isLocked && (
+                    <Button type="button" size="sm" variant="ghost" onClick={() => addDimension(idx)} className="h-6 px-2 text-[10px] text-indigo-600 hover:bg-indigo-50 font-bold uppercase">
+                      <Plus className="w-3 h-3 mr-1" /> Add Sub Note
+                    </Button>
+                  )}
+                </div>
+                <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1 custom-scrollbar">
+                  {dims.map((dim: any, dIdx: number) => (
+                    <div key={dim.id} className={cn("bg-white border rounded-lg shadow-sm overflow-hidden", dIdx === 0 ? "border-slate-200" : "border-indigo-100")}>
+                      <div className={cn("px-2 py-1.5 flex items-center gap-2", dIdx === 0 ? "bg-slate-50" : "bg-indigo-50/50")}>
+                        {dIdx === 0 ? (
+                          <FileText className="w-3 h-3 text-slate-400" />
+                        ) : (
+                          <GitBranch className="w-3 h-3 text-indigo-400" />
+                        )}
+                        <span className={cn("text-[9px] font-bold uppercase truncate flex-1", dIdx === 0 ? "text-slate-500" : "text-indigo-600")}>
+                          {dIdx === 0 ? "Primary Dimensions" : `Sub: ${dim.note || 'Untitled'}`}
+                        </span>
+                        {dIdx > 0 && (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button className="p-0.5 hover:bg-indigo-100 rounded text-indigo-400">
+                                <ChevronDown className="w-3 h-3" />
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent side="right" className="w-[200px] p-2 text-[10px] bg-slate-900 text-white border-slate-700">
+                              <p className="font-bold border-b border-slate-700 pb-1 mb-1">Sub Note Detail</p>
+                              <p className="italic text-slate-300">"{dim.note || 'No description provided'}"</p>
+                            </PopoverContent>
+                          </Popover>
+                        )}
+                        {dIdx > 0 && !isLocked && (
+                          <button type="button" onClick={() => removeDimension(idx, dIdx)} className="p-0.5 hover:bg-red-50 text-red-400 rounded transition-colors ml-1">
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="p-2 grid grid-cols-3 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-[8px] text-slate-400 font-bold uppercase block text-center">Length</Label>
+                          <Input value={dim.length} onChange={(e) => updateDimension(idx, dIdx, "length", e.target.value)} placeholder="0" className="h-7 text-[11px] text-center px-1 font-bold" disabled={isLocked} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[8px] text-slate-400 font-bold uppercase block text-center">Width</Label>
+                          <Input value={dim.width} onChange={(e) => updateDimension(idx, dIdx, "width", e.target.value)} placeholder="0" className="h-7 text-[11px] text-center px-1 font-bold" disabled={isLocked} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[8px] text-slate-400 font-bold uppercase block text-center">Height</Label>
+                          <Input value={dim.height} onChange={(e) => updateDimension(idx, dIdx, "height", e.target.value)} placeholder="0" className="h-7 text-[11px] text-center px-1 font-bold" disabled={isLocked} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+        </div>
       </td>
-      <td className={cn("px-1", isCompact ? "py-0" : "py-2")}>
-        <Input value={item.width} onChange={(e) => updateItem(idx, "width", e.target.value)} className={cn("px-1", isCompact ? "h-5 text-[10px]" : "h-8 text-xs")} placeholder="0" disabled={isLocked} />
-      </td>
-      <td className={cn("px-1", isCompact ? "py-0" : "py-2")}>
-        <Input value={item.height} onChange={(e) => updateItem(idx, "height", e.target.value)} className={cn("px-1", isCompact ? "h-5 text-[10px]" : "h-8 text-xs")} placeholder="0" disabled={isLocked} />
-      </td>
-      <td className={cn("px-1", isCompact ? "py-0" : "py-2")}>
-        <Input value={item.qty} onChange={(e) => updateItem(idx, "qty", e.target.value)} className={cn("bg-slate-50 font-bold text-indigo-700 px-1", isCompact ? "h-5 text-[10px]" : "h-8 text-xs")} disabled={isLocked} />
+      <td className={cn("px-1 align-top w-[80px] min-w-[80px] max-w-[80px]", isCompact ? "py-1" : "py-2")}>
+        <div className="flex flex-col gap-1 w-full relative h-[calc(100%-4px)]">
+          <div className={cn("relative flex items-center justify-center top-1")}>
+            <Input value={item.qty} onChange={(e) => updateItem(idx, "qty", e.target.value)} className={cn("bg-slate-50 font-bold text-indigo-700 px-1 w-full max-w-[80px] text-center", isCompact ? "h-5 text-[10px]" : "h-8 text-xs")} disabled={isLocked} />
+          </div>
+        </div>
       </td>
       {!isSupplier && (
         <td className={cn("px-1", isCompact ? "py-0" : "py-2")}>
-          <div className="flex flex-col">
-            <span className={cn("truncate font-medium text-indigo-600", isCompact ? "text-[8px]" : "text-[10px]")}>
-              {item.vendor_name || "-"}
-            </span>
+          <div className="flex flex-col gap-0.5">
+            {item.vendor_name && (
+              <span className={cn("truncate font-medium text-amber-600", isCompact ? "text-[8px]" : "text-[10px]")}>
+                V: {item.vendor_name}
+              </span>
+            )}
+            {item.assigned_user_name && (
+              <span className={cn("flex items-center gap-1 font-medium text-blue-600", isCompact ? "text-[8px]" : "text-[10px]")}>
+                <span className="truncate">U: {item.assigned_user_name}</span>
+                {item.user_task_status === 'completed' && (
+                  <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border-none px-1 h-3.5 text-[7px] font-black tracking-tighter shadow-none">
+                    DONE
+                  </Badge>
+                )}
+              </span>
+            )}
+            {!item.vendor_name && !item.assigned_user_name && (
+              <span className={cn("truncate font-medium text-slate-400", isCompact ? "text-[8px]" : "text-[10px]")}>
+                -
+              </span>
+            )}
           </div>
         </td>
       )}
@@ -455,7 +716,14 @@ const SketchPlanRow = ({
         />
       </td>
       <td className={cn("px-1 text-center border-l", isCompact ? "py-0" : "py-2")}>
-        <Button variant="ghost" size="icon" onClick={() => removeItem(idx)} className={cn("text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors bg-slate-50 border border-transparent hover:border-red-200", isCompact ? "h-5 w-5" : "h-6 w-6")} disabled={isLocked} title="Remove Item"><Trash2 className={isCompact ? "w-3 h-3" : "w-3.5 h-3.5"} /></Button>
+        <div className="flex items-center justify-center gap-1">
+          <Button variant="ghost" size="icon" onClick={() => cloneItem(idx)} className={cn("text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 transition-colors border border-transparent hover:border-indigo-200", isCompact ? "h-5 w-5" : "h-6 w-6")} disabled={isLocked} title="Clone Row">
+            <Copy className={isCompact ? "w-3 h-3" : "w-3.5 h-3.5"} />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={() => removeItem(idx)} className={cn("text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors border border-transparent hover:border-red-200", isCompact ? "h-5 w-5" : "h-6 w-6")} disabled={isLocked} title="Remove Item">
+            <Trash2 className={isCompact ? "w-3 h-3" : "w-3.5 h-3.5"} />
+          </Button>
+        </div>
       </td>
     </Reorder.Item>
   );
@@ -470,10 +738,11 @@ export default function CreateSketchPlan() {
 
   const [name, setName] = useState("");
   const [projectId, setProjectId] = useState<string>("none");
+  const [projectName, setProjectName] = useState<string>("");
   const [locationStr, setLocationStr] = useState("");
   const [planDate, setPlanDate] = useState(new Date().toISOString().split("T")[0]);
   const [items, setItems] = useState<PlanItem[]>([
-    { id: "1", item_name: "", description: "", length: "", width: "", height: "", qty: "1", unit: "Nos", dimension_unit: "feet", remarks: "", preImages: [], postImages: [], images: [] }
+    { id: "1", item_name: "", description: "", length: "", width: "", height: "", qty: "1", unit: "Nos", dimension_unit: "feet", category: "", remarks: "", preImages: [], postImages: [], images: [] }
   ]);
 
   const [projects, setProjects] = useState<any[]>([]);
@@ -485,6 +754,8 @@ export default function CreateSketchPlan() {
 
   // PDF / Export State
   const [isPdfDialogOpen, setIsPdfDialogOpen] = useState(false);
+  const [includePlanPhotosInExport, setIncludePlanPhotosInExport] = useState(true);
+  const [includeSubNotesInExport, setIncludeSubNotesInExport] = useState(true);
   const [selectedPdfCols, setSelectedPdfCols] = useState<string[]>(["#", "Item", "Notes", "L", "W", "H", "Qty", "Unit", "Pre Photos", "Post Photos"]
   );
   const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
@@ -493,6 +764,7 @@ export default function CreateSketchPlan() {
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [isCompact, setIsCompact] = useState(false);
+  const [sortBy, setSortBy] = useState<string>("none");
 
   const [materialSearch, setMaterialSearch] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -503,6 +775,14 @@ export default function CreateSketchPlan() {
   const [assigningLoading, setAssigningLoading] = useState(false);
   const [loadingToProposal, setLoadingToProposal] = useState(false);
   const [vendorSearchTerm, setVendorSearchTerm] = useState("");
+  const [usersList, setUsersList] = useState<any[]>([]);
+  const [showAssignUserDialog, setShowAssignUserDialog] = useState(false);
+  const [userSearchTerm, setUserSearchTerm] = useState("");
+  const [categories, setCategories] = useState<any[]>([]);
+  const [showAssignCategoryDialog, setShowAssignCategoryDialog] = useState(false);
+  const [categorySearchTerm, setCategorySearchTerm] = useState("");
+  const [rowToConfirm, setRowToConfirm] = useState<{ idx: number, material: any } | null>(null);
+  const [showCategoryConfirm, setShowCategoryConfirm] = useState(false);
 
   // New state
   const [projectOpen, setProjectOpen] = useState(false);
@@ -642,6 +922,45 @@ export default function CreateSketchPlan() {
     }
   };
 
+  const loadUsers = async () => {
+    try {
+      setUserSearchTerm("");
+      const res = await apiFetch("/api/users");
+      if (res.ok) {
+        const data = await res.json();
+        setUsersList(data.users || []);
+      }
+    } catch (e) {
+      console.error("Failed to load users", e);
+    }
+  };
+
+  const handleAssignToUser = async (userId: string) => {
+    if (selectedItemIds.size === 0) return;
+
+    setAssigningLoading(true);
+    try {
+      const userObj = usersList.find(u => u.id === userId);
+      const userName = userObj ? (userObj.fullName || userObj.username) : "User";
+
+      const updatedItems = items.map(item => {
+        if (selectedItemIds.has(item.id)) {
+          return { ...item, assigned_user_id: String(userId), assigned_user_name: userName, user_task_status: 'pending' };
+        }
+        return item;
+      });
+
+      setItems(updatedItems);
+      toast({ title: "Success", description: `Assigned ${selectedItemIds.size} items to ${userName}` });
+      setSelectedItemIds(new Set());
+      setShowAssignUserDialog(false);
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to assign items to user", variant: "destructive" });
+    } finally {
+      setAssigningLoading(false);
+    }
+  };
+
   const handleAssignToVendor = async (shopId: string) => {
     if (selectedItemIds.size === 0) return;
 
@@ -650,7 +969,7 @@ export default function CreateSketchPlan() {
       const shopName = vendors.find(v => v.id === shopId)?.name || "Vendor";
       const updatedItems = items.map(item => {
         if (selectedItemIds.has(item.id)) {
-          return { ...item, assigned_vendor_id: shopId, vendor_name: shopName };
+          return { ...item, assigned_vendor_id: String(shopId), vendor_name: shopName };
         }
         return item;
       });
@@ -666,6 +985,29 @@ export default function CreateSketchPlan() {
     }
   };
 
+  const handleAssignToCategory = async (catName: string) => {
+    if (selectedItemIds.size === 0) return;
+
+    setAssigningLoading(true);
+    try {
+      const updatedItems = items.map(item => {
+        if (selectedItemIds.has(item.id)) {
+          return { ...item, category: catName };
+        }
+        return item;
+      });
+
+      setItems(updatedItems);
+      toast({ title: "Success", description: `Assigned category "${catName}" to ${selectedItemIds.size} items` });
+      setSelectedItemIds(new Set());
+      setShowAssignCategoryDialog(false);
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to assign category", variant: "destructive" });
+    } finally {
+      setAssigningLoading(false);
+    }
+  };
+
   const handleLoadToProposal = async () => {
     if (!currentId) return;
     setLoadingToProposal(true);
@@ -676,9 +1018,14 @@ export default function CreateSketchPlan() {
       if (res.ok) {
         const data = await res.json();
         toast({ title: "Success", description: "Items loaded to proposal successfully" });
-        setLocation(`/proposal/${data.projectId}?versionId=${data.versionId}`);
+
+        // Proper internal redirect
+        const targetUrl = `/proposal/${data.projectId}?versionId=${data.versionId}`;
+        setTimeout(() => {
+          setLocation(targetUrl);
+        }, 500);
       } else {
-        const error = await res.json();
+        const error = await res.json().catch(() => ({ message: "Failed to load to proposal" }));
         toast({ title: "Error", description: error.message || "Failed to load to proposal", variant: "destructive" });
       }
     } catch (err) {
@@ -688,9 +1035,53 @@ export default function CreateSketchPlan() {
     }
   };
 
+  const handleSort = (criteria: string) => {
+    setSortBy(criteria);
+    if (criteria === "none") return;
+
+    const sorted = [...items].sort((a, b) => {
+      switch (criteria) {
+        case "name-asc":
+          return (a.item_name || "").trim().localeCompare((b.item_name || "").trim());
+        case "name-desc":
+          return (b.item_name || "").trim().localeCompare((a.item_name || "").trim());
+        case "qty-asc":
+          return (Number(a.qty) || 0) - (Number(b.qty) || 0);
+        case "qty-desc":
+          return (Number(b.qty) || 0) - (Number(a.qty) || 0);
+        case "category-asc":
+          return (a.category || "").trim().localeCompare((b.category || "").trim());
+        case "category-desc":
+          return (b.category || "").trim().localeCompare((a.category || "").trim());
+        case "notes-asc":
+          return (a.description || "").trim().localeCompare((b.description || "").trim());
+        case "notes-desc":
+          return (b.description || "").trim().localeCompare((a.description || "").trim());
+        case "vendor-asc":
+          return (a.vendor_name || "").localeCompare(b.vendor_name || "");
+        case "vendor-desc":
+          return (b.vendor_name || "").localeCompare(a.vendor_name || "");
+        default:
+          return 0;
+      }
+    });
+    setItems(sorted);
+  };
+
   // Load initial data
   useEffect(() => {
     const loadInitialData = async () => {
+      // Load Categories
+      try {
+        const catRes = await apiFetch("/api/categories");
+        if (catRes.ok) {
+          const catData = await catRes.json();
+          setCategories(catData.categories || []);
+        }
+      } catch (e) {
+        console.error("Failed to load categories", e);
+      }
+
       try {
         if (!isSupplier) {
           const projectsRes = await apiFetch("/api/boq-projects");
@@ -707,8 +1098,10 @@ export default function CreateSketchPlan() {
             const p = data.plan;
             setName(p.name || "");
             setProjectId(p.project_id || "none");
+            setProjectName(p.project_name || "");
             setLocationStr(p.location || "");
             if (p.plan_date) setPlanDate(new Date(p.plan_date).toISOString().split("T")[0]);
+
 
             // Lock Info
             setIsLocked(!!p.is_locked);
@@ -886,6 +1279,7 @@ export default function CreateSketchPlan() {
     // Clear filters to ensure the new item is visible
     setSearchTerm("");
     setCategoryFilter("all");
+    if (sortBy !== "none") setSortBy("none");
 
     setItems([
       ...items,
@@ -898,6 +1292,24 @@ export default function CreateSketchPlan() {
     const newItems = [...items];
     newItems.splice(idx, 1);
     setItems(newItems);
+    if (sortBy !== "none") setSortBy("none");
+  };
+
+  const cloneItem = (idx: number) => {
+    const itemToClone = items[idx];
+    const clonedItem: PlanItem = {
+      ...JSON.parse(JSON.stringify(itemToClone)),
+      id: `ski-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      // Reset image IDs for the clone so they are treated as new uploads if saved
+      preImages: (itemToClone.preImages || []).map(img => ({ ...img, id: undefined })),
+      postImages: (itemToClone.postImages || []).map(img => ({ ...img, id: undefined }))
+    };
+
+    const newItems = [...items];
+    newItems.splice(idx + 1, 0, clonedItem);
+    setItems(newItems);
+    if (sortBy !== "none") setSortBy("none");
+    toast({ title: "Row Cloned", description: `Successfully duplicated ${itemToClone.item_name || 'item'}` });
   };
 
   const moveItemToPosition = (fromIdx: number, toIdx: number) => {
@@ -906,7 +1318,87 @@ export default function CreateSketchPlan() {
     const item = newItems.splice(fromIdx, 1)[0];
     newItems.splice(toIdx, 0, item);
     setItems(newItems);
+    if (sortBy !== "none") setSortBy("none");
   };
+
+  const addDimension = useCallback((itemIdx: number) => {
+    setItems((prevItems) => {
+      const newItems = [...prevItems];
+      const item = { ...newItems[itemIdx] };
+      const dims = item.dimensions?.length ? [...item.dimensions] : [{ id: "def", length: item.length, width: item.width, height: item.height, note: item.description }];
+      dims.push({ id: `dim-${Date.now()}`, length: "", width: "", height: "", note: "" });
+      item.dimensions = dims;
+      newItems[itemIdx] = item;
+      return newItems;
+    });
+  }, []);
+
+  const removeDimension = useCallback((itemIdx: number, dimIdx: number) => {
+    setItems((prevItems) => {
+      const newItems = [...prevItems];
+      const item = { ...newItems[itemIdx] };
+      if (!item.dimensions || item.dimensions.length <= 1) return prevItems;
+      const dims = [...item.dimensions];
+      dims.splice(dimIdx, 1);
+      item.dimensions = dims;
+
+      let totalQty = 0;
+      dims.forEach(d => {
+        const l = parseFloat(d.length) || 0;
+        const w = parseFloat(d.width) || 0;
+        const h = parseFloat(d.height) || 0;
+        if (l > 0 || w > 0 || h > 0) {
+          const p = [l, w, h].filter(v => v > 0);
+          totalQty += p.reduce((acc, v) => acc * v, 1);
+        }
+      });
+      item.qty = item.dimension_unit === "mm" ? Math.round(totalQty).toString() : totalQty.toFixed(2);
+
+      item.length = dims[0].length;
+      item.width = dims[0].width;
+      item.height = dims[0].height;
+
+      newItems[itemIdx] = item;
+      return newItems;
+    });
+  }, []);
+
+  const updateDimension = useCallback((itemIdx: number, dimIdx: number, field: "length" | "width" | "height", value: string) => {
+    setItems((prevItems) => {
+      const newItems = [...prevItems];
+      const item = { ...newItems[itemIdx] };
+      const dims = item.dimensions?.length ? [...item.dimensions] : [{ id: "def", length: item.length, width: item.width, height: item.height, note: item.description }];
+
+      dims[dimIdx] = { ...dims[dimIdx], [field]: value };
+      item.dimensions = dims;
+
+      let totalQty = 0;
+      dims.forEach(d => {
+        const l = parseFloat(d.length) || 0;
+        const w = parseFloat(d.width) || 0;
+        const h = parseFloat(d.height) || 0;
+        if (l > 0 || w > 0 || h > 0) {
+          const p = [l, w, h].filter(v => v > 0);
+          totalQty += p.reduce((acc, v) => acc * v, 1);
+        }
+      });
+
+      if (totalQty > 0) {
+        item.qty = item.dimension_unit === "mm" ? Math.round(totalQty).toString() : totalQty.toFixed(2);
+      } else {
+        item.qty = "0";
+      }
+
+      if (dimIdx === 0) {
+        item.length = dims[0].length;
+        item.width = dims[0].width;
+        item.height = dims[0].height;
+      }
+
+      newItems[itemIdx] = item;
+      return newItems;
+    });
+  }, []);
 
   const updateItem = (idx: number, field: keyof PlanItem, value: any) => {
     const newItems = [...items];
@@ -914,24 +1406,43 @@ export default function CreateSketchPlan() {
 
     // Auto-calculate quantity if dimensions or unit change
     if (["length", "width", "height", "dimension_unit"].includes(field)) {
-      const l = parseFloat(newItems[idx].length) || 0;
-      const w = parseFloat(newItems[idx].width) || 0;
-      const h = parseFloat(newItems[idx].height) || 0;
-      if (l > 0 || w > 0 || h > 0) {
-        const dims = [l, w, h].filter(v => v > 0);
-        const autoQty = dims.reduce((acc, v) => acc * v, 1);
-        // If dimension_unit is mm, round to nearest integer. Otherwise use 2 decimal places.
-        newItems[idx].qty = newItems[idx].dimension_unit === "mm"
-          ? Math.round(autoQty).toString()
-          : autoQty.toFixed(2);
-      } else if (newItems[idx].dimension_unit === "mm") {
-        // Ensure existing qty is also rounded when unit switches to mm
-        const currentQty = parseFloat(newItems[idx].qty) || 0;
-        newItems[idx].qty = Math.round(currentQty).toString();
+      if (field === "dimension_unit") {
+        const dims = newItems[idx].dimensions?.length ? newItems[idx].dimensions : [{ id: "def", length: newItems[idx].length, width: newItems[idx].width, height: newItems[idx].height, note: newItems[idx].description }];
+        let totalQty = 0;
+        dims.forEach((d: any) => {
+          const l = parseFloat(d.length) || 0;
+          const w = parseFloat(d.width) || 0;
+          const h = parseFloat(d.height) || 0;
+          if (l > 0 || w > 0 || h > 0) {
+            const p = [l, w, h].filter(v => v > 0);
+            totalQty += p.reduce((acc, v) => acc * v, 1);
+          }
+        });
+        if (totalQty > 0) {
+          newItems[idx].qty = value === "mm" ? Math.round(totalQty).toString() : totalQty.toFixed(2);
+        } else if (value === "mm") {
+          const currentQty = parseFloat(newItems[idx].qty) || 0;
+          newItems[idx].qty = Math.round(currentQty).toString();
+        }
+      } else {
+        const l = parseFloat(newItems[idx].length) || 0;
+        const w = parseFloat(newItems[idx].width) || 0;
+        const h = parseFloat(newItems[idx].height) || 0;
+        if (l > 0 || w > 0 || h > 0) {
+          const dimsArr = [l, w, h].filter(v => v > 0);
+          const autoQty = dimsArr.reduce((acc, v) => acc * v, 1);
+          newItems[idx].qty = newItems[idx].dimension_unit === "mm"
+            ? Math.round(autoQty).toString()
+            : autoQty.toFixed(2);
+        } else if (newItems[idx].dimension_unit === "mm") {
+          const currentQty = parseFloat(newItems[idx].qty) || 0;
+          newItems[idx].qty = Math.round(currentQty).toString();
+        }
       }
     }
 
     setItems(newItems);
+    if (sortBy !== "none") setSortBy("none");
   };
 
   const handlePlanImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1016,10 +1527,23 @@ export default function CreateSketchPlan() {
   };
 
   const selectMaterial = (idx: number, material: any) => {
+    const currentCategory = items[idx].category;
+    const materialCategory = material.category;
+
+    if (currentCategory && materialCategory && currentCategory !== materialCategory) {
+      setRowToConfirm({ idx, material });
+      setShowCategoryConfirm(true);
+      return;
+    }
+
+    applyMaterialSelection(idx, material);
+  };
+
+  const applyMaterialSelection = (idx: number, material: any, updateCategory: boolean = true) => {
     const newItems = [...items];
     newItems[idx].material_id = material.id;
     newItems[idx].item_name = material.name;
-    if (material.category) newItems[idx].category = material.category;
+    if (updateCategory && material.category) newItems[idx].category = material.category;
     if (material.unit) newItems[idx].unit = material.unit;
 
     // Automatically load material image into PRE option if available
@@ -1039,6 +1563,24 @@ export default function CreateSketchPlan() {
     }
 
     setItems(newItems);
+    setMaterialSearch("");
+    setSearchResults([]);
+  };
+
+  const confirmCategoryReplace = () => {
+    if (rowToConfirm) {
+      applyMaterialSelection(rowToConfirm.idx, rowToConfirm.material, true);
+      setRowToConfirm(null);
+      setShowCategoryConfirm(false);
+    }
+  };
+
+  const cancelCategoryReplace = () => {
+    // "On cancel → keep existing category and prevent mismatch"
+    // This implies we don't apply the material selection because it has a different category.
+    setRowToConfirm(null);
+    setShowCategoryConfirm(false);
+    setOpenPopoverIdx(null); // Close the item picker
     setMaterialSearch("");
     setSearchResults([]);
   };
@@ -1220,22 +1762,45 @@ export default function CreateSketchPlan() {
       doc.text(`Plan: ${name}`, metaX, headerBoxY + 13, { align: "right" });
       doc.text(`Date: ${planDate}`, metaX, headerBoxY + 19, { align: "right" });
 
+      const getDisplayUnit = (u: string) => {
+        const unitMap: any = { feet: "ft", mm: "mm", inch: "in", cm: "cm", meter: "m", sqft: "sqft", sqmt: "sqmt", rft: "rft", rmt: "rmt", nos: "nos", pcs: "pcs", kg: "kg", litre: "ltr", set: "set", ls: "LS" };
+        return unitMap[u] || u;
+      };
+
       const headers = selectedPdfCols;
-      const body = processedItems.map((item, idx) => {
-        const row: any[] = [];
-        headers.forEach(h => {
-          if (h === "#") row.push(idx + 1);
-          else if (h === "Item") row.push(item.item_name);
-          else if (h === "Notes") row.push(item.description);
-          else if (h === "L") row.push(item.length);
-          else if (h === "W") row.push(item.width);
-          else if (h === "H") row.push(item.height);
-          else if (h === "Qty") row.push(item.qty);
-          else if (h === "Unit") row.push(item.unit);
-          else if (h === "Pre Photos") row.push("");
-          else if (h === "Post Photos") row.push("");
+      const body: any[] = [];
+      processedItems.forEach((item, idx) => {
+        const itemDims = (includeSubNotesInExport && item.dimensions?.length) ? item.dimensions : [{ id: "def", length: item.length, width: item.width, height: item.height, note: item.description }];
+
+        itemDims.forEach((dim: any, dIdx: number) => {
+          const row: any[] = [];
+          headers.forEach(h => {
+            if (h === "#") {
+              row.push(dIdx === 0 ? idx + 1 : "");
+            } else if (h === "Item") {
+              row.push(dIdx === 0 ? item.item_name : "");
+            } else if (h === "Notes") {
+              const noteText = dIdx === 0 ? item.description : (dim.note || "");
+              row.push(dIdx === 0 ? noteText : `     -  ${noteText}`);
+            } else if (h === "L") {
+              row.push(dim.length || "");
+            } else if (h === "W") {
+              row.push(dim.width || "");
+            } else if (h === "H") {
+              row.push(dim.height || "");
+            } else if (h === "Qty") {
+              // Only show total qty on the first row of the item to avoid confusion
+              row.push(dIdx === 0 ? item.qty : "");
+            } else if (h === "Unit") {
+              row.push(dIdx === 0 ? getDisplayUnit(item.dimension_unit) : "");
+            } else if (h === "Pre Photos") {
+              row.push("");
+            } else if (h === "Post Photos") {
+              row.push("");
+            }
+          });
+          body.push(row);
         });
-        return row;
       });
 
       const prePhotoColIdx = headers.indexOf("Pre Photos");
@@ -1253,19 +1818,55 @@ export default function CreateSketchPlan() {
           [prePhotoColIdx]: { cellWidth: 25 },
           [postPhotoColIdx]: { cellWidth: 25 },
         },
-        didParseCell: (data) => {
+        didParseCell: (data: any) => {
+          // Check if this is a sub-row (empty S.No cell)
+          const sNoIdx = headers.indexOf("#");
+          const isSubRow = data.section === 'body' && (sNoIdx !== -1 ? !data.row.raw[sNoIdx] : !data.row.raw[0]);
+
+          if (isSubRow) {
+            data.cell.styles.fillColor = [240, 245, 250]; // Slightly stronger blue-ish gray
+            data.cell.styles.textColor = [80, 80, 80];
+            data.cell.styles.fontStyle = 'italic';
+            data.cell.styles.fontSize = 7.5;
+          }
+
           if (data.section === 'body' && (data.column.index === prePhotoColIdx || data.column.index === postPhotoColIdx)) {
-            const item = processedItems[data.row.index];
+            const itemIdx = processedItems.findIndex((it, i) => {
+              // Find which item this row belongs to by matching cumulative row count
+              let count = 0;
+              for (let j = 0; j <= i; j++) {
+                count += (processedItems[j].dimensions?.length || 1);
+                if (count > data.row.index) return true;
+              }
+              return false;
+            });
+            const item = processedItems[itemIdx];
             if (!item) return;
-            const pdfImg = data.column.index === prePhotoColIdx ? item._pdfPre : item._pdfPost;
+            // Photos should only appear on the first row of an item to save space or be handled specially
+            // For now, let's only allow photos on the main row (where # is present)
+            const hasSNo = !!data.row.raw[headers.indexOf("#")];
+            const pdfImg = hasSNo ? (data.column.index === prePhotoColIdx ? item._pdfPre : item._pdfPost) : null;
             if (pdfImg) {
               data.cell.styles.minCellHeight = 25;
+            } else if (!hasSNo) {
+              data.cell.text = ""; // Clear text for sub-row photo cells
             }
           }
         },
-        didDrawCell: (data) => {
+        didDrawCell: (data: any) => {
           if (data.section === 'body' && (data.column.index === prePhotoColIdx || data.column.index === postPhotoColIdx)) {
-            const item = processedItems[data.row.index];
+            const hasSNo = !!data.row.raw[headers.indexOf("#")];
+            if (!hasSNo) return; // Don't draw images on sub-rows
+
+            const itemIdx = processedItems.findIndex((it, i) => {
+              let count = 0;
+              for (let j = 0; j <= i; j++) {
+                count += (processedItems[j].dimensions?.length || 1);
+                if (count > data.row.index) return true;
+              }
+              return false;
+            });
+            const item = processedItems[itemIdx];
             if (!item) return;
             const pdfImg = data.column.index === prePhotoColIdx ? item._pdfPre : item._pdfPost;
             if (pdfImg) {
@@ -1281,7 +1882,7 @@ export default function CreateSketchPlan() {
       });
 
       // Add plan-level images if space remains
-      if (processedPlanImages.length > 0) {
+      if (includePlanPhotosInExport && processedPlanImages.length > 0) {
         let finalY = (doc as any).lastAutoTable.finalY + 15;
         if (finalY + 60 > doc.internal.pageSize.getHeight()) {
           doc.addPage();
@@ -1334,6 +1935,80 @@ export default function CreateSketchPlan() {
     } catch (err) {
       console.error("PDF Error", err);
       toast({ title: "Error", description: "Failed to generate PDF", variant: "destructive" });
+    }
+  };
+
+  const handleDownloadExcel = () => {
+    try {
+      toast({ title: "Preparing Excel", description: "Generating spreadsheet..." });
+
+      // 1. Prepare Header Info (Metadata)
+      const info = [
+        ["Project", projects.find(p => p.id === projectId)?.name || "N/A"],
+        ["Plan Name", name],
+        ["Location", locationStr],
+        ["Date", planDate],
+        ["Generated", new Date().toLocaleString()],
+        [], // Spacing row
+      ];
+
+      const getDisplayUnit = (u: string) => {
+        const unitMap: any = { feet: "ft", mm: "mm", inch: "in", cm: "cm", meter: "m", sqft: "sqft", sqmt: "sqmt", rft: "rft", rmt: "rmt", nos: "nos", pcs: "pcs", kg: "kg", litre: "ltr", set: "set", ls: "LS" };
+        return unitMap[u] || u;
+      };
+
+      // 2. Prepare Table Data
+      const tableData: any[] = [];
+      items.forEach((item, idx) => {
+        const itemDims = (includeSubNotesInExport && item.dimensions?.length) ? item.dimensions : [{ id: "def", length: item.length, width: item.width, height: item.height, note: item.description }];
+
+        itemDims.forEach((dim: any, dIdx: number) => {
+          const row: any = {};
+          if (selectedPdfCols.includes("#")) row["S.No"] = dIdx === 0 ? idx + 1 : "";
+          if (selectedPdfCols.includes("Item")) row["Item Name"] = dIdx === 0 ? item.item_name : "";
+          if (selectedPdfCols.includes("Notes")) row["Notes"] = dIdx === 0 ? item.description : (dim.note || "");
+          if (selectedPdfCols.includes("L")) row["L"] = dim.length || "";
+          if (selectedPdfCols.includes("W")) row["W"] = dim.width || "";
+          if (selectedPdfCols.includes("H")) row["H"] = dim.height || "";
+          if (selectedPdfCols.includes("Qty")) row["Quantity"] = dIdx === 0 ? item.qty : "";
+          if (selectedPdfCols.includes("Unit")) row["Unit"] = dIdx === 0 ? getDisplayUnit(item.dimension_unit) : "";
+          tableData.push(row);
+        });
+      });
+
+      // 3. Create Worksheet
+      // Start with an empty sheet
+      const ws = XLSX.utils.aoa_to_sheet(info);
+
+      // 4. Add Table Data below the info
+      const dataStartRow = info.length;
+      XLSX.utils.sheet_add_json(ws, tableData, {
+        origin: `A${dataStartRow + 1}`,
+        skipHeader: false
+      });
+
+      // 5. Basic cell width adjustments (approximation)
+      const colWidths = [
+        { wch: 8 },  // S.No
+        { wch: 25 }, // Item Name
+        { wch: 35 }, // Notes
+        { wch: 8 },  // L
+        { wch: 8 },  // W
+        { wch: 8 },  // H
+        { wch: 10 }, // Qty
+        { wch: 10 }, // Unit
+      ];
+      ws['!cols'] = colWidths;
+
+      // 6. Finalize and Save
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Site Report");
+      XLSX.writeFile(wb, `${name.replace(/\s+/g, '_')}_Report.xlsx`);
+
+      toast({ title: "Success", description: "Excel downloaded successfully" });
+    } catch (err) {
+      console.error("Excel Error", err);
+      toast({ title: "Error", description: "Failed to generate Excel", variant: "destructive" });
     }
   };
 
@@ -1529,6 +2204,14 @@ export default function CreateSketchPlan() {
     });
   };
 
+  const filteredItems = items.filter(it =>
+    (isSupplier ? it.assigned_vendor_id === (user as any)?.shopId : true) &&
+    ((it.item_name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (it.description || "").toLowerCase().includes(searchTerm.toLowerCase())) &&
+    (categoryFilter === "all" || it.category === categoryFilter)
+  );
+  const isFiltering = filteredItems.length !== items.length;
+
   const LayoutComponent = isSupplier ? SupplierLayout : Layout;
 
   return (
@@ -1565,7 +2248,7 @@ export default function CreateSketchPlan() {
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => setIsPdfDialogOpen(true)} className="gap-1.5 h-8 text-[10px] border-indigo-200 text-indigo-600 hover:bg-indigo-50">
-              <FileText className="w-3 h-3" /> Export PDF
+              <FileText className="w-3 h-3" /> Export
             </Button>
             <Button variant="outline" size="sm" onClick={() => setIsEmailDialogOpen(true)} className="gap-1.5 h-8 text-[10px] border-indigo-200 text-indigo-600 hover:bg-indigo-50">
               <MessageSquare className="w-3 h-3" /> Email Plan
@@ -1725,9 +2408,9 @@ export default function CreateSketchPlan() {
           </div>
         </div>
 
-        <div className={cn("space-y-4 transition-all duration-300 relative", (isLocked || isSupplier) && "opacity-[0.8] grayscale-[20%] pointer-events-none select-none")}>
-          {(isLocked || isSupplier) && (
-            <div className="absolute inset-0 z-40 rounded-xl" title="Plan is locked" aria-hidden="true" />
+        <div className={cn("space-y-4 transition-all duration-300 relative", isLocked && "opacity-[0.9] grayscale-[10%]")}>
+          {isLocked && (
+            <div className="absolute inset-0 z-40 rounded-xl pointer-events-none" title="Plan is locked" aria-hidden="true" />
           )}
 
           {/* Basic Details - Compact */}
@@ -1755,7 +2438,9 @@ export default function CreateSketchPlan() {
                       disabled={isLocked || isSupplier}
                     >
                       <span className="truncate">
-                        {projectId !== "none" ? projects.find((project) => project.id === projectId)?.name || "Select project..." : "No Project"}
+                        {projectId !== "none"
+                          ? (projects.find((proj) => proj.id === projectId)?.name || projectName || "Select project...")
+                          : "No Project"}
                       </span>
                       <Search className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
                     </Button>
@@ -1774,7 +2459,7 @@ export default function CreateSketchPlan() {
                           >
                             No Project
                           </CommandItem>
-                          {projects.map((project) => (
+                          {projects.slice().sort((a, b) => (a.name || "").localeCompare(b.name || "")).map((project) => (
                             <CommandItem
                               key={project.id}
                               onSelect={() => {
@@ -1819,11 +2504,30 @@ export default function CreateSketchPlan() {
                 <SelectTrigger className="w-[180px] h-10 bg-white">
                   <SelectValue placeholder="All Categories" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[300px] overflow-y-auto">
                   <SelectItem value="all">All Categories</SelectItem>
-                  {Array.from(new Set(items.map(it => it.category).filter(Boolean))).map(cat => (
+                  {Array.from(new Set(items.map(it => it.category).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b))).map(cat => (
                     <SelectItem key={cat as string} value={cat as string}>{cat as string}</SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+              <Select value={sortBy} onValueChange={handleSort}>
+                <SelectTrigger className="w-[160px] h-10 bg-white">
+                  <div className="flex items-center gap-2">
+                    <ArrowDownAz className="w-4 h-4 text-slate-400" />
+                    <SelectValue placeholder="Sort Items" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent className="z-[110]">
+                  <SelectItem value="none">Manual Order</SelectItem>
+                  <SelectItem value="name-asc">Item Sort (A-Z)</SelectItem>
+                  <SelectItem value="name-desc">Item Sort (Z-A)</SelectItem>
+                  <SelectItem value="category-asc">Category Sort (A-Z)</SelectItem>
+                  <SelectItem value="category-desc">Category Sort (Z-A)</SelectItem>
+                  <SelectItem value="notes-asc">Notes Sort (A-Z)</SelectItem>
+                  <SelectItem value="notes-desc">Notes Sort (Z-A)</SelectItem>
+                  <SelectItem value="qty-desc">Qty Sort (High to Low)</SelectItem>
+                  <SelectItem value="qty-asc">Qty Sort (Low to High)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1854,14 +2558,32 @@ export default function CreateSketchPlan() {
                   </Button>
                 )}
                 {selectedItemIds.size > 0 && !isSupplier && (
-                  <Button
-                    onClick={() => { loadVendors(); setShowAssignDialog(true); }}
-                    size="sm"
-                    variant="outline"
-                    className="h-8 gap-1 border-amber-500 text-amber-600 hover:bg-amber-50"
-                  >
-                    Assign to Vendor ({selectedItemIds.size})
-                  </Button>
+                  <>
+                    <Button
+                      onClick={() => { setShowAssignCategoryDialog(true); }}
+                      size="sm"
+                      variant="outline"
+                      className="h-8 gap-1 border-indigo-500 text-indigo-600 hover:bg-blue-50"
+                    >
+                      <Layers className="w-3.5 h-3.5" /> Assign Category ({selectedItemIds.size})
+                    </Button>
+                    <Button
+                      onClick={() => { loadUsers(); setShowAssignUserDialog(true); }}
+                      size="sm"
+                      variant="outline"
+                      className="h-8 gap-1 border-blue-500 text-blue-600 hover:bg-blue-50"
+                    >
+                      <Users className="w-3.5 h-3.5" /> Assign to User ({selectedItemIds.size})
+                    </Button>
+                    <Button
+                      onClick={() => { loadVendors(); setShowAssignDialog(true); }}
+                      size="sm"
+                      variant="outline"
+                      className="h-8 gap-1 border-amber-500 text-amber-600 hover:bg-amber-50"
+                    >
+                      Assign to Vendor ({selectedItemIds.size})
+                    </Button>
+                  </>
                 )}
                 {userRole !== "supplier" && (
                   <Button onClick={addItem} size="sm" variant="outline" className="h-8 gap-1 border-indigo-200 text-indigo-600 hover:bg-indigo-50" disabled={isLocked}>
@@ -1887,13 +2609,12 @@ export default function CreateSketchPlan() {
                         )}
                       </th>
                       <th className={cn("w-10 px-2 text-left", isCompact ? "py-1" : "py-3")}>#</th>
-                      <th className={cn("w-[220px] min-w-[220px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Notes/Review</th>
+                      <th className={cn("w-[200px] min-w-[200px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Notes/Review</th>
+                      <th className={cn("w-[100px] min-w-[100px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Category</th>
                       <th className={cn("w-[160px] min-w-[160px] max-w-[160px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Item/Product</th>
                       <th className={cn("w-[60px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Unit</th>
-                      <th className={cn("w-[60px] px-2 text-left font-bold text-indigo-900 border-l border-slate-200/50 bg-indigo-50/20", isCompact ? "py-1" : "py-3")}>L</th>
-                      <th className={cn("w-[60px] px-2 text-left font-bold text-indigo-900 bg-indigo-50/20", isCompact ? "py-1" : "py-3")}>W</th>
-                      <th className={cn("w-[60px] px-2 text-left font-bold text-indigo-900 bg-indigo-50/20", isCompact ? "py-1" : "py-3")}>H</th>
-                      <th className={cn("w-[80px] px-2 text-center bg-indigo-50 font-bold text-indigo-700", isCompact ? "py-1" : "py-3")}>QTY</th>
+                      <th className={cn("w-[110px] min-w-[110px] max-w-[110px] px-2 text-center font-bold text-indigo-900 border-l border-slate-200/50 bg-indigo-50/20", isCompact ? "py-1" : "py-3")}>Dimensions</th>
+                      <th className={cn("w-[80px] min-w-[80px] max-w-[80px] px-2 text-center bg-indigo-50 font-bold text-indigo-700", isCompact ? "py-1" : "py-3")}>QTY</th>
                       {!isSupplier && (
                         <th className={cn("w-[100px] px-2 text-left font-bold text-indigo-900 border-l border-slate-200/50 bg-indigo-50/20", isCompact ? "py-1" : "py-3")}>Assignee</th>
                       )}
@@ -1902,28 +2623,27 @@ export default function CreateSketchPlan() {
                       <th className={cn("w-10 px-2 text-center", isCompact ? "py-1" : "py-3")}>Del</th>
                     </tr>
                   </thead>
-                  <Reorder.Group as="tbody" axis="y" values={items} onReorder={setItems}>
-                    {items.filter(it =>
-                      (isSupplier ? it.assigned_vendor_id === (user as any)?.shopId : true) &&
-                      (it.item_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        it.description.toLowerCase().includes(searchTerm.toLowerCase())) &&
-                      (categoryFilter === "all" || it.category === categoryFilter)
-                    ).map((item, idx) => (
+                  <Reorder.Group as="tbody" axis="y" values={isFiltering ? items : items} onReorder={(newOrder) => {
+                    if (isFiltering) return;
+                    setItems(newOrder);
+                    if (sortBy !== "none") setSortBy("none");
+                  }} key={sortBy}>
+                    {filteredItems.map((item, idx) => (
                       <SketchPlanRow
                         key={item.id}
                         item={item}
                         idx={items.indexOf(item)}
                         itemsLength={items.length}
-                        isLocked={isLocked || userRole === "supplier"}
+                        isLocked={isLocked || userRole === "supplier" || isFiltering}
                         isCompact={isCompact}
                         updateItem={updateItem}
-                        addItem={addItem}
                         removeItem={removeItem}
                         moveItemToPosition={moveItemToPosition}
                         selectMaterial={selectMaterial}
                         searchResults={searchResults}
                         searching={searching}
                         loadMaterials={loadMaterials}
+                        materialSearch={materialSearch}
                         setMaterialSearch={setMaterialSearch}
                         openPopoverIdx={openPopoverIdx}
                         setOpenPopoverIdx={setOpenPopoverIdx}
@@ -1941,6 +2661,11 @@ export default function CreateSketchPlan() {
                         userRole={userRole}
                         onImageDragStart={handleImageDragStart}
                         onImageDrop={handleImageDrop}
+                        addDimension={addDimension}
+                        removeDimension={removeDimension}
+                        updateDimension={updateDimension}
+                        cloneItem={cloneItem}
+                        categories={categories}
                       />
                     ))}
                   </Reorder.Group>
@@ -1999,7 +2724,7 @@ export default function CreateSketchPlan() {
                           </button>
                         </div>
                       )}
-                      {!(isLocked || userRole === "supplier") && (
+                      {!(isLocked || isSupplier) && (
                         <>
                           <button onClick={() => renamePlanImage(idx)} className="absolute bottom-1 right-1 bg-indigo-500 text-white p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10" title="Rename photo">
                             <Pencil className="w-3 h-3" />
@@ -2011,10 +2736,10 @@ export default function CreateSketchPlan() {
                       )}
                     </div>
                   ))}
-                  {!(isLocked || userRole === "supplier") && (
+                  {!(isLocked || isSupplier) && (
                     <>
-                      <input type="file" multiple accept="image/*" className="hidden" id="plan-photo-upload" onChange={handlePlanImageUpload} disabled={isLocked || userRole === "supplier"} />
-                      <Button variant="ghost" size="sm" className="col-span-4 border-2 border-dashed border-slate-200 h-10 hover:bg-slate-100 p-0" asChild disabled={isLocked || userRole === "supplier"}>
+                      <input type="file" multiple accept="image/*" className="hidden" id="plan-photo-upload" onChange={handlePlanImageUpload} disabled={isLocked || isSupplier} />
+                      <Button variant="ghost" size="sm" className="col-span-4 border-2 border-dashed border-slate-200 h-10 hover:bg-slate-100 p-0" asChild disabled={isLocked || isSupplier}>
                         <label htmlFor="plan-photo-upload" className="cursor-pointer flex flex-col items-center justify-center w-full h-full">
                           <Plus className="w-5 h-5 text-slate-400" />
                         </label>
@@ -2168,30 +2893,71 @@ export default function CreateSketchPlan() {
 
         {/* PDF Export Dialog */}
         <Dialog open={isPdfDialogOpen} onOpenChange={setIsPdfDialogOpen}>
-          <DialogContent className="sm:max-w-[425px]">
+          <DialogContent className="sm:max-w-[450px]">
             <DialogHeader>
-              <DialogTitle>Select Columns for PDF Report</DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-indigo-600" />
+                Export Report Options
+              </DialogTitle>
             </DialogHeader>
-            <div className="grid grid-cols-2 gap-4 py-4">
-              {["#", "Item", "Notes", "L", "W", "H", "Qty", "Unit", "Pre Photos", "Post Photos"].map((col) => (
-                <div key={col} className="flex items-center space-x-2">
-                  <Checkbox
-                    id={`col-${col}`}
-                    checked={selectedPdfCols.includes(col)}
-                    onCheckedChange={(checked) => {
-                      if (checked) setSelectedPdfCols([...selectedPdfCols, col]);
-                      else setSelectedPdfCols(selectedPdfCols.filter(c => c !== col));
-                    }}
-                  />
-                  <label htmlFor={`col-${col}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    {col}
-                  </label>
+            <div className="space-y-6 py-4">
+              <div>
+                <Label className="text-[10px] uppercase font-bold text-slate-500 mb-3 block">Column Selection</Label>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  {["#", "Item", "Notes", "L", "W", "H", "Qty", "Unit", "Pre Photos", "Post Photos"].map((col) => (
+                    <div key={col} className="flex items-center space-x-2 bg-slate-50 p-2 rounded border border-slate-100">
+                      <Checkbox
+                        id={`col-${col}`}
+                        checked={selectedPdfCols.includes(col)}
+                        onCheckedChange={(checked) => {
+                          if (checked) setSelectedPdfCols([...selectedPdfCols, col]);
+                          else setSelectedPdfCols(selectedPdfCols.filter(c => c !== col));
+                        }}
+                      />
+                      <label htmlFor={`col-${col}`} className="text-xs font-semibold leading-none cursor-pointer text-slate-700">
+                        {col}
+                      </label>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
+
+              <div className="pt-4 border-t border-slate-100">
+                <Label className="text-[10px] uppercase font-bold text-slate-500 mb-3 block">Additional Content</Label>
+                <div className="space-y-3">
+                  <div className="flex items-center space-x-2 bg-amber-50 p-3 rounded border border-amber-100">
+                    <Checkbox
+                      id="include-plan-photos"
+                      checked={includePlanPhotosInExport}
+                      onCheckedChange={(checked) => setIncludePlanPhotosInExport(!!checked)}
+                    />
+                    <label htmlFor="include-plan-photos" className="text-xs font-bold leading-none cursor-pointer text-amber-900 flex items-center gap-2">
+                      <ImageIcon className="w-3.5 h-3.5" /> Include Plan-Level Site Photos
+                    </label>
+                  </div>
+                  <div className="flex items-center space-x-2 bg-indigo-50 p-3 rounded border border-indigo-100">
+                    <Checkbox
+                      id="include-sub-notes"
+                      checked={includeSubNotesInExport}
+                      onCheckedChange={(checked) => setIncludeSubNotesInExport(!!checked)}
+                    />
+                    <label htmlFor="include-sub-notes" className="text-xs font-bold leading-none cursor-pointer text-indigo-900 flex items-center gap-2">
+                      <GitBranch className="w-3.5 h-3.5" /> Include Sub-Notes & Detailed Dimensions
+                    </label>
+                  </div>
+                </div>
+              </div>
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsPdfDialogOpen(false)}>Cancel</Button>
-              <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => { setIsPdfDialogOpen(false); handleDownloadPdf(); }}>Download PDF</Button>
+            <DialogFooter className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+              <Button variant="outline" onClick={() => setIsPdfDialogOpen(false)} className="w-full sm:w-auto">Cancel</Button>
+              <div className="flex gap-2 w-full sm:w-auto">
+                <Button variant="outline" className="flex-1 sm:flex-initial gap-1 border-green-600 text-green-700 hover:bg-green-50" onClick={() => { setIsPdfDialogOpen(false); handleDownloadExcel(); }}>
+                  <FileSpreadsheet className="w-4 h-4" /> Excel
+                </Button>
+                <Button className="flex-1 sm:flex-initial bg-indigo-600 hover:bg-indigo-700 gap-1" onClick={() => { setIsPdfDialogOpen(false); handleDownloadPdf(); }}>
+                  <Download className="w-4 h-4" /> PDF
+                </Button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -2220,7 +2986,7 @@ export default function CreateSketchPlan() {
 
         {/* Image Preview Dialog */}
         <Dialog open={!!previewImage} onOpenChange={(open) => !open && setPreviewImage(null)}>
-          <DialogContent className="max-w-4xl p-1 bg-transparent border-none shadow-none [&>button]:text-white [&>button]:bg-black/50 [&>button]:hover:bg-black/80 [&>button]:rounded-full [&>button]:p-2 [&>button]:z-50 [&>button]:top-4 [&>button]:right-4">
+          <DialogContent className="max-w-4xl p-1 bg-transparent border-none shadow-none [&>button]:text-white [&>button]:bg-black/50 [&>button]:hover:bg-black/80 [&>button]:rounded-full [&>button]:p-2 [&>button]:z-[210] [&>button]:top-4 [&>button]:right-4 z-[200]">
             <DialogHeader className="sr-only">
               <DialogTitle>Image Preview</DialogTitle>
             </DialogHeader>
@@ -2283,7 +3049,7 @@ export default function CreateSketchPlan() {
                     {vendors.filter(v =>
                       v.name?.toLowerCase().includes(vendorSearchTerm.toLowerCase()) ||
                       v.city?.toLowerCase().includes(vendorSearchTerm.toLowerCase())
-                    ).map(v => (
+                    ).sort((a, b) => (a.name || "").localeCompare(b.name || "")).map(v => (
                       <Button
                         key={v.id}
                         variant="outline"
@@ -2327,6 +3093,198 @@ export default function CreateSketchPlan() {
           </DialogContent>
         </Dialog>
 
+        {/* Assign User Dialog */}
+        <Dialog open={showAssignUserDialog} onOpenChange={(open) => {
+          setShowAssignUserDialog(open);
+          if (!open) setUserSearchTerm("");
+        }}>
+          <DialogContent className="sm:max-w-[480px] p-0 overflow-hidden border-none shadow-2xl max-h-[85vh] flex flex-col">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white shrink-0">
+              <DialogHeader>
+                <div className="flex items-center justify-between">
+                  <DialogTitle className="text-white flex items-center gap-2 text-xl font-bold">
+                    <Users className="w-6 h-6 border-2 border-blue-400 rounded-full p-0.5" />
+                    Assign Items to User
+                  </DialogTitle>
+                </div>
+                <p className="text-blue-100 text-sm mt-1">
+                  You have selected <span className="font-bold underline decoration-blue-400 underline-offset-4">{selectedItemIds.size}</span> items to assigned directly to a team member.
+                </p>
+              </DialogHeader>
+            </div>
+
+            <div className="p-4 space-y-4 bg-white flex-1 overflow-hidden flex flex-col">
+              <div className="relative group shrink-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                <Input
+                  placeholder="Search users by name..."
+                  className="pl-9 h-11 bg-slate-50 border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium"
+                  value={userSearchTerm}
+                  onChange={(e) => setUserSearchTerm(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar min-h-[100px]">
+                {usersList.filter(u =>
+                  u.username?.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
+                  u.fullName?.toLowerCase().includes(userSearchTerm.toLowerCase())
+                ).length === 0 ? (
+                  <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-200 flex flex-col items-center gap-2 m-2">
+                    <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center">
+                      <Search className="w-6 h-6 text-slate-300" />
+                    </div>
+                    <p className="text-sm text-slate-500 font-medium">No matching users found.</p>
+                    <Button variant="link" size="sm" onClick={() => setUserSearchTerm("")} className="text-blue-600 p-0 h-auto">Clear Search</Button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 p-1">
+                    {usersList.filter(u =>
+                      u.username?.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
+                      u.fullName?.toLowerCase().includes(userSearchTerm.toLowerCase())
+                    ).sort((a, b) => ((a.fullName || a.username) || "").localeCompare((b.fullName || b.username) || "")).map(u => (
+                      <Button
+                        key={u.id}
+                        variant="outline"
+                        className="w-full justify-start h-auto py-3 px-4 hover:border-blue-400 hover:bg-blue-50 group transition-all duration-200 border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-0.5"
+                        onClick={() => handleAssignToUser(u.id)}
+                        disabled={assigningLoading}
+                      >
+                        <div className="w-10 h-10 rounded-lg bg-slate-100 group-hover:bg-blue-100 flex items-center justify-center mr-3 shrink-0 transition-colors">
+                          <Users className="w-5 h-5 text-slate-500 group-hover:text-blue-600" />
+                        </div>
+                        <div className="flex flex-col items-start min-w-0 flex-1 text-left">
+                          <span className="font-bold text-slate-700 group-hover:text-blue-900 truncate w-full text-sm">{u.fullName || u.username}</span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[10px] text-slate-400 font-mono tracking-tighter">
+                              Role: {u.role}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="opacity-0 group-hover:opacity-100 transition-all ml-2 shrink-0 translate-x-2 group-hover:translate-x-0">
+                          <Check className="w-5 h-5 text-blue-600" />
+                        </div>
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t flex justify-end shrink-0">
+              <Button variant="ghost" onClick={() => setShowAssignUserDialog(false)} className="text-slate-500 hover:text-slate-700 font-semibold h-9">
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Assign Category Dialog */}
+        <Dialog open={showAssignCategoryDialog} onOpenChange={(open) => {
+          setShowAssignCategoryDialog(open);
+          if (!open) setCategorySearchTerm("");
+        }}>
+          <DialogContent className="sm:max-w-[480px] p-0 overflow-hidden border-none shadow-2xl max-h-[85vh] flex flex-col">
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white shrink-0">
+              <DialogHeader>
+                <div className="flex items-center justify-between">
+                  <DialogTitle className="text-white flex items-center gap-2 text-xl font-bold">
+                    <Layers className="w-6 h-6 border-2 border-indigo-400 rounded-full p-0.5" />
+                    Assign Category to Items
+                  </DialogTitle>
+                </div>
+                <p className="text-indigo-100 text-sm mt-1">
+                  Assign a category to <span className="font-bold underline decoration-amber-400 underline-offset-4">{selectedItemIds.size}</span> selected items.
+                </p>
+              </DialogHeader>
+            </div>
+
+            <div className="p-4 space-y-4 bg-white flex-1 overflow-hidden flex flex-col">
+              <div className="relative group shrink-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+                <Input
+                  placeholder="Search categories..."
+                  className="pl-9 h-11 bg-slate-50 border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-medium"
+                  value={categorySearchTerm}
+                  onChange={(e) => setCategorySearchTerm(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar min-h-[100px]">
+                {categories.filter(cat =>
+                  cat.toLowerCase().includes(categorySearchTerm.toLowerCase())
+                ).length === 0 ? (
+                  <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-200 flex flex-col items-center gap-2 m-2">
+                    <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center">
+                      <Search className="w-6 h-6 text-slate-300" />
+                    </div>
+                    <p className="text-sm text-slate-500 font-medium">No matching categories found.</p>
+                    <Button variant="link" size="sm" onClick={() => setCategorySearchTerm("")} className="text-indigo-600 p-0 h-auto">Clear Search</Button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 p-1">
+                    {categories.filter(cat =>
+                      cat.toLowerCase().includes(categorySearchTerm.toLowerCase())
+                    ).sort((a, b) => a.localeCompare(b)).map((cat, idx) => (
+                      <Button
+                        key={idx}
+                        variant="outline"
+                        className="w-full justify-start h-auto py-3 px-4 hover:border-indigo-400 hover:bg-indigo-50 group transition-all duration-200 border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-0.5"
+                        onClick={() => handleAssignToCategory(cat)}
+                        disabled={assigningLoading}
+                      >
+                        <div className="w-10 h-10 rounded-lg bg-slate-100 group-hover:bg-indigo-100 flex items-center justify-center mr-3 shrink-0 transition-colors">
+                          <Layers className="w-5 h-5 text-slate-500 group-hover:text-indigo-600" />
+                        </div>
+                        <div className="flex flex-col items-start min-w-0 flex-1 text-left">
+                          <span className="font-bold text-slate-700 group-hover:text-indigo-900 truncate w-full text-sm">{cat}</span>
+                        </div>
+                        <div className="opacity-0 group-hover:opacity-100 transition-all ml-2 shrink-0 translate-x-2 group-hover:translate-x-0">
+                          <Check className="w-5 h-5 text-indigo-600" />
+                        </div>
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t flex flex-col gap-3 shrink-0">
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-[10px] uppercase font-bold text-slate-400">Manual Entry</Label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Type custom category..."
+                    className="h-9 text-xs bg-white"
+                    value={categorySearchTerm}
+                    onChange={(e) => setCategorySearchTerm(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && categorySearchTerm.trim()) {
+                        handleAssignToCategory(categorySearchTerm.trim());
+                      }
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    className="bg-indigo-600 hover:bg-indigo-700 h-9"
+                    onClick={() => {
+                      if (categorySearchTerm.trim()) {
+                        handleAssignToCategory(categorySearchTerm.trim());
+                      }
+                    }}
+                  >
+                    Assign
+                  </Button>
+                </div>
+              </div>
+              <div className="flex justify-end pt-1 border-t border-slate-200">
+                <Button variant="ghost" onClick={() => setShowAssignCategoryDialog(false)} className="text-slate-500 hover:text-slate-700 font-semibold h-8 text-xs">
+                  Close
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {/* New Version Dialog */}
         <Dialog open={showNewVersionDialog} onOpenChange={setShowNewVersionDialog}>
           <DialogContent className="sm:max-w-[420px]">
@@ -2336,6 +3294,41 @@ export default function CreateSketchPlan() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* Floating Action Button */}
+      <div className="fixed right-6 bottom-24 z-[100] flex flex-col items-end gap-2 md:gap-3">
+        <Button
+          onClick={() => setIsCompact(!isCompact)}
+          variant="outline"
+          className={`h-8 px-3 text-xs font-semibold shadow-sm ${isCompact ? 'bg-indigo-50 text-indigo-600 border-indigo-300' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+          title="Toggle Compact View"
+        >
+          Compact View
+        </Button>
+      </div>
+      {/* Category Mismatch Confirmation Dialog */}
+      <Dialog open={showCategoryConfirm} onOpenChange={setShowCategoryConfirm}>
+        <DialogContent className="sm:max-w-[425px] z-[300]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="h-5 w-5" />
+              Category Mismatch
+            </DialogTitle>
+            <DialogDescription className="py-2 text-slate-600 font-medium">
+              This item belongs to a different category (<strong>{rowToConfirm?.material?.category}</strong>).
+              Do you want to replace the current category (<strong>{rowToConfirm?.idx !== undefined ? items[rowToConfirm.idx]?.category : ""}</strong>)?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={cancelCategoryReplace} className="flex-1 sm:flex-none">
+              Cancel
+            </Button>
+            <Button onClick={confirmCategoryReplace} className="bg-amber-600 hover:bg-amber-700 text-white flex-1 sm:flex-none">
+              Replace Category
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </LayoutComponent>
   );
 }

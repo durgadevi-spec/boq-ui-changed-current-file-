@@ -292,7 +292,8 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
       const iRate = Number(getEditedValue(itemKey, "install_rate", line.installRate));
       const rate = Number(getEditedValue(itemKey, "rate", sRate + iRate)) || (sRate + iRate);
       const reqQty = Number((qty * (tableData.targetRequiredQty || 1)).toFixed(2));
-      const roundOff = Math.ceil(reqQty);
+      const applyR = line.apply_rounding !== undefined ? Boolean(line.apply_rounding) : (line.applyRounding !== undefined ? Boolean(line.applyRounding) : true);
+      const roundOff = applyR ? Math.ceil(reqQty) : reqQty;
       return {
         title: line.name, description: line.name, unit: line.unit, shop_name: line.shop_name,
         qtyPerSqf: qty, requiredQty: reqQty, roundOff: roundOff,
@@ -604,12 +605,31 @@ export default function GeneratePo() {
 
   const handleGeneratePO = async () => {
     if (!selectedVersionId || isGeneratingPO) return;
+    
     setIsGeneratingPO(true);
     try {
+      // 1. Check if already generated
+      const checkRes = await apiFetch(`/api/purchase-orders/check-existence?versionId=${selectedVersionId}`);
+      if (checkRes.ok) {
+        const { exists } = await checkRes.json();
+        if (exists) {
+          const proceed = window.confirm("Annexures have already been generated for this version. Do you want to generate them again?");
+          if (!proceed) {
+            setIsGeneratingPO(false);
+            return;
+          }
+        }
+      }
+
+      // 2. Generate
       const res = await apiFetch("/api/purchase-orders/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: selectedProjectId, versionId: selectedVersionId }),
+        body: JSON.stringify({ 
+          projectId: selectedProjectId, 
+          versionId: selectedVersionId,
+          versionNumber: selectedVersion?.version_number 
+        }),
       });
       if (res.ok) {
         toast({ title: "Success", description: "Annexures generated successfully!" });

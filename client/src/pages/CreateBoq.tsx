@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Reorder, useDragControls } from "framer-motion";
-import { ChevronUp, ChevronDown, Loader2, CheckCircle2, XCircle, Lock, History, Clock, Briefcase, MapPin, IndianRupee, GripVertical, Search, ArrowUp, Plus, Trash2, Save, MessageSquare, Users, ChevronsUpDown, Check, X, RefreshCw } from "lucide-react";
+import { ChevronUp, ChevronDown, Loader2, CheckCircle2, XCircle, Lock, History, Clock, Briefcase, MapPin, IndianRupee, GripVertical, Search, ArrowUp, ArrowLeft, Plus, Trash2, Save, MessageSquare, Users, ChevronsUpDown, Check, X, RefreshCw, Star, Edit, Reply } from "lucide-react";
 import { fuzzySearch, cn } from "@/lib/utils";
 import { Layout } from "@/components/layout/Layout";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,35 +18,50 @@ import { getEstimatorTypeFromProduct } from "@/lib/estimatorUtils";
 import ProductPicker from "@/components/ProductPicker";
 import MaterialPicker from "@/components/MaterialPicker";
 import Step11Preview from "@/components/Step11Preview";
+import { BomSketchCompareDialog } from "@/components/BomSketchCompareDialog";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from 'xlsx';
-import { DeleteConfirmationDialog } from "@/components/ui/DeleteConfirmationDialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Textarea } from "@/components/ui/textarea";
-import { useData } from "@/lib/store";
+import { DeleteConfirmationDialog } from "../components/ui/DeleteConfirmationDialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+import { Textarea } from "../components/ui/textarea";
+import { useData } from "../lib/store";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 type Project = { id: string; name: string; client: string; budget: string; location?: string; status?: string; project_status?: string };
 
 const PROJECT_STATUSES: { value: string; label: string; color: string }[] = [
-  { value: 'started', label: 'Started', color: 'bg-blue-100 text-blue-700' },
-  { value: 'in_progress', label: 'In Progress', color: 'bg-amber-100 text-amber-700' },
-  { value: 'hold', label: 'Hold', color: 'bg-orange-100 text-orange-700' },
+  { value: 'started', label: 'Started', color: 'bg-slate-100 text-slate-700' },
+  { value: 'in_progress', label: 'In Progress', color: 'bg-cyan-100 text-cyan-700' },
+  { value: 'bom_stage', label: 'BOM Stage', color: 'bg-blue-100 text-blue-700' },
+  { value: 'boq_stage', label: 'BOQ Stage', color: 'bg-indigo-100 text-indigo-700' },
+  { value: 'client_approval', label: 'Client Approval', color: 'bg-amber-100 text-amber-700' },
+  { value: 'work_in_execution', label: 'Work in Execution', color: 'bg-green-100 text-green-700' },
+  { value: 'finance', label: 'Finance', color: 'bg-purple-100 text-purple-700' },
+  { value: 'hold', label: 'On Hold', color: 'bg-orange-100 text-orange-700' },
   { value: 'cancelled', label: 'Cancelled', color: 'bg-red-100 text-red-700' },
   { value: 'closed', label: 'Closed', color: 'bg-gray-200 text-gray-600' },
 ];
-const getProjectStatusMeta = (s?: string) => PROJECT_STATUSES.find(x => x.value === s) ?? { label: s || 'Started', color: 'bg-blue-100 text-blue-700' };
+
+const getProjectStatusMeta = (s?: string) => PROJECT_STATUSES.find(x => x.value === s) ?? { label: s || 'Started', color: 'bg-slate-100 text-slate-700' };
 type BOMVersion = { id: string; project_id: string; version_number: number; status: "draft" | "submitted" | "pending_approval" | "approved" | "rejected" | "edit_requested"; created_at: string; rejection_reason?: string; updated_at: string; project_name?: string; project_client?: string; project_location?: string };
 type BOMItem = { id: string; estimator: string; session_id: string; table_data: any; created_at: string };
 type Product = { id: string; name: string; code: string; image?: string; category?: string; subcategory?: string; description?: string; category_name?: string; subcategory_name?: string; tax_code_type?: string; tax_code_value?: string; hsn_code?: string; sac_code?: string };
 type Step11Item = { id?: string; s_no?: number; title?: string; description?: string; unit?: string; qty?: number; supply_rate?: number; install_rate?: number;[key: string]: any };
 type BOMHistory = { id: string; version_id: string; user_id: string; user_full_name: string; action: string; reason?: string; created_at: string };
-type BOMComment = { id: string; version_id: string; product_id?: string; item_id?: string; user_id: string; user_full_name: string; comment_text: string; version_number: number; visible_to: string[]; created_at: string; updated_at: string };
-type User = { id: string; username: string; fullName?: string; role: string; department?: string; displayName: string };
+type BOMComment = { id: string; version_id: string; product_id?: string; item_id?: string; user_id: string; user_full_name: string; comment_text: string; version_number: number; visible_to: string[]; read_by?: string[]; parent_id?: string; reply_to_text?: string; reply_to_user?: string; created_at: string; updated_at: string };
+type User = { id: string; username: string; fullName?: string; role: string; department?: string };
 
 // ─── Helpers ───────────────────────────────────────────────────────
 
@@ -274,7 +289,7 @@ function VersionStatusBanner({ version }: { version: BOMVersion }) {
 
 // ─── BOQ Item Card ─────────────────────────────────────────────────────────────
 
-function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, setExpandedProductIds, getEditedValue, updateEditedField, handleDeleteRow, handleFinalizeProduct, handleAddItem, loadBoqItemsAndEdits, setBoqItems, checkBudgetEarly, handleSaveProject, onCardDragStart, onCardDragOver, onCardDrop, isCardDragOver, mismatches, isCompactView, onSaveAsTemplate, editedFields, comments, users, onAddComment, selectedVersionId }: {
+function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, setExpandedProductIds, getEditedValue, updateEditedField, handleDeleteRow, handleFinalizeProduct, handleAddItem, loadBoqItemsAndEdits, setBoqItems, checkBudgetEarly, handleSaveProject, onCardDragStart, onCardDragOver, onCardDrop, isCardDragOver, mismatches, isCompactView, onSaveAsTemplate, editedFields, comments, users, currentUser, onAddComment, selectedVersionId, totalProducts, onProductOrdinalChange, itemCategoryFilter }: {
   boqItem: BOMItem; boqIdx: number; isVersionSubmitted: boolean;
   expandedProductIds: Set<string>; setExpandedProductIds: (fn: (p: Set<string>) => Set<string>) => void;
   getEditedValue: (k: string, f: string, v: any) => any;
@@ -296,8 +311,12 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
   editedFields: Record<string, any>;
   comments: BOMComment[];
   users: User[];
+  currentUser: any;
   onAddComment: (versionId: string, itemId?: string) => void;
   selectedVersionId: string | null;
+  totalProducts?: number;
+  onProductOrdinalChange?: (toIdx: number) => void;
+  itemCategoryFilter: string;
 }) {
   const { toast } = useToast();
   const tableData = parseTableData(boqItem.table_data);
@@ -309,7 +328,10 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
 
   const step11Items = Array.isArray(tableData.step11_items) ? tableData.step11_items : [];
   const productName = tableData.product_name || boqItem.estimator;
+  const isBifProd = (productName || "").toLowerCase().includes('bif');
+  const isLumpSum = getEditedValue(boqItem.id, "is_lump_sum", tableData.is_lump_sum || false);
   const isExpanded = expandedProductIds.has(boqItem.id);
+  const isProductIndicate = getEditedValue(boqItem.id, "indicate", tableData.indicate || false);
   const toggle = () => setExpandedProductIds((prev: Set<string>) => { const n = new Set(prev); n.has(boqItem.id) ? n.delete(boqItem.id) : n.add(boqItem.id); return n; });
 
   // Drag state for row reorder
@@ -329,17 +351,23 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
     const boqResult = computeBoq(tableData.configBasis, tableData.materialLines, calculationTarget);
     const computedLines = boqResult.computed.map((line: any, idx: number) => {
       const itemKey = `${boqItem.id}-engine-${idx}`;
+      const isFrozen = line.freezeAndEdit || line.freeze_and_edit;
       const qty = Number(getEditedValue(itemKey, "qty", line.perUnitQty));
       const sRate = Number(getEditedValue(itemKey, "supply_rate", line.supplyRate));
       const iRate = Number(getEditedValue(itemKey, "install_rate", line.installRate));
       const rate = Number(getEditedValue(itemKey, "rate", sRate + iRate)) || (sRate + iRate);
-      const reqQty = Number((qty * calculationTarget).toFixed(2));
-      const roundOff = line.applyRounding !== false ? Math.ceil(reqQty) : reqQty;
+
+      const reqQty = isFrozen ? line.roundOffQty : Number((qty * calculationTarget).toFixed(2));
+      const roundOff = isFrozen ? line.roundOffQty : (line.applyRounding !== false ? Math.ceil(reqQty) : reqQty);
+
       return {
         title: line.name, description: line.name, unit: line.unit, shop_name: line.shop_name,
         qtyPerSqf: qty, requiredQty: reqQty, roundOff: roundOff,
         rateSqft: rate, amount: Number((roundOff * rate).toFixed(2)), s_no: idx + 1, manual: false,
-        _materialIdx: idx, itemKey
+        _materialIdx: idx, itemKey,
+        freezeAndEdit: line.freezeAndEdit,
+        freeze_and_edit: line.freeze_and_edit,
+        category: line.category
       };
     });
     const manualStep11 = step11Items.map((it: any, s11Idx: number) => {
@@ -441,22 +469,106 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
 
   return (
     <div
-      className={`border rounded-lg overflow-hidden transition-all ${isCardDragOver ? 'ring-2 ring-blue-400 bg-blue-50/30' : ''}`}
+      className={`border rounded-lg overflow-hidden transition-all ${isCardDragOver ? 'ring-2 ring-blue-400 bg-blue-50/30' : ''} ${isProductIndicate ? 'border-rose-300 ring-1 ring-rose-200' : ''}`}
       draggable={!isVersionSubmitted}
       onDragStart={onCardDragStart}
       onDragOver={onCardDragOver}
       onDrop={onCardDrop}
     >
       {/* Header */}
-      <div className={`bg-gray-100 px-4 flex justify-between items-center border-b border-gray-200 ${isCompactView ? 'py-1.5' : 'py-3'}`}>
-        <div className={`flex ${isCompactView ? 'items-center justify-between w-full' : 'flex-col gap-0.5 flex-1'}`}>
-          <div className={`flex items-center gap-2 font-semibold text-gray-800 ${isCompactView ? 'text-xs' : 'text-sm'}`}>
+      <div className={`${isProductIndicate ? 'bg-rose-100/50 border-rose-200' : 'bg-gray-100 border-gray-200'} px-4 flex flex-wrap justify-between items-center border-b gap-y-2 ${isCompactView ? 'py-1.5' : 'py-3'}`}>
+        <div className={`flex ${isCompactView ? 'items-center justify-between w-full' : 'flex-col gap-0.5 flex-1 min-w-0'}`}>
+          <div className={`flex items-center gap-2 font-semibold text-gray-800 flex-wrap ${isCompactView ? 'text-xs' : 'text-sm'}`}>
             <GripVertical className={`h-4 w-4 flex-shrink-0 ${isVersionSubmitted ? 'text-gray-200' : 'text-gray-400 hover:text-blue-500 cursor-grab'}`} />
+            {!isVersionSubmitted ? (
+              <select
+                value={boqIdx}
+                onChange={(e) => onProductOrdinalChange?.(parseInt(e.target.value))}
+                onClick={(e) => e.stopPropagation()}
+                className={`text-xs p-0.5 border border-slate-200 rounded outline-none cursor-pointer text-slate-700 ${isProductIndicate ? 'bg-rose-50 border-rose-200' : 'bg-white'}`}
+              >
+                {Array.from({ length: totalProducts || 1 }).map((_, i) => (
+                  <option key={i} value={i}>{i + 1}</option>
+                ))}
+              </select>
+            ) : null}
             {displayImage && <img src={displayImage} alt={productName} className="h-8 w-8 object-cover rounded shadow-sm border border-slate-200" />}
-            <span className="truncate max-w-[200px] sm:max-w-sm" title={productName}>{boqIdx + 1}. {productName}</span>
-            {tableData.category && !isCompactView && <span className="text-xs text-gray-500 font-normal">({tableData.category})</span>}
+            <span className="truncate max-w-[200px] sm:max-w-sm" title={productName}>
+              {isVersionSubmitted ? `${boqIdx + 1}. ` : ""}{productName}
+            </span>
+            {!isVersionSubmitted && (
+              <label
+                className="flex items-center gap-1 text-[10px] text-blue-600 font-bold bg-white px-1.5 py-0.5 rounded border border-blue-200 shadow-sm whitespace-nowrap cursor-pointer ml-1"
+                onClick={e => e.stopPropagation()}
+                title="Convert to Lump Sum"
+              >
+                <input
+                  type="checkbox"
+                  checked={isLumpSum}
+                  onChange={async (e) => {
+                    const checked = e.target.checked;
+                    updateEditedField(boqItem.id, "is_lump_sum", checked);
+                    try {
+                      // Update tableData in backend
+                      let updatedTd = { ...tableData, is_lump_sum: checked };
+                      const resp = await apiFetch(`/api/boq-items/${boqItem.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ table_data: updatedTd }) });
+                      if (resp.ok) { setBoqItems((prev: BOMItem[]) => prev.map((i: BOMItem) => i.id === boqItem.id ? { ...i, table_data: updatedTd } : i)); }
+                    } catch (err) { console.error("Failed to save is_lump_sum", err); }
+                  }}
+                  className="cursor-pointer"
+                />
+                Convert to LS
+              </label>
+            )}
+            {!isVersionSubmitted && (
+              <label
+                className="flex items-center gap-1 text-[10px] text-rose-600 font-bold bg-white px-1.5 py-0.5 rounded border border-rose-200 shadow-sm whitespace-nowrap cursor-pointer ml-1"
+                onClick={e => e.stopPropagation()}
+              >
+                <input
+                  type="checkbox"
+                  checked={isProductIndicate}
+                  onChange={(e) => updateEditedField(boqItem.id, "indicate", e.target.checked)}
+                  className="cursor-pointer"
+                />
+                Indicate
+              </label>
+            )}
+            {!isVersionSubmitted && !isCompactView ? (
+              <div className="flex items-center gap-1 ml-2">
+                <MapPin className="h-3 w-3 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Area (e.g. Hall)"
+                  className="text-[10px] w-24 h-5 px-1.5 border border-slate-200 rounded outline-none focus:ring-1 ring-blue-400 transition-all bg-white font-medium"
+                  value={tableData.category || ""}
+                  onChange={(e) => {
+                    const newArea = e.target.value;
+                    updateEditedField(boqItem.id, "category", newArea);
+                    updateEditedField(boqItem.id, "category_name", newArea);
+                  }}
+                  onBlur={async () => {
+                    const newArea = editedFields[boqItem.id]?.category;
+                    if (newArea === undefined) return;
+                    try {
+                      // Update product and optionally all its materials
+                      const updatedTd = { ...tableData, category: newArea, category_name: newArea };
+                      if (updatedTd.materialLines) {
+                        updatedTd.materialLines = updatedTd.materialLines.map((ml: any) => ({ ...ml, category: newArea }));
+                      }
+                      const resp = await apiFetch(`/api/boq-items/${boqItem.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ table_data: updatedTd }) });
+                      if (resp.ok) { setBoqItems((prev: BOMItem[]) => prev.map((i: BOMItem) => i.id === boqItem.id ? { ...i, table_data: updatedTd } : i)); }
+                    } catch (err) { console.error("Failed to save area", err); }
+                  }}
+                  onClick={e => e.stopPropagation()}
+                  title="Project Area / Location"
+                />
+              </div>
+            ) : (
+              tableData.category && !isCompactView && <span className="text-xs text-gray-500 font-normal">({tableData.category})</span>
+            )}
             {tableData.is_finalized && <span className={`inline-block bg-green-100 text-green-700 px-2 py-0.5 rounded font-semibold ml-2 ${isCompactView ? 'text-[10px]' : 'text-xs'}`}>Finalized</span>}
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-1" title={isExpanded ? "Collapse" : "Expand"} onClick={toggle}>
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-1 shrink-0" title={isExpanded ? "Collapse" : "Expand"} onClick={toggle}>
               {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </Button>
             {isCompactView && (
@@ -469,32 +581,34 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
           </div>
 
           {isCompactView && (
-            <div className="flex gap-2 ml-4">
+            <div className="flex flex-wrap gap-2 ml-4 mt-2 sm:mt-0 items-center justify-end">
               {!tableData.is_finalized && (
                 <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" disabled={isVersionSubmitted} onClick={() => handleAddItem(boqItem.id)}>+ Add Item</Button>
               )}
               <Button variant="default" size="sm" className="h-6 text-[10px] px-2 bg-green-600 hover:bg-green-700 text-white" disabled={isVersionSubmitted || tableData.is_finalized} onClick={() => handleFinalizeProduct(boqItem.id)}>Finalize</Button>
               <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" disabled={isVersionSubmitted} onClick={() => onSaveAsTemplate?.(boqItem)}>Save as Template</Button>
-              <Button variant="destructive" size="sm" className="h-6 text-[10px] px-2" disabled={isVersionSubmitted}
-                onClick={async () => {
-                  if (!confirm("Delete this product and all its items?")) return;
-                  try {
-                    const res = await apiFetch(`/api/boq-items/${boqItem.id}`, { method: "DELETE" });
+              {!isBifProd && (
+                <Button variant="destructive" size="sm" className="h-6 text-[10px] px-2" disabled={isVersionSubmitted}
+                  onClick={async () => {
+                    if (!confirm("Delete this product and all its items?")) return;
+                    try {
+                      const res = await apiFetch(`/api/boq-items/${boqItem.id}`, { method: "DELETE" });
 
-                    if (res.ok) {
-                      setBoqItems(prev => prev.filter(i => i.id !== boqItem.id));
-                      toast({ title: "Product Deleted", description: "The product has been deleted permanently." });
+                      if (res.ok) {
+                        setBoqItems(prev => prev.filter(i => i.id !== boqItem.id));
+                        toast({ title: "Product Deleted", description: "The product has been deleted permanently." });
 
-                      // Finalize state update to ensure and recalculate
-                      loadBoqItemsAndEdits();
-                    } else {
-                      throw new Error("Failed to delete product");
+                        // Finalize state update to ensure and recalculate
+                        loadBoqItemsAndEdits();
+                      } else {
+                        throw new Error("Failed to delete product");
+                      }
+                    } catch (err) {
+                      console.error("Failed to delete product", err);
+                      toast({ title: "Error", description: "Failed to delete product.", variant: "destructive" });
                     }
-                  } catch (err) {
-                    console.error("Failed to delete product", err);
-                    toast({ title: "Error", description: "Failed to delete product.", variant: "destructive" });
-                  }
-                }}>Delete Product</Button>
+                  }}>Delete Product</Button>
+              )}
             </div>
           )}
 
@@ -502,8 +616,8 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-4 mt-1">
                 <div className="flex flex-col bg-white border border-slate-200 rounded-md px-3 py-1.5 shadow-sm">
-                  <span className="text-[10px] leading-none text-slate-400 font-bold uppercase tracking-tight mb-1">Rate per {tableData.configBasis?.requiredUnitType || "Unit"}</span>
-                  <span className="text-sm font-extrabold text-blue-700">₹{ratePerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="text-[10px] leading-none text-slate-400 font-bold uppercase tracking-tight mb-1">Rate per {isLumpSum ? "LS" : (tableData.configBasis?.requiredUnitType || "Unit")}</span>
+                  <span className="text-sm font-extrabold text-blue-700">₹{isLumpSum ? grandTotalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ratePerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="flex flex-col bg-white border border-slate-200 rounded-md px-3 py-1.5 shadow-sm">
                   <span className="text-[10px] leading-none text-slate-400 font-bold uppercase tracking-tight mb-1">Grand Total</span>
@@ -547,13 +661,13 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
                 />
               </div>
               {isEngineBased && (
-                <div className="flex items-center gap-2 text-[11px] text-gray-600 font-medium whitespace-nowrap">
+                <div className={`flex items-center gap-2 text-[11px] text-gray-600 font-medium whitespace-nowrap ${isLumpSum ? "opacity-50 pointer-events-none" : ""}`}>
                   Project Target:
                   <div className="flex items-center gap-1 group/target">
                     <Input
                       type="number"
                       className="h-7 w-20 text-[11px] font-bold text-blue-600 px-1 py-0 border-blue-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-100 transition-all rounded"
-                      value={localTarget}
+                      value={isLumpSum ? 1 : localTarget}
                       onChange={(e) => setLocalTarget(parseFloat(e.target.value) || 0)}
                       disabled={isVersionSubmitted || tableData.is_finalized}
                       onBlur={async (e) => {
@@ -593,7 +707,7 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
                         }
                       }}
                     />
-                    <span className="text-blue-600 font-bold">{tableData.configBasis?.requiredUnitType || "Unit"}</span>
+                    <span className="text-blue-600 font-bold">{isLumpSum ? "LS" : (tableData.configBasis?.requiredUnitType || "Unit")}</span>
                   </div>
                 </div>
               )}
@@ -602,21 +716,34 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
         </div>
 
         {!isCompactView && (
-          <div className="flex gap-2 ml-4">
+          <div className="flex flex-wrap items-center gap-2 px-1 shrink-0 mt-2 sm:mt-0 justify-end w-full sm:w-auto">
             {!tableData.is_finalized && (
               <Button variant="outline" size="sm" className="h-7 text-xs" disabled={isVersionSubmitted} onClick={() => handleAddItem(boqItem.id)}>+ Add Item</Button>
             )}
             <Button variant="default" size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white" disabled={isVersionSubmitted || tableData.is_finalized} onClick={() => handleFinalizeProduct(boqItem.id)}>Finalize</Button>
             <Button variant="outline" size="sm" className="h-7 text-xs" disabled={isVersionSubmitted} onClick={() => onSaveAsTemplate?.(boqItem)}>Save as Template</Button>
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => onAddComment(selectedVersionId!, boqItem.id)}>
+            <Button variant="outline" size="sm" className="h-7 text-xs relative" onClick={() => onAddComment(selectedVersionId!, boqItem.id)}>
               <MessageSquare className="h-3 w-3 mr-1" />
-              Comments ({comments.filter(c => c.item_id === boqItem.id).length})
+              Comments ({comments.filter(c => c.product_id === boqItem.id || (c.item_id && c.item_id.startsWith(boqItem.id))).length})
+              {(() => {
+                const unread = comments.filter(c => {
+                  if (c.product_id !== boqItem.id && !(c.item_id && c.item_id.startsWith(boqItem.id))) return false;
+                  if (c.user_id === currentUser?.id) return false;
+                  const isVisible = (!c.visible_to || c.visible_to.length === 0 || c.visible_to.includes(currentUser?.username));
+                  return isVisible && (!c.read_by || !c.read_by.includes(currentUser?.id));
+                }).length;
+                return unread > 0 ? (
+                  <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] rounded-full h-4 min-w-4 flex items-center justify-center px-1 font-bold shadow border border-white">{unread}</span>
+                ) : null;
+              })()}
             </Button>
-            <Button variant="destructive" size="sm" className="h-7 text-xs" disabled={isVersionSubmitted}
-              onClick={async () => {
-                if (!confirm("Delete this product and all its items?")) return;
-                try { await apiFetch(`/api/boq-items/${boqItem.id}`, { method: "DELETE" }); loadBoqItemsAndEdits(); } catch { /* handled */ }
-              }}>Delete Product</Button>
+            {!isBifProd && (
+              <Button variant="destructive" size="sm" className="h-7 text-xs" disabled={isVersionSubmitted}
+                onClick={async () => {
+                  if (!confirm("Delete this product and all its items?")) return;
+                  try { await apiFetch(`/api/boq-items/${boqItem.id}`, { method: "DELETE" }); loadBoqItemsAndEdits(); } catch { /* handled */ }
+                }}>Delete Product</Button>
+            )}
           </div>
         )}
       </div>
@@ -632,6 +759,7 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
                   <th className="border px-2 py-2 text-left font-semibold w-10">Sl</th>
                   <th className="border px-1 py-1 text-center w-12 font-semibold">Image</th>
                   <th className="border px-2 py-2 text-left font-semibold w-64">Item</th>
+                  {!isCompactView && <th className="border px-2 py-2 text-left font-semibold w-24">Project Area</th>}
                   {!isCompactView && <th className="border px-2 py-2 text-left font-semibold w-32">Shop</th>}
                   {!isCompactView && <th className="border px-2 py-2 text-left font-semibold w-[300px]">Description</th>}
                   <th className="border px-2 py-2 text-center font-semibold w-16">Unit</th>
@@ -646,36 +774,49 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
               <tbody>
                 {renderLines.length === 0
                   ? <tr><td colSpan={12} className="text-center py-4 text-gray-500 italic">No items. Click "+ Add Item" to add one.</td></tr>
-                  : renderLines.map((item: any, itemIdx: number) => (
-                    <BoqItemRow
-                      key={item.itemKey || `${boqItem.id}-${itemIdx}`}
-                      item={item} itemIdx={itemIdx} boqItem={boqItem}
-                      tableData={tableData} isEngineBased={isEngineBased} isVersionSubmitted={isVersionSubmitted}
-                      getEditedValue={getEditedValue} updateEditedField={updateEditedField}
-                      handleDeleteRow={handleDeleteRow} checkBudgetEarly={checkBudgetEarly}
-                      handleSaveProject={handleSaveProject}
-                      isDraggable={!isVersionSubmitted && !tableData.is_finalized}
-                      isDragOver={dragOverIdx === itemIdx}
-                      onDragStart={() => { dragIdxRef.current = itemIdx; }}
-                      onDragOver={() => setDragOverIdx(itemIdx)}
-                      onDrop={() => {
-                        setDragOverIdx(null);
-                        const from = dragIdxRef.current;
-                        if (from === null || from === itemIdx) return;
-                        dragIdxRef.current = null;
-                        const newOrder = [...renderLines];
-                        const [moved] = newOrder.splice(from, 1);
-                        newOrder.splice(itemIdx, 0, moved);
-                        handleRowReorder(newOrder);
-                      }}
-                      mismatch={mismatches?.find(m => m.index === (isEngineBased ? item._materialIdx : item._s11Idx) && m.type === (isEngineBased ? 'materialLine' : 'step11'))}
-                      isCompactView={isCompactView}
-                      comments={comments}
-                      users={users}
-                      onAddComment={onAddComment}
-                      selectedVersionId={selectedVersionId}
-                    />
-                  ))
+                  : renderLines
+                    .map((item, originalIdx) => ({ ...item, originalIdx }))
+                    .filter(item => itemCategoryFilter === "all" || item.category === itemCategoryFilter)
+                    .map((item: any) => (
+                      <BoqItemRow
+                        key={item.itemKey || `${boqItem.id}-${item.originalIdx}`}
+                        item={item} itemIdx={item.originalIdx} boqItem={boqItem}
+                        tableData={tableData} isEngineBased={isEngineBased} isVersionSubmitted={isVersionSubmitted}
+                        getEditedValue={getEditedValue} updateEditedField={updateEditedField}
+                        handleDeleteRow={handleDeleteRow} checkBudgetEarly={checkBudgetEarly}
+                        handleSaveProject={handleSaveProject}
+                        isDraggable={!isVersionSubmitted && !tableData.is_finalized}
+                        isDragOver={dragOverIdx === item.originalIdx}
+                        onDragStart={() => { dragIdxRef.current = item.originalIdx; }}
+                        onDragOver={() => setDragOverIdx(item.originalIdx)}
+                        onDrop={() => {
+                          setDragOverIdx(null);
+                          const from = dragIdxRef.current;
+                          if (from === null || from === item.originalIdx) return;
+                          dragIdxRef.current = null;
+                          const newOrder = [...renderLines];
+                          const [moved] = newOrder.splice(from, 1);
+                          newOrder.splice(item.originalIdx, 0, moved);
+                          handleRowReorder(newOrder);
+                        }}
+                        mismatch={mismatches?.find(m => m.index === (isEngineBased ? item._materialIdx : item._s11Idx) && m.type === (isEngineBased ? 'materialLine' : 'step11'))}
+                        isCompactView={isCompactView}
+                        comments={comments}
+                        users={users}
+                        currentUser={currentUser}
+                        onAddComment={onAddComment}
+                        selectedVersionId={selectedVersionId}
+                        isBifProd={isBifProd}
+                        totalItems={renderLines.length}
+                        onOrdinalChange={(toIdx: number) => {
+                          if (toIdx === item.originalIdx) return;
+                          const newOrder = [...renderLines];
+                          const [moved] = newOrder.splice(item.originalIdx, 1);
+                          newOrder.splice(toIdx, 0, moved);
+                          handleRowReorder(newOrder);
+                        }}
+                      />
+                    ))
                 }
               </tbody>
               <tfoot className="bg-gray-50/50 border-t-2 border-gray-200">
@@ -721,90 +862,11 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
         </>
       )}
 
-      {/* Comments Section */}
-      {(() => {
-        const productComments = comments.filter(c => c.item_id === boqItem.id);
-        const itemComments = comments.filter(c => c.item_id && c.item_id !== boqItem.id);
-
-        if (productComments.length === 0 && itemComments.length === 0) return null;
-
-        return (
-          <div className="border-t border-gray-200 bg-gray-50/30 px-4 py-3">
-            <div className="flex items-center gap-2 mb-3">
-              <MessageSquare className="h-4 w-4 text-blue-600" />
-              <span className="text-sm font-semibold text-gray-700">Comments</span>
-            </div>
-
-            {/* Product Comments */}
-            {productComments.length > 0 && (
-              <div className="mb-4">
-                <div className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">Product Comments</div>
-                <div className="space-y-2">
-                  {productComments.map(comment => (
-                    <div key={comment.id} className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-gray-900">{comment.user_full_name}</span>
-                          <span className="text-xs text-gray-500">v{comment.version_number}</span>
-                        </div>
-                        <span className="text-xs text-gray-400">{new Date(comment.created_at).toLocaleString()}</span>
-                      </div>
-                      <p className="text-sm text-gray-700 mb-2">{comment.comment_text}</p>
-                      {comment.visible_to.length > 0 && (
-                        <div className="flex items-center gap-1 text-xs text-gray-500">
-                          <Users className="h-3 w-3" />
-                          <span>Visible to: {comment.visible_to.map(id => {
-                            const user = users.find(u => u.id === id);
-                            return user ? user.displayName : id;
-                          }).join(', ')}</span>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Item Comments */}
-            {itemComments.length > 0 && (
-              <div>
-                <div className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">Item Comments</div>
-                <div className="space-y-2">
-                  {itemComments.map(comment => (
-                    <div key={comment.id} className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-gray-900">{comment.user_full_name}</span>
-                          <span className="text-xs text-gray-500">v{comment.version_number}</span>
-                          <span className="text-xs text-blue-600 font-medium">
-                            Item: {renderLines.find(item => (item.itemKey || `${boqItem.id}-${renderLines.indexOf(item)}`) === comment.item_id)?.title || 'Unknown'}
-                          </span>
-                        </div>
-                        <span className="text-xs text-gray-400">{new Date(comment.created_at).toLocaleString()}</span>
-                      </div>
-                      <p className="text-sm text-gray-700 mb-2">{comment.comment_text}</p>
-                      {comment.visible_to.length > 0 && (
-                        <div className="flex items-center gap-1 text-xs text-gray-500">
-                          <Users className="h-3 w-3" />
-                          <span>Visible to: {comment.visible_to.map(id => {
-                            const user = users.find(u => u.id === id);
-                            return user ? user.displayName : id;
-                          }).join(', ')}</span>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })()}
     </div>
   );
 }
 
-function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersionSubmitted, getEditedValue, updateEditedField, handleDeleteRow, checkBudgetEarly, handleSaveProject, isDraggable, isDragOver, onDragStart, onDragOver, onDrop, mismatch, isCompactView, comments, users, onAddComment, selectedVersionId }: {
+function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersionSubmitted, getEditedValue, updateEditedField, handleDeleteRow, checkBudgetEarly, handleSaveProject, isDraggable, isDragOver, onDragStart, onDragOver, onDrop, mismatch, isCompactView, comments, users, currentUser, onAddComment, selectedVersionId, isBifProd, totalItems, onOrdinalChange }: {
   item: any; itemIdx: number; boqItem: BOMItem; tableData: any; isEngineBased: boolean; isVersionSubmitted: boolean;
   getEditedValue: (k: string, f: string, v: any) => any;
   updateEditedField: (k: string, f: string, v: any) => void;
@@ -820,8 +882,12 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
   isCompactView?: boolean;
   comments: BOMComment[];
   users: User[];
+  currentUser: any;
   onAddComment: (versionId: string, itemId?: string) => void;
   selectedVersionId: string | null;
+  isBifProd?: boolean;
+  totalItems?: number;
+  onOrdinalChange?: (toIdx: number) => void;
 }) {
   const { toast } = useToast();
   const itemKey = item.itemKey || `${boqItem.id}-manual-${itemIdx}`;
@@ -830,46 +896,7 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
   // Rendering them through the editable path reads supply_rate=0, causing the "0 rate" bug.
   const perItemIsEngine = isEngineBased && !item.manual;
 
-  if (perItemIsEngine) {
-    // Read-only display for engine-computed items
-    return (
-      <tr
-        className={`border-b border-gray-200 hover:bg-gray-50 transition-colors text-xs ${isDragOver ? 'bg-blue-50 border-blue-300' : ''}`}
-        draggable={isDraggable}
-        onDragStart={onDragStart}
-        onDragOver={(e) => { e.preventDefault(); onDragOver?.(); }}
-        onDrop={onDrop}
-      >
-        <td className="border px-1 py-2 text-center w-8 text-gray-400">{isDraggable && <GripVertical className="h-3 w-3 mx-auto cursor-grab hover:text-blue-500" />}</td>
-        <td className="border px-2 py-2 text-center font-medium w-10">{item.s_no || itemIdx + 1}</td>
-        <td className="border px-0.5 py-0.5 text-center w-12 bg-gray-50/30">
-          <div className="w-10 h-10 rounded border border-gray-200 bg-white overflow-hidden flex items-center justify-center mx-auto shadow-sm">
-            {item.image ? (<img src={item.image.startsWith('data:') ? item.image : parseImages(item.image)[0]} alt="material" className="max-w-full max-h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100?text=No+Image'; }} />) : (<span className="text-[8px] text-gray-400">N/A</span>)}
-          </div>
-        </td>
-        <td className="border px-2 py-2 text-left w-64">
-          <div className="font-medium text-gray-900">{item.title || item.name || "-"}</div>
-          {mismatch && (<div className="mt-1 flex items-center gap-1 text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-200"><ArrowUp className="h-3 w-3" />Rate updated ₹{mismatch.new.toLocaleString()}</div>)}
-        </td>
-        {!isCompactView && <td className="border px-2 py-2 text-left w-32 text-gray-600">{item.shop_name || "-"}</td>}
-        {!isCompactView && <td className="border px-2 py-2 text-left w-[300px] text-gray-600 truncate max-w-[300px]">{item.description || "-"}</td>}
-        <td className="border px-2 py-2 text-center w-16">{item.unit || "-"}</td>
-        <td className="border px-2 py-2 text-center w-20 font-medium">{(item.qtyPerSqf ?? 0).toFixed(3)}</td>
-        <td className="border px-2 py-2 text-center w-24 text-blue-600 font-medium">{(item.requiredQty ?? 0).toFixed(2)}</td>
-        {!isCompactView && <td className="border px-2 py-2 text-center w-24 font-bold">{item.roundOff}</td>}
-        <td className={`border px-2 py-2 text-center w-24 ${mismatch ? 'bg-amber-50' : ''}`}><span className={mismatch ? 'text-amber-700 font-bold' : ''}>₹{(item.rateSqft || 0).toLocaleString()}</span></td>
-        <td className="border px-2 py-2 text-center w-28 font-bold text-green-700 bg-green-50">₹{(item.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        <td className="border px-2 py-2 text-center w-16">
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50" onClick={() => onAddComment(selectedVersionId!, itemKey)} title={`Comments (${comments.filter(c => c.item_id === itemKey).length})`}><MessageSquare className="h-3 w-3" /></Button>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-600 hover:text-red-800 hover:bg-red-50" onClick={() => handleDeleteRow(boqItem.id, tableData, itemIdx, item)} disabled={isVersionSubmitted} title="Delete Item"><Trash2 className="h-3 w-3" /></Button>
-          </div>
-        </td>
-      </tr>
-    );
-  }
-
-  // ── Manual / non-engine editable path ──────────────────────────────────────
+  // ── Shared Editable States ──────────────────────────────────────
   const baseQty = Number(getEditedValue(itemKey, "qty", item.qty ?? 0)) || 0;
   const sRate = Number(getEditedValue(itemKey, "supply_rate", item.supply_rate ?? item.rateSqft ?? 0)) || 0;
   const iRate = Number(getEditedValue(itemKey, "install_rate", item.install_rate ?? 0)) || 0;
@@ -882,21 +909,162 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
   const [localUnit, setLocalUnit] = useState(unit);
   const [localQty, setLocalQty] = useState(baseQty.toString());
   const [localRate, setLocalRate] = useState(rate.toString());
+  const [isFocused, setIsFocused] = useState(false);
+  const isIndicate = getEditedValue(itemKey, "indicate", item.indicate || false);
 
+  const hasUnreadComments = comments.some(c => {
+    if (c.item_id !== itemKey) return false;
+    if (c.user_id === currentUser?.id) return false;
+    const isVisible = (!c.visible_to || c.visible_to.length === 0 || c.visible_to.includes(currentUser?.username));
+    return isVisible && (!c.read_by || !c.read_by.includes(currentUser?.id));
+  });
+
+  useEffect(() => { if (!isFocused) setLocalDesc(desc); }, [desc, isFocused]);
+  useEffect(() => { if (!isFocused) setLocalUnit(unit); }, [unit, isFocused]);
+  useEffect(() => { if (!isFocused) setLocalQty(baseQty.toString()); }, [baseQty, isFocused]);
+  useEffect(() => { if (!isFocused) setLocalRate(rate.toString()); }, [rate, isFocused]);
+
+  const isFreezed = item.freezeAndEdit === true || item.freezeAndEdit === "true" || item.freezeAndEdit === 1 || item.freeze_and_edit === true || item.freeze_and_edit === "true" || item.freeze_and_edit === 1;
+
+  if (perItemIsEngine) {
+    // Read-only display for engine-computed items (with optional rate editing)
+    return (
+      <tr
+        className={`border-b border-gray-200 transition-colors text-xs ${isDragOver ? 'bg-blue-50 border-blue-300' : ''} ${hasUnreadComments ? 'bg-amber-50/70 hover:bg-amber-100 ring-1 ring-amber-200/50 relative z-10' : isIndicate ? 'bg-rose-50 hover:bg-rose-100' : isFreezed ? 'bg-cyan-100' : 'hover:bg-gray-50'}`}
+        draggable={isDraggable}
+        onDragStart={onDragStart}
+        onDragOver={(e) => { e.preventDefault(); onDragOver?.(); }}
+        onDrop={onDrop}
+      >
+        <td className="border px-1 py-2 text-center w-8 text-gray-400">{isDraggable && <GripVertical className="h-3 w-3 mx-auto cursor-grab hover:text-blue-500" />}</td>
+        <td className="border px-2 py-2 text-center font-medium w-12">
+          {!isVersionSubmitted ? (
+            <select
+              value={itemIdx}
+              onChange={(e) => onOrdinalChange?.(parseInt(e.target.value))}
+              className="text-xs p-0.5 border border-slate-200 rounded w-full bg-white outline-none cursor-pointer"
+            >
+              {Array.from({ length: totalItems || 1 }).map((_, i) => (
+                <option key={i} value={i}>{i + 1}</option>
+              ))}
+            </select>
+          ) : (
+            item.s_no || itemIdx + 1
+          )}
+        </td>
+        <td className="border px-0.5 py-0.5 text-center w-12 bg-gray-50/30">
+          <div className="w-10 h-10 rounded border border-gray-200 bg-white overflow-hidden flex items-center justify-center mx-auto shadow-sm">
+            {item.image ? (<img src={item.image.startsWith('data:') ? item.image : parseImages(item.image)[0]} alt="material" className="max-w-full max-h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100?text=No+Image'; }} />) : (<span className="text-[8px] text-gray-400">N/A</span>)}
+          </div>
+        </td>
+        <td className="border px-2 py-2 text-left w-64">
+          <div className="font-medium text-gray-900">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span>{item.title || item.name || "-"}</span>
+              {item.category && item.category !== "General" && (
+                <Badge variant="secondary" className="bg-indigo-50 text-indigo-600 border-indigo-100 text-[9px] px-1.5 py-0 h-4 font-bold uppercase tracking-tight">
+                  {item.category}
+                </Badge>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-1 mt-1">
+            <span></span>
+            {!isVersionSubmitted && (
+              <label className="flex items-center gap-1 text-[10px] text-rose-600 font-bold bg-white px-1.5 py-0.5 rounded border border-rose-200 shadow-sm whitespace-nowrap cursor-pointer">
+                <input type="checkbox" checked={isIndicate} onChange={(e) => updateEditedField(itemKey, "indicate", e.target.checked)} className="cursor-pointer" />
+                Indicate
+              </label>
+            )}
+          </div>
+          {mismatch && (<div className="mt-1 flex items-center gap-1 text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-200"><ArrowUp className="h-3 w-3" />Rate updated ₹{mismatch.new.toLocaleString()}</div>)}
+        </td>
+        {!isCompactView && (
+          <td className="border px-2 py-2 text-left w-24">
+            <Input
+              value={item.category || ""}
+              onChange={(e) => updateEditedField(itemKey, "category", e.target.value)}
+              placeholder="Area..."
+              className="h-7 text-[10px] border-gray-200 focus:border-blue-400 px-1.5"
+              disabled={isVersionSubmitted}
+            />
+          </td>
+        )}
+        {!isCompactView && <td className="border px-2 py-2 text-left w-32 text-gray-600">{item.shop_name || "-"}</td>}
+        {!isCompactView && <td className="border px-2 py-2 text-left w-[300px] text-gray-600 truncate max-w-[300px]">{item.description || "-"}</td>}
+        <td className="border px-2 py-2 text-center w-16">{item.unit || "-"}</td>
+        <td className="border px-2 py-2 text-center w-20 font-medium">{(item.qtyPerSqf ?? 0).toFixed(3)}</td>
+        <td className="border px-2 py-2 text-center w-24 text-blue-600 font-medium">{(item.requiredQty ?? 0).toFixed(2)}</td>
+        {!isCompactView && <td className="border px-2 py-2 text-center w-24 font-bold">{item.roundOff}</td>}
+        <td className={`border px-2 py-2 text-center w-24 ${mismatch ? 'bg-amber-50' : ''}`}>
+          {(item.freezeAndEdit === true || item.freezeAndEdit === "true" || item.freezeAndEdit === 1 || item.freeze_and_edit === true || item.freeze_and_edit === "true" || item.freeze_and_edit === 1) && !tableData.is_finalized ? (
+            <Input
+              type="text"
+              value={localRate}
+              onChange={(e) => {
+                const val = e.target.value;
+                setLocalRate(val);
+                const parsed = parseFloat(val);
+                if (!isNaN(parsed)) {
+                  updateEditedField(itemKey, "rate", parsed);
+                  updateEditedField(itemKey, "supply_rate", parsed);
+                  updateEditedField(itemKey, "install_rate", 0);
+                } else if (val === "") {
+                  updateEditedField(itemKey, "rate", 0);
+                  updateEditedField(itemKey, "supply_rate", 0);
+                  updateEditedField(itemKey, "install_rate", 0);
+                }
+              }}
+              onBlur={() => {
+                setIsFocused(false);
+                const v = parseFloat(localRate) || 0;
+                updateEditedField(itemKey, "rate", v);
+                updateEditedField(itemKey, "supply_rate", v);
+                updateEditedField(itemKey, "install_rate", 0);
+              }}
+              className="h-7 w-20 text-xs text-center border-gray-200 focus:border-blue-400"
+              disabled={isVersionSubmitted}
+              onFocus={() => { setIsFocused(true); checkBudgetEarly(); }}
+            />
+          ) : (
+            <span className={mismatch ? 'text-amber-700 font-bold' : ''}>₹{(item.rateSqft || 0).toLocaleString()}</span>
+          )}
+        </td>
+        <td className="border px-2 py-2 text-center w-28 font-bold text-green-700 bg-green-50">₹{(item.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td className="border px-2 py-2 text-center w-16">
+          <div className="flex items-center justify-center gap-1">
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50 relative" onClick={() => onAddComment(selectedVersionId!, itemKey)} title={`Comments (${comments.filter(c => c.item_id === itemKey).length})`}>
+              <MessageSquare className="h-3 w-3" />
+              {(() => {
+                const unread = comments.filter(c => {
+                  if (c.item_id !== itemKey) return false;
+                  if (c.user_id === currentUser?.id) return false;
+                  const isVisible = (!c.visible_to || c.visible_to.length === 0 || c.visible_to.includes(currentUser?.username));
+                  return isVisible && (!c.read_by || !c.read_by.includes(currentUser?.id));
+                }).length;
+                return unread > 0 ? (
+                  <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] rounded-full h-3.5 min-w-3.5 flex items-center justify-center font-bold px-0.5 shadow-sm border border-white">{unread}</span>
+                ) : null;
+              })()}
+            </Button>
+            {!isBifProd && (
+              <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-600 hover:text-red-800 hover:bg-red-50" onClick={() => handleDeleteRow(boqItem.id, tableData, itemIdx, item)} disabled={isVersionSubmitted} title="Delete Item"><Trash2 className="h-3 w-3" /></Button>
+            )}
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  // ── Manual / non-engine editable path ──────────────────────────────────────
   // Preview values — manual items: qty × rate directly, no project-target scaling
   const previewQtyValue = parseFloat(localQty) || 0;
   const previewRateValue = parseFloat(localRate) || 0;
   const previewAmount = Number((previewQtyValue * previewRateValue).toFixed(2));
 
-  // Sync local state with props
-  useEffect(() => { setLocalDesc(desc); }, [desc]);
-  useEffect(() => { setLocalUnit(unit); }, [unit]);
-  useEffect(() => { setLocalQty(baseQty.toString()); }, [baseQty]);
-  useEffect(() => { setLocalRate(rate.toString()); }, [rate]);
-
   return (
     <tr
-      className={`border-b border-gray-200 hover:bg-gray-50 transition-colors ${isDragOver ? 'bg-blue-50 border-blue-300' : ''}`}
+      className={`border-b border-gray-200 transition-colors text-xs ${isDragOver ? 'bg-blue-50 border-blue-300' : ''} ${hasUnreadComments ? 'bg-amber-50/70 hover:bg-amber-100 ring-1 ring-amber-200/50 relative z-10' : isIndicate ? 'bg-rose-50 hover:bg-rose-100' : isFreezed ? 'bg-cyan-100' : 'hover:bg-gray-50'}`}
       draggable={isDraggable}
       onDragStart={onDragStart}
       onDragOver={(e) => { e.preventDefault(); onDragOver?.(); }}
@@ -905,7 +1073,21 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
       <td className="border px-1 py-2 text-center w-8 text-gray-400">
         {isDraggable && <GripVertical className="h-3 w-3 mx-auto cursor-grab hover:text-blue-500" />}
       </td>
-      <td className="border px-2 py-2 text-center font-medium w-10">{item.s_no || itemIdx + 1}</td>
+      <td className="border px-2 py-2 text-center font-medium w-12">
+        {!isVersionSubmitted ? (
+          <select
+            value={itemIdx}
+            onChange={(e) => onOrdinalChange?.(parseInt(e.target.value))}
+            className="text-xs p-0.5 border border-slate-200 rounded w-full bg-white outline-none cursor-pointer"
+          >
+            {Array.from({ length: totalItems || 1 }).map((_, i) => (
+              <option key={i} value={i}>{i + 1}</option>
+            ))}
+          </select>
+        ) : (
+          item.s_no || itemIdx + 1
+        )}
+      </td>
       <td className="border px-0.5 py-0.5 text-center w-12 bg-gray-50/30">
         <div className="w-10 h-10 rounded border border-gray-200 bg-white overflow-hidden flex items-center justify-center mx-auto shadow-sm">
           {item.image ? (
@@ -923,12 +1105,29 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
         </div>
       </td>
       <td className="border px-2 py-2 text-left w-64">
-        <div className="flex items-center gap-2">
-          <div className="font-medium text-gray-900">{item.title || item.name || "-"}</div>
-          {item.manual && (
-            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[9px] px-1.5 py-0 font-bold uppercase leading-tight">
-              Manual
-            </Badge>
+        <div className="flex items-center justify-between gap-1">
+          <div className="flex items-center gap-2">
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="font-medium text-gray-900">{item.title || item.name || "-"}</div>
+                {item.category && item.category !== "General" && (
+                  <Badge variant="secondary" className="bg-indigo-50 text-indigo-600 border-indigo-100 text-[9px] px-1.5 py-0 h-4 font-bold uppercase tracking-tight">
+                    {item.category}
+                  </Badge>
+                )}
+              </div>
+            </div>
+            {item.manual && (
+              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[9px] px-1.5 py-0 font-bold uppercase leading-tight">
+                Manual
+              </Badge>
+            )}
+          </div>
+          {!isVersionSubmitted && (
+            <label className="flex items-center gap-1 text-[10px] text-rose-600 font-bold bg-white px-1.5 py-0.5 rounded border border-rose-200 shadow-sm whitespace-nowrap cursor-pointer">
+              <input type="checkbox" checked={isIndicate} onChange={(e) => updateEditedField(itemKey, "indicate", e.target.checked)} className="cursor-pointer" />
+              Indicate
+            </label>
           )}
         </div>
         {mismatch && (
@@ -938,16 +1137,27 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
           </div>
         )}
       </td>
+      {!isCompactView && (
+        <td className="border px-2 py-2 text-left w-24">
+          <Input
+            value={item.category || ""}
+            onChange={(e) => updateEditedField(itemKey, "category", e.target.value)}
+            placeholder="Area..."
+            className="h-7 text-[10px] border-gray-200 focus:border-blue-400 px-1.5"
+            disabled={isVersionSubmitted}
+          />
+        </td>
+      )}
       {!isCompactView && <td className="border px-2 py-2 text-left w-32 text-gray-600">{item.shop_name || "-"}</td>}
       {!isCompactView && <td className="border px-2 py-2 text-left w-[300px]">
         <Input
           value={localDesc}
           onChange={(e) => setLocalDesc(e.target.value)}
-          onBlur={() => updateEditedField(itemKey, "description", localDesc)}
+          onBlur={() => { setIsFocused(false); updateEditedField(itemKey, "description", localDesc); }}
           placeholder="Description..."
           className="h-7 text-xs border-gray-200 focus:border-blue-400"
-          disabled={isVersionSubmitted}
-          onFocus={checkBudgetEarly}
+          disabled={isVersionSubmitted || (item.freezeAndEdit || item.freeze_and_edit)}
+          onFocus={() => { setIsFocused(true); checkBudgetEarly(); }}
         />
       </td>}
       <td className="border px-2 py-2 text-center w-16">
@@ -955,10 +1165,10 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
           type="text"
           value={localUnit}
           onChange={(e) => setLocalUnit(e.target.value)}
-          onBlur={() => updateEditedField(itemKey, "unit", localUnit)}
+          onBlur={() => { setIsFocused(false); updateEditedField(itemKey, "unit", localUnit); }}
           className="h-7 w-12 text-xs text-center border-gray-200 focus:border-blue-400"
-          disabled={isVersionSubmitted}
-          onFocus={checkBudgetEarly}
+          disabled={isVersionSubmitted || (item.freezeAndEdit || item.freeze_and_edit)}
+          onFocus={() => { setIsFocused(true); checkBudgetEarly(); }}
         />
       </td>
       <td className="border px-2 py-2 text-center w-20">
@@ -975,10 +1185,10 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
               updateEditedField(itemKey, "qty", 0);
             }
           }}
-          onBlur={() => updateEditedField(itemKey, "qty", parseFloat(localQty) || 0)}
+          onBlur={() => { setIsFocused(false); updateEditedField(itemKey, "qty", parseFloat(localQty) || 0); }}
           className="h-7 w-16 text-xs text-center border-gray-200 focus:border-blue-400"
-          disabled={isVersionSubmitted}
-          onFocus={checkBudgetEarly}
+          disabled={isVersionSubmitted || (item.freezeAndEdit || item.freeze_and_edit)}
+          onFocus={() => { setIsFocused(true); checkBudgetEarly(); }}
         />
       </td>
       {/* Required Qty — manual items show qty directly (no scaling) */}
@@ -1006,6 +1216,7 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
             }
           }}
           onBlur={() => {
+            setIsFocused(false);
             const v = parseFloat(localRate) || 0;
             updateEditedField(itemKey, "rate", v);
             updateEditedField(itemKey, "supply_rate", v);
@@ -1013,7 +1224,7 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
           }}
           className="h-7 w-20 text-xs text-center border-gray-200 focus:border-blue-400"
           disabled={isVersionSubmitted}
-          onFocus={checkBudgetEarly}
+          onFocus={() => { setIsFocused(true); checkBudgetEarly(); }}
         />
       </td>
       <td className="border px-2 py-2 text-center w-28 font-bold text-green-700 bg-green-50">
@@ -1022,19 +1233,32 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
       <td className="border px-2 py-2 text-center w-16">
         <div className="flex items-center gap-1">
           <Button
-            variant="ghost" size="sm" className="h-6 w-6 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+            variant="ghost" size="sm" className="h-6 w-6 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50 relative"
             onClick={() => onAddComment(selectedVersionId!, itemKey)}
             title={`Comments (${comments.filter(c => c.item_id === itemKey).length})`}
           >
             <MessageSquare className="h-3 w-3" />
+            {(() => {
+              const unread = comments.filter(c => {
+                if (c.item_id !== itemKey) return false;
+                if (c.user_id === currentUser?.id) return false;
+                const isVisible = (!c.visible_to || c.visible_to.length === 0 || c.visible_to.includes(currentUser?.username));
+                return isVisible && (!c.read_by || !c.read_by.includes(currentUser?.id));
+              }).length;
+              return unread > 0 ? (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] rounded-full h-3.5 min-w-3.5 flex items-center justify-center font-bold px-0.5 shadow-sm border border-white">{unread}</span>
+              ) : null;
+            })()}
           </Button>
-          <Button
-            variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-600 hover:text-red-800 hover:bg-red-50"
-            onClick={() => handleDeleteRow(boqItem.id, tableData, itemIdx, item)}
-            disabled={isVersionSubmitted} title="Delete Item"
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
+          {!isBifProd && (
+            <Button
+              variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-600 hover:text-red-800 hover:bg-red-50"
+              onClick={() => handleDeleteRow(boqItem.id, tableData, itemIdx, item)}
+              disabled={isVersionSubmitted} title="Delete Item"
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          )}
         </div>
       </td>
     </tr>
@@ -1086,6 +1310,348 @@ function HistorySection({ history }: { history: BOMHistory[] }) {
   );
 }
 
+// ─── Approvals Components ───────────────────────────────────────────────────
+
+function ApprovalsList({
+  approvals,
+  onPreview,
+  onAction,
+  actionLoading
+}: {
+  approvals: any[],
+  onPreview: (a: any) => void,
+  onAction: (id: string, action: 'approve' | 'reject' | 'approve-edit' | 'reject-edit') => void,
+  actionLoading: string | null
+}) {
+  const [listType, setListType] = React.useState("bom");
+
+  const pending = approvals.filter(a => a.status === 'pending_approval' || a.status === 'submitted');
+  const editRequests = approvals.filter(a => a.status === 'edit_requested');
+  const others = approvals.filter(a => a.status !== 'pending_approval' && a.status !== 'submitted' && a.status !== 'edit_requested');
+
+  const currentList = listType === "bom" ? pending : listType === "edit" ? editRequests : others;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-center mb-6">
+        <Tabs value={listType} onValueChange={setListType} className="w-fit">
+          <TabsList className="bg-slate-100/80 p-1 border border-slate-200">
+            <TabsTrigger
+              value="edit"
+              className="px-8 py-2 text-xs font-bold data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm"
+            >
+              Edit Requests
+              {editRequests.length > 0 && <Badge variant="secondary" className="ml-2 bg-slate-200 text-slate-700">{editRequests.length}</Badge>}
+            </TabsTrigger>
+            <TabsTrigger
+              value="bom"
+              className="px-8 py-2 text-xs font-bold data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm"
+            >
+              BOM Approvals
+              {pending.length > 0 && <Badge variant="secondary" className="ml-2 bg-blue-100 text-blue-600">{pending.length}</Badge>}
+            </TabsTrigger>
+            <TabsTrigger
+              value="history"
+              className="px-8 py-2 text-xs font-bold data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm"
+            >
+              History
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm ring-1 ring-slate-900/5">
+        <Table>
+          <TableHeader className="bg-slate-50/80">
+            <TableRow className="hover:bg-transparent border-b-slate-200">
+              <TableHead className="w-12 text-center text-[10px] font-bold text-slate-400">
+                <div className="flex items-center justify-center"><ChevronDown className="h-3 w-3" /></div>
+              </TableHead>
+              <TableHead className="w-10 px-0">
+                <div className="w-4 h-4 border border-slate-300 rounded bg-slate-50/50"></div>
+              </TableHead>
+              <TableHead className="text-[11px] font-bold uppercase tracking-wider text-slate-500 py-4">Project</TableHead>
+              <TableHead className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Client</TableHead>
+              <TableHead className="text-[11px] font-bold uppercase tracking-wider text-slate-500 text-center">Version</TableHead>
+              <TableHead className="text-[11px] font-bold uppercase tracking-wider text-slate-500 text-center">Type</TableHead>
+              <TableHead className="text-[11px] font-bold uppercase tracking-wider text-slate-500 text-center">Status</TableHead>
+              <TableHead className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Date</TableHead>
+              <TableHead className="text-[11px] font-bold uppercase tracking-wider text-slate-500 text-right pr-8">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {currentList.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={9} className="py-24 text-center">
+                  <div className="flex flex-col items-center justify-center gap-3">
+                    <div className="p-4 bg-slate-50 rounded-full">
+                      <CheckCircle2 className="h-10 w-10 text-slate-200" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="font-bold text-slate-600">No {listType === 'history' ? 'approval history' : listType === 'bom' ? 'pending BOM approvals' : 'edit requests'}</p>
+                      <p className="text-sm text-slate-400">You're all caught up for now.</p>
+                    </div>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : (
+              currentList.map((a) => (
+                <TableRow key={a.id} className="hover:bg-slate-50/50 transition-colors border-b-slate-100">
+                  <TableCell className="w-12 py-4">
+                    <button
+                      className="flex items-center justify-center w-full text-slate-400 hover:text-blue-600 transition-colors"
+                      onClick={() => onPreview(a)}
+                      title="Expand View"
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                  </TableCell>
+                  <TableCell className="w-10 px-0">
+                    <div className="w-4 h-4 border border-slate-200 rounded hover:border-blue-400 transition-colors"></div>
+                  </TableCell>
+                  <TableCell className="font-bold text-slate-900 text-sm py-4">{a.project_name}</TableCell>
+                  <TableCell className="text-sm text-slate-600 italic font-medium">{a.project_client}</TableCell>
+                  <TableCell className="text-center font-bold text-slate-500 text-xs">V{a.version_number}</TableCell>
+                  <TableCell className="text-center py-4">
+                    <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-100 font-bold px-2 py-0 text-[10px] h-5">BOM</Badge>
+                  </TableCell>
+                  <TableCell className="text-center py-4">
+                    {a.status === 'edit_requested' ? (
+                      <Badge className="bg-amber-50 text-amber-600 border-amber-100 font-bold text-[10px] h-6 px-3">Edit Requested</Badge>
+                    ) : a.status === 'approved' ? (
+                      <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100 font-bold text-[10px] h-6 px-3">Approved</Badge>
+                    ) : a.status === 'rejected' ? (
+                      <Badge className="bg-rose-50 text-rose-600 border-rose-100 font-bold text-[10px] h-6 px-3">Rejected</Badge>
+                    ) : (
+                      <Badge className="bg-orange-50 text-orange-600 border-orange-100 font-bold text-[10px] h-6 px-3">Pending</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-[11px] font-medium text-slate-500 whitespace-nowrap">
+                    {new Date(a.created_at).toLocaleDateString()}
+                  </TableCell>
+                  <TableCell className="text-right pr-8 py-4">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs font-bold border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300"
+                        onClick={() => onPreview(a)}
+                      >
+                        <Edit className="h-3 w-3 mr-1.5" /> Edit BOM
+                      </Button>
+
+                      {(a.status === 'pending_approval' || a.status === 'submitted' || a.status === 'edit_requested') && (
+                        <>
+                          <Button
+                            size="sm"
+                            className="h-8 text-xs font-bold bg-green-600 hover:bg-green-700 text-white shadow-sm px-4"
+                            onClick={() => onAction(a.id, a.status === 'edit_requested' ? 'approve-edit' : 'approve')}
+                            disabled={!!actionLoading}
+                          >
+                            {actionLoading === a.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Approve"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-8 text-xs font-bold bg-red-500 hover:bg-red-600 text-white shadow-sm px-4 border-none"
+                            onClick={() => onAction(a.id, a.status === 'edit_requested' ? 'reject-edit' : 'reject')}
+                            disabled={!!actionLoading}
+                          >
+                            {actionLoading === a.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Reject"}
+                          </Button>
+                        </>
+                      )}
+
+                      {/* Add Clear button for approved/rejected if needed, similar to screenshot */}
+                      {(a.status === 'approved' || a.status === 'rejected') && (
+                        <Button size="sm" variant="ghost" className="h-8 text-xs text-slate-400 hover:text-slate-600">Clear</Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+function ApprovalPreviewDialog({
+  approval,
+  items,
+  loading,
+  open,
+  onClose,
+  onAction,
+  actionLoading
+}: {
+  approval: any,
+  items: any[],
+  loading: boolean,
+  open: boolean,
+  onClose: () => void,
+  onAction: (id: string, action: 'approve' | 'reject' | 'approve-edit' | 'reject-edit') => void,
+  actionLoading: string | null
+}) {
+  if (!approval) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-7xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+        <DialogHeader className="px-6 py-4 border-b bg-slate-50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-100 rounded-lg text-blue-700">
+                <Briefcase className="h-5 w-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-xl font-bold text-slate-900">{approval.project_name}</DialogTitle>
+                <DialogDescription className="text-sm font-medium text-slate-500">
+                  {approval.project_client} • Version V{approval.version_number} • {approval.status === 'edit_requested' ? "Edit Request" : "Standard Approval"}
+                </DialogDescription>
+              </div>
+            </div>
+            <div className="flex gap-2 mr-8">
+              <Button
+                variant="outline"
+                className="border-red-200 text-red-700 hover:bg-red-50 font-bold"
+                onClick={() => onAction(approval.id, approval.status === 'edit_requested' ? 'reject-edit' : 'reject')}
+                disabled={!!actionLoading}
+              >
+                {actionLoading === approval.id ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <XCircle className="h-4 w-4 mr-2" />}
+                Reject
+              </Button>
+              <Button
+                className="bg-green-600 hover:bg-green-700 text-white font-bold"
+                onClick={() => onAction(approval.id, approval.status === 'edit_requested' ? 'approve-edit' : 'approve')}
+                disabled={!!actionLoading}
+              >
+                {actionLoading === approval.id ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
+                Approve
+              </Button>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-100/30">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-24 gap-3 text-slate-400">
+              <Loader2 className="h-10 w-10 animate-spin" />
+              <span className="font-bold">Loading BOM Details...</span>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {items.map((item, idx) => {
+                const td = typeof item.table_data === 'string' ? JSON.parse(item.table_data) : item.table_data;
+                const step11Items = Array.isArray(td.step11_items) ? td.step11_items : [];
+                let displayLines = [];
+
+                if (td.materialLines && td.targetRequiredQty !== undefined) {
+                  const res = computeBoq(td.configBasis, td.materialLines, td.targetRequiredQty);
+                  displayLines = res.computed.map((line: any) => ({
+                    title: line.name,
+                    description: line.name,
+                    unit: line.unit,
+                    shop_name: line.shop_name,
+                    qtyPerSqf: line.perUnitQty,
+                    requiredQty: line.scaledQty,
+                    roundOff: line.roundOffQty,
+                    rateSqft: line.supplyRate + line.installRate,
+                    amount: line.lineTotal
+                  }));
+                  const manualAdditions = step11Items.filter((i: any) => i && i.manual).map((it: any) => ({
+                    ...it,
+                    qtyPerSqf: it.qtyPerSqf ?? 0,
+                    requiredQty: it.qty ?? 0,
+                    roundOff: it.qty ?? 0,
+                    rateSqft: it.rate || (it.supply_rate + it.install_rate),
+                    amount: (it.qty ?? 0) * (it.rate || (it.supply_rate + it.install_rate))
+                  }));
+                  displayLines = [...displayLines, ...manualAdditions];
+                } else {
+                  displayLines = step11Items.map((it: any) => ({
+                    ...it,
+                    qtyPerSqf: it.qtyPerSqf ?? 0,
+                    requiredQty: it.qty ?? 0,
+                    roundOff: it.qty ?? 0,
+                    rateSqft: it.rate || (it.supply_rate + it.install_rate),
+                    amount: (it.qty ?? 0) * (it.rate || (it.supply_rate + it.install_rate))
+                  }));
+                }
+
+                return (
+                  <Card key={item.id} className="border-slate-200 overflow-hidden shadow-sm">
+                    <CardHeader className="bg-slate-50 py-3 px-4 border-b">
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-400 font-bold">#{idx + 1}</span>
+                          <span className="font-bold text-slate-800 uppercase tracking-tight">{td.product_name || item.estimator}</span>
+                        </div>
+                        {td.targetRequiredQty && (
+                          <Badge variant="outline" className="bg-white font-bold border-blue-200 text-blue-700">
+                            Target: {td.targetRequiredQty} {td.configBasis?.requiredUnitType || "Unit"}
+                          </Badge>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <Table className="text-[11px]">
+                        <TableHeader className="bg-slate-50/50">
+                          <TableRow>
+                            <TableHead className="w-10">Sl</TableHead>
+                            <TableHead>Item / Material</TableHead>
+                            <TableHead>Shop</TableHead>
+                            <TableHead className="text-center">Unit</TableHead>
+                            <TableHead className="text-center">Qty/Unit</TableHead>
+                            <TableHead className="text-center">Required Qty</TableHead>
+                            <TableHead className="text-right">Rate</TableHead>
+                            <TableHead className="text-right px-6">Amount</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {displayLines.map((l: any, iIdx: number) => (
+                            <TableRow key={iIdx} className="hover:bg-slate-50/30">
+                              <TableCell className="text-slate-400 font-medium">{iIdx + 1}</TableCell>
+                              <TableCell className="font-semibold text-slate-700">
+                                {l.title}
+                                {l.manual && <Badge className="ml-2 scale-75 h-4 bg-amber-100 text-amber-700 border-amber-200 uppercase">Manual</Badge>}
+                              </TableCell>
+                              <TableCell className="text-slate-500">{l.shop_name || "—"}</TableCell>
+                              <TableCell className="text-center font-medium">{l.unit}</TableCell>
+                              <TableCell className="text-center">{Number(l.qtyPerSqf).toFixed(3)}</TableCell>
+                              <TableCell className="text-center font-bold text-blue-600">{Number(l.requiredQty).toFixed(2)}</TableCell>
+                              <TableCell className="text-right font-medium text-slate-600">₹{Number(l.rateSqft).toLocaleString()}</TableCell>
+                              <TableCell className="text-right px-6 font-bold text-slate-900 bg-slate-50/30">₹{Number(l.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                        <tfoot className="bg-slate-50/50 border-t font-bold">
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-right uppercase text-[10px] text-slate-500 font-extrabold tracking-widest">Product Total</TableCell>
+                            <TableCell className="text-right px-6 text-sm text-green-700">
+                              ₹{displayLines.reduce((sum: number, l: any) => sum + (Number(l.amount) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </TableCell>
+                          </TableRow>
+                        </tfoot>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="px-6 py-4 border-t bg-slate-50">
+          <Button variant="ghost" onClick={onClose} className="font-bold text-slate-500 hover:text-slate-700">Close Preview</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export default function CreateBom() {
@@ -1108,6 +1674,8 @@ export default function CreateBom() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [editedFields, setEditedFields] = useState<Record<string, any>>({});
   const [productSearch, setProductSearch] = useState("");
+  const [productCategoryFilter, setProductCategoryFilter] = useState("all");
+  const [itemCategoryFilter, setItemCategoryFilter] = useState("all");
   const [isCompactView, setIsCompactView] = useState(false);
   const cardDragIdxRef = useRef<number | null>(null);
   const [cardDragOverIdx, setCardDragOverIdx] = useState<number | null>(null);
@@ -1121,11 +1689,40 @@ export default function CreateBom() {
   const [projectStatusFilter, setProjectStatusFilter] = useState<string>("all");
   const [projectSearchTerm, setProjectSearchTerm] = useState("");
 
+  const productCategories = useMemo(() => {
+    const cats = new Set<string>();
+    boqItems.forEach(item => {
+      const td = parseTableData(item.table_data);
+      // Only include categories from real products (those with a product_id).
+      // Items added via "Add Item" have no product_id and must not pollute the product filter.
+      if (!td.product_id) return;
+      const c = td.category_name || td.category || "General";
+      if (c) cats.add(c);
+    });
+    return Array.from(cats).sort();
+  }, [boqItems]);
+
+  const itemCategories = useMemo(() => {
+    const cats = new Set<string>();
+    boqItems.forEach(item => {
+      const td = parseTableData(item.table_data);
+      // For standalone items (no product_id), treat their top-level category as the item category.
+      if (!td.product_id) {
+        const c = td.category_name || td.category || "General";
+        if (c) cats.add(c);
+        return;
+      }
+      if (td.materialLines) td.materialLines.forEach((ml: any) => { cats.add(ml.category || "General"); });
+      if (td.step11_items) td.step11_items.forEach((it: any) => { cats.add(it.category || "General"); });
+    });
+    return Array.from(cats).sort();
+  }, [boqItems]);
+
   // Comments state
   const [comments, setComments] = useState<BOMComment[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [showCommentDialog, setShowCommentDialog] = useState(false);
-  const [commentTarget, setCommentTarget] = useState<{ type: 'product' | 'item'; id: string; name: string } | null>(null);
+  const [commentTarget, setCommentTarget] = useState<{ type: 'product' | 'item' | 'overall'; id: string; name: string } | null>(null);
   const [newComment, setNewComment] = useState("");
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [showProposalImportDialog, setShowProposalImportDialog] = useState(false);
@@ -1133,12 +1730,24 @@ export default function CreateBom() {
   const [expandedProposalId, setExpandedProposalId] = useState<string | null>(null);
   const [proposalItemsPreview, setProposalItemsPreview] = useState<Record<string, any[]>>({});
   const [loadingPreviewId, setLoadingPreviewId] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<BOMComment | null>(null);
+  const [commentInboxView, setCommentInboxView] = useState(false);
+  const [isSelectingThread, setIsSelectingThread] = useState(false);
+  const [threadSearchQuery, setThreadSearchQuery] = useState("");
 
   const [approvedProposals, setApprovedProposals] = useState<any[]>([]);
   const [bomTemplates, setBomTemplates] = useState<any[]>([]);
   const [sketchTemplates, setSketchTemplates] = useState<any[]>([]);
   const [showTemplateManager, setShowTemplateManager] = useState(false);
   const [showSaveTemplateDialog, setShowSaveTemplateDialog] = useState(false);
+  const [showCompareDialog, setShowCompareDialog] = useState(false);
+  const [activeTab, setActiveTab] = useState("bom");
+  const [approvals, setApprovals] = useState<any[]>([]);
+  const [loadingApprovals, setLoadingApprovals] = useState(false);
+  const [approvalActionLoading, setApprovalActionLoading] = useState<string | null>(null);
+  const [previewApprovalId, setPreviewApprovalId] = useState<string | null>(null);
+  const [previewApprovalItems, setPreviewApprovalItems] = useState<any[]>([]);
+  const [loadingPreviewItems, setLoadingPreviewItems] = useState(false);
   const [templateToSave, setTemplateToSave] = useState<BOMItem | null>(null);
   const [newTemplateName, setNewTemplateName] = useState("");
   const [templateSearch, setTemplateSearch] = useState("");
@@ -1163,6 +1772,81 @@ export default function CreateBom() {
     }
   }, []);
 
+  const fetchApprovals = useCallback(async () => {
+    try {
+      setLoadingApprovals(true);
+      const res = await apiFetch("/api/bom-approvals");
+      if (res.ok) {
+        const data = await res.json();
+        // Strictly filter for BOM type to separate from BOQ approvals
+        const filtered = (data.approvals || []).filter((a: any) =>
+          (a.type === 'bom' || !a.type)
+        );
+        setApprovals(filtered);
+      }
+    } catch (err) {
+      console.error("Failed to load BOM approvals:", err);
+    } finally {
+      setLoadingApprovals(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "approvals" && (user?.role === 'admin' || user?.role === 'software_team')) {
+      fetchApprovals();
+    }
+  }, [activeTab, user?.role, fetchApprovals]);
+
+  const handleApprovalAction = async (id: string, action: 'approve' | 'reject' | 'approve-edit' | 'reject-edit') => {
+    let reason = "";
+    if (action === 'reject' || action === 'reject-edit') {
+      const r = prompt("Please enter a reason for rejection:");
+      if (r === null) return;
+      reason = r;
+    } else {
+      const confirmMsg = action === 'approve-edit' ? "Approve this edit request?" : "Approve this BOM version?";
+      if (!confirm(confirmMsg)) return;
+    }
+
+    setApprovalActionLoading(id);
+    try {
+      const res = await apiFetch(`/api/bom-approvals/${id}/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: reason ? JSON.stringify({ reason }) : undefined
+      });
+
+      if (res.ok) {
+        toast({ title: "Success", description: `BOM ${action.replace('-', ' ')}ed successfully.` });
+        fetchApprovals();
+        if (previewApprovalId === id) setPreviewApprovalId(null);
+      } else {
+        const data = await res.json();
+        toast({ title: "Error", description: data.message || `Failed to ${action}`, variant: "destructive" });
+      }
+    } catch (err) {
+      toast({ title: "Error", description: `Failed to ${action}`, variant: "destructive" });
+    } finally {
+      setApprovalActionLoading(null);
+    }
+  };
+
+  const handlePreviewApproval = async (approval: any) => {
+    setPreviewApprovalId(approval.id);
+    setLoadingPreviewItems(true);
+    try {
+      const res = await apiFetch(`/api/boq-items/version/${approval.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPreviewApprovalItems(data.items || []);
+      }
+    } catch (err) {
+      console.error("Failed to load items for preview:", err);
+    } finally {
+      setLoadingPreviewItems(false);
+    }
+  };
+
   const handleSaveAsTemplate = async (name: string, config: any) => {
     try {
       const resp = await apiFetch("/api/bom-templates", {
@@ -1186,7 +1870,11 @@ export default function CreateBom() {
   };
 
   const handleApplyTemplate = async (template: any) => {
-    if (!selectedVersionId || isSaving) return;
+    if (!selectedVersionId) {
+      toast({ title: "Version Required", description: "Please select or create a BOQ version first before applying templates.", variant: "destructive" });
+      return;
+    }
+    if (isSaving) return;
     setIsSaving(true);
 
     try {
@@ -1194,7 +1882,7 @@ export default function CreateBom() {
       const newItem = {
         project_id: selectedProjectId,
         version_id: selectedVersionId,
-        estimator: template.config.product_name || "Template Product",
+        estimator: (template.config.product_name || "Template Product").substring(0, 50),
         table_data: template.config,
         sort_order: boqItems.length,
       };
@@ -1212,6 +1900,9 @@ export default function CreateBom() {
         setBoqItems(prev => [...prev, itemWithParsedData]);
         setExpandedProductIds(prev => new Set(prev).add(created.id));
         setShowTemplateManager(false);
+      } else {
+        const errorData = await resp.json();
+        toast({ title: "Error", description: errorData.message || "Failed to apply template", variant: "destructive" });
       }
     } catch (e) {
       console.error("Apply template error:", e);
@@ -1222,7 +1913,11 @@ export default function CreateBom() {
   };
 
   const handleApplySketchTemplate = async (template: any) => {
-    if (!selectedProjectId || !selectedVersionId || isSaving) return;
+    if (!selectedProjectId || !selectedVersionId) {
+      toast({ title: "Version Required", description: "Please select or create a BOQ version first before applying sketch templates.", variant: "destructive" });
+      return;
+    }
+    if (isSaving) return;
     setIsSaving(true);
 
     try {
@@ -1239,40 +1934,139 @@ export default function CreateBom() {
         return;
       }
 
-      toast({ title: "Importing Sketch", description: `Adding ${items.length} items to your BOM...` });
+      // 1. Fetch products & materials once to avoid over-fetching in loops
+      const [prodResp, matResp] = await Promise.all([
+        apiFetch("/api/products"),
+        apiFetch("/api/materials")
+      ]);
 
-      const batchItems = items.map((item: any) => {
+      const allProds: Product[] = prodResp.ok ? (await prodResp.json()).products || [] : [];
+      const allMats: any[] = matResp.ok ? (await matResp.json()).materials || [] : [];
+      const matMap = Object.fromEntries(allMats.map(m => [m.id, m]));
+
+      toast({ title: "Importing Sketch", description: `Processing ${items.length} items...` });
+
+      const batchItems = [];
+
+      for (const item of items) {
+        const itemName = (item.item_name || "").toLowerCase().trim();
+        const mId = item.material_id || item.id;
+        const area = item.category || "General";
+
+        // Try to find a matching product
+        const matchedProd = allProds.find(p =>
+          p.id === mId ||
+          p.name.toLowerCase().trim() === itemName
+        );
+
         const dims = [item.length, item.width, item.height].filter(Boolean).filter(d => d !== "0" && d !== "").join(' x ');
         const desc = `${item.description || ''} ${dims ? `(Dims: ${dims} ${item.dimension_unit || ''})` : ''}`.trim();
+        const qty = Number(item.qty ?? item.quantity ?? item.qty_required ?? item.requiredQty ?? 1) || 1;
 
-        return {
+        if (matchedProd) {
+          // It's a product! Fetch its config
+          try {
+            const configRes = await apiFetch(`/api/product-step3-config/${matchedProd.id}`);
+            if (configRes.ok) {
+              const { items: configLines, config } = await configRes.json();
+              if (configLines && configLines.length > 0) {
+                const materialLines = configLines.map((it: any) => ({
+                  id: it.material_id,
+                  name: it.material_name,
+                  unit: it.unit,
+                  baseQty: Number(it.base_qty ?? it.qty ?? 0),
+                  wastagePct: it.wastage_pct != null ? Number(it.wastage_pct) : undefined,
+                  supplyRate: Number(it.supply_rate ?? it.rate ?? 0),
+                  installRate: Number(it.install_rate ?? 0),
+                  shop_name: it.shop_name,
+                  freezeAndEdit: it.freezeAndEdit || it.freeze_and_edit,
+                  freeze_and_edit: it.freezeAndEdit || it.freeze_and_edit,
+                  category: area // Apply area to all materials
+                }));
+
+                batchItems.push({
+                  estimator: matchedProd.name.substring(0, 50),
+                  table_data: {
+                    product_name: matchedProd.name,
+                    product_id: matchedProd.id,
+                    image: matchedProd.image,
+                    category: area,
+                    category_name: area,
+                    hsn_sac_type: matchedProd.tax_code_type || null,
+                    hsn_sac_code: matchedProd.tax_code_value || null,
+                    hsn_code: matchedProd.hsn_code || null,
+                    sac_code: matchedProd.sac_code || null,
+                    targetRequiredQty: qty,
+                    configBasis: {
+                      requiredUnitType: config.required_unit_type || config.basis_unit || "nos",
+                      baseRequiredQty: Number(config.base_required_qty || config.basis_qty || 1),
+                      wastagePctDefault: Number(config.wastage_pct_default || 0)
+                    },
+                    materialLines,
+                    step11_items: [],
+                    finalize_description: config?.description || desc || matchedProd.name,
+                    created_at: new Date().toISOString()
+                  }
+                });
+                continue;
+              }
+            }
+          } catch (e) {
+            console.warn("Failed to fetch product config for", matchedProd.name, e);
+          }
+        }
+
+        // Fallback: Manual Item (either product config failed or it's a raw material)
+        let rate = Number(item.rate ?? item.price ?? item.unit_rate ?? item.unitRate ?? (item.amount && qty > 0 ? Number(item.amount) / qty : undefined) ?? 0) || 0;
+        let hsn = "";
+        let sac = "";
+        let taxType = null;
+        let taxValue = "";
+
+        const mat = matMap[mId] || allMats.find(m => m.name.toLowerCase().trim() === itemName);
+        if (mat) {
+          if (rate === 0) rate = Number(mat.rate || 0);
+          hsn = mat.hsn_code || mat.template_hsn_code || "";
+          sac = mat.sac_code || mat.template_sac_code || "";
+          taxType = mat.tax_code_type || (hsn ? "hsn" : (sac ? "sac" : null));
+          taxValue = mat.tax_code_value || hsn || sac || "";
+        }
+
+        batchItems.push({
           estimator: "General",
           table_data: {
             product_name: item.item_name || "Sketch Item",
             product_id: null,
-            material_id: item.material_id || null,
-            category: item.category || "General",
+            material_id: mId || null,
+            hsn_code: hsn,
+            sac_code: sac,
+            hsn_sac_type: taxType,
+            hsn_sac_code: taxValue,
+            category: area,
+            category_name: area,
             finalize_description: desc,
-            finalize_qty: Number(item.qty) || 1,
-            finalize_rate: 0,
+            finalize_qty: qty,
+            finalize_rate: rate,
             unit: item.unit || "nos",
             step11_items: [
               {
                 s_no: 1,
-                material_id: item.material_id || null,
+                material_id: mId || null,
                 title: item.item_name || "Sketch Item",
                 description: desc,
                 unit: item.unit || "nos",
-                qty: Number(item.qty) || 1,
-                supply_rate: 0,
+                qty,
+                supply_rate: rate,
                 install_rate: 0,
-                manual: true
+                rate,
+                manual: true,
+                category: area
               }
             ],
             created_at: new Date().toISOString()
           }
-        };
-      });
+        });
+      }
 
       const resp = await apiFetch("/api/boq-items/batch", {
         method: "POST",
@@ -1289,7 +2083,9 @@ export default function CreateBom() {
         toast({ title: "Sketch Imported", description: `${items.length} items added from sketch template.` });
         loadBoqItemsAndEdits();
       } else {
-        throw new Error("Batch import failed");
+        const errData = await resp.json().catch(() => ({}));
+        console.error("Batch import failed details:", errData);
+        throw new Error(errData.error || errData.message || "Batch import failed");
       }
     } catch (e) {
       console.error("Apply sketch template error:", e);
@@ -1477,24 +2273,80 @@ export default function CreateBom() {
         const pr = await apiFetch("/api/products");
         if (pr.ok) {
           const pd = await pr.json();
-          const byId: Record<string, any> = Object.fromEntries((pd.products || []).map((p: any) => [p.id, p]));
+          const prodById: Record<string, any> = Object.fromEntries((pd.products || []).map((p: any) => [p.id, p]));
           items.forEach(item => {
             const td = parseTableData(item.table_data);
-            if (td.product_id && !td.hsn_code && !td.sac_code) {
-              const prod = byId[td.product_id];
-              if (prod) {
-                if (prod.hsn_code) td.hsn_code = prod.hsn_code;
-                if (prod.sac_code) td.sac_code = prod.sac_code;
-                if (prod.tax_code_value) { td.hsn_sac_code = prod.tax_code_value; td.hsn_sac_type = prod.tax_code_type || null; }
+            if (!td.hsn_code && !td.sac_code) {
+              if (td.product_id) {
+                const prod = prodById[td.product_id];
+                if (prod) {
+                  if (prod.hsn_code) td.hsn_code = prod.hsn_code;
+                  if (prod.sac_code) td.sac_code = prod.sac_code;
+                  if (prod.tax_code_value) { td.hsn_sac_code = prod.tax_code_value; td.hsn_sac_type = prod.tax_code_type || null; }
+                  item.table_data = td;
+                }
+              } else if (td.material_id && materialsById[td.material_id]) {
+                const mat = materialsById[td.material_id];
+                if (mat.hsn_code || mat.template_hsn_code) td.hsn_code = mat.hsn_code || mat.template_hsn_code;
+                if (mat.sac_code || mat.template_sac_code) td.sac_code = mat.sac_code || mat.template_sac_code;
+                if (mat.tax_code_value || mat.hsn_sac_code) {
+                  td.hsn_sac_code = mat.tax_code_value || mat.hsn_sac_code;
+                  td.hsn_sac_type = mat.tax_code_type || mat.hsn_sac_type || null;
+                }
                 item.table_data = td;
               }
             }
           });
         }
-      } catch { /* ignore */ }
+      } catch (e) { console.warn("Backfill error", e); }
       setBoqItems(items);
     } catch { toast({ title: "Error", description: "Failed to load BOQ items", variant: "destructive" }); }
   }, [selectedVersionId]);
+
+  const handleSendComment = async () => {
+    if (!newComment.trim() || !commentTarget || !selectedVersionId) return;
+    setIsSaving(true);
+
+    // Automatically make replies visible to the person you are replying to (like a direct message)
+    let finalVisibleTo = [...selectedMembers];
+    if (replyingTo?.user_id) {
+      const repliedUser = users.find(u => u.id === replyingTo.user_id)?.username;
+      if (repliedUser && !finalVisibleTo.includes(repliedUser)) {
+        finalVisibleTo.push(repliedUser);
+      }
+    }
+
+    try {
+      const res = await apiFetch("/api/boq-comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          version_id: selectedVersionId,
+          product_id: commentTarget.type === 'product' ? commentTarget.id : null,
+          item_id: commentTarget.type === 'item' ? commentTarget.id : null,
+          comment_text: newComment.trim(),
+          visible_to: finalVisibleTo,
+          parent_id: replyingTo?.id || null,
+          reply_to_text: replyingTo?.comment_text || null,
+          reply_to_user: replyingTo?.user_full_name || null
+        })
+      });
+
+      if (res.ok) {
+        await loadComments();
+        setNewComment("");
+        setSelectedMembers([]);
+        setReplyingTo(null);
+      } else {
+        toast({ title: "Error", description: "Failed to send comment", variant: "destructive" });
+      }
+    } catch (err) {
+      console.error("Failed to add comment", err);
+      toast({ title: "Error", description: "Failed to add comment", variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!selectedVersionId) { setBoqItems([]); setEditedFields({}); editedFieldsRef.current = {}; return; }
@@ -1557,7 +2409,8 @@ export default function CreateBom() {
                 qty: Number(item.qty) || 1,
                 supply_rate: Number(item.rate) || 0,
                 install_rate: 0,
-                manual: true
+                manual: true,
+                category: "Vendor Proposal"
               }
             ],
             created_at: new Date().toISOString()
@@ -1854,6 +2707,9 @@ export default function CreateBom() {
     let shopName = template.shop_name || template.shopName || "";
     let hsnSacType = template.tax_code_type || template.taxCodeType || null;
     let hsnSacCode = template.tax_code_value || template.taxCodeValue || "";
+    let hsnCode = template.hsn_code || template.hsnCode || null;
+    let sacCode = template.sac_code || template.sacCode || null;
+    let category = template.category || "";
 
     if (template.id) {
       try {
@@ -1866,10 +2722,13 @@ export default function CreateBom() {
           shopName = m.shop_name || m.shopName || shopName;
           hsnSacType = m.tax_code_type || m.taxCodeType || hsnSacType;
           hsnSacCode = m.tax_code_value || m.taxCodeValue || hsnSacCode;
+          hsnCode = m.hsn_code || m.hsnCode || m.template_hsn_code || hsnCode;
+          sacCode = m.sac_code || m.sacCode || m.template_sac_code || sacCode;
+          if (m.category) category = m.category;
         }
       } catch { /* ignore */ }
     }
-    return { unit, rate, shopName, hsnSacType, hsnSacCode };
+    return { unit, rate, shopName, hsnSacType, hsnSacCode, hsnCode, sacCode, category };
   };
 
   const getMergedTableData = (boqItem: BOMItem) => {
@@ -1942,7 +2801,7 @@ export default function CreateBom() {
       if (!selectedProjectId || !selectedVersionId) { toast({ title: "Error", description: "Select a project and version first", variant: "destructive" }); return; }
       setIsSaving(true);
       try {
-        const { unit, rate, shopName, hsnSacType, hsnSacCode } = await resolveMaterialFields(template);
+        const { unit, rate, shopName, hsnSacType, hsnSacCode, hsnCode, sacCode, category } = await resolveMaterialFields(template);
         const materialItem = {
           id: template.id,
           title: template.name,
@@ -1953,7 +2812,8 @@ export default function CreateBom() {
           install_rate: 0,
           location: "Main Area",
           s_no: 1,
-          shop_name: shopName
+          shop_name: shopName,
+          category: category || "General"
         };
         const res = await apiFetch("/api/boq-items", {
           method: "POST",
@@ -1964,9 +2824,13 @@ export default function CreateBom() {
             estimator: `material_${template.id}`,
             table_data: {
               product_name: template.name,
+              category: category || "General",
+              category_name: category || "General",
               step11_items: [materialItem],
               hsn_sac_type: hsnSacType,
               hsn_sac_code: hsnSacCode,
+              hsn_code: hsnCode,
+              sac_code: sacCode,
               finalize_description: materialItem.description
             }
           })
@@ -1990,7 +2854,7 @@ export default function CreateBom() {
         if (!existing) throw new Error("Product group not found");
         const tableData = parseTableData(existing.table_data);
         const currentStep11 = Array.isArray(tableData.step11_items) ? tableData.step11_items : [];
-        const { unit, rate, shopName, hsnSacType, hsnSacCode } = await resolveMaterialFields(template);
+        const { unit, rate, shopName, hsnSacType, hsnSacCode, hsnCode, sacCode, category } = await resolveMaterialFields(template);
         const newItem: Step11Item = {
           id: template.id,
           title: template.name,
@@ -2001,7 +2865,8 @@ export default function CreateBom() {
           install_rate: 0,
           location: template.location || "Main Area",
           s_no: currentStep11.length + 1,
-          shop_name: shopName
+          shop_name: shopName,
+          category: category
         };
         const updatedTableData = tableData.materialLines && tableData.targetRequiredQty !== undefined
           ? { ...tableData, step11_items: [...currentStep11, { ...newItem, manual: true }] }
@@ -2010,6 +2875,8 @@ export default function CreateBom() {
           updatedTableData.hsn_sac_type = hsnSacType;
           updatedTableData.hsn_sac_code = hsnSacCode;
         }
+        if (!tableData.hsn_code && hsnCode) updatedTableData.hsn_code = hsnCode;
+        if (!tableData.sac_code && sacCode) updatedTableData.sac_code = sacCode;
         if (!tableData.finalize_description || tableData.finalize_description.trim() === "") {
           updatedTableData.finalize_description = newItem.description;
         }
@@ -2080,15 +2947,17 @@ export default function CreateBom() {
             wastagePct: item.wastage_pct != null ? Number(item.wastage_pct) : undefined,
             supplyRate: Number(item.supply_rate ?? item.rate ?? 0),
             installRate: Number(item.install_rate ?? 0),
-            shop_name: item.shop_name
+            shop_name: item.shop_name,
+            category: item.category || "General",
+            freeze_and_edit: (item.freeze_and_edit === true || item.freeze_and_edit === "true" || item.freeze_and_edit === 1 || item.freezeAndEdit === true || item.freezeAndEdit === "true" || item.freezeAndEdit === 1)
           }));
         }
       }
       if (!configBasis) {
         configBasis = { requiredUnitType: "Sqft" as UnitType, baseRequiredQty: 1, wastagePctDefault: 0 };
-        materialLines = pendingItems.map(i => ({ materialId: i.id || Math.random().toString(), materialName: i.title || "Item", unit: i.unit || "nos", baseQty: i.qty || 1, supplyRate: i.supply_rate || 0, installRate: i.install_rate || 0 }));
+        materialLines = pendingItems.map(i => ({ materialId: i.id || Math.random().toString(), materialName: i.title || "Item", unit: i.unit || "nos", baseQty: i.qty || 1, supplyRate: i.supply_rate || 0, installRate: i.install_rate || 0, category: i.category || "General" }));
       }
-      const tableData = { product_name: selectedProduct.name, product_id: selectedProduct.id, image: selectedProduct.image, category: selectedProduct.category, subcategory: selectedProduct.subcategory, hsn_sac_type: selectedProduct.tax_code_type || null, hsn_sac_code: selectedProduct.tax_code_value || null, hsn_code: selectedProduct.hsn_code || null, sac_code: selectedProduct.sac_code || null, targetRequiredQty, configBasis, materialLines, step11_items: pendingItems, finalize_description: pendingItems[0]?.description || "", created_at: new Date().toISOString() };
+      const tableData = { product_name: selectedProduct.name, product_id: selectedProduct.id, image: selectedProduct.image, category: selectedProduct.category || "General", category_name: selectedProduct.category || "General", subcategory: selectedProduct.subcategory, hsn_sac_type: selectedProduct.tax_code_type || null, hsn_sac_code: selectedProduct.tax_code_value || null, hsn_code: selectedProduct.hsn_code || null, sac_code: selectedProduct.sac_code || null, targetRequiredQty, configBasis, materialLines, step11_items: pendingItems.map(i => ({ ...i, category: i.category || "General" })), finalize_description: pendingItems[0]?.description || "", created_at: new Date().toISOString() };
 
       // --- NEW: Check for Material Quantity Increases in Approved POs ---
       const materialIds = materialLines.map(ml => ml.id || ml.materialId).filter(Boolean);
@@ -2173,9 +3042,34 @@ export default function CreateBom() {
 
       const saveResp = await res.json();
       if (saveResp?.updatedItems?.length) {
-        setEditedFields({});
-        editedFieldsRef.current = {};
-        await loadBoqItemsAndEdits();
+        // Incrementally clear ONLY the fields we sent, instead of a blanket reset.
+        // This prevents overwriting new typing that happened while the request was in flight.
+        setEditedFields(prev => {
+          const next = { ...prev };
+          Object.keys(payload).forEach(key => {
+            // Only clear if the current edit state matches what we just sent
+            // (Prevents clearing items if user kept typing)
+            if (JSON.stringify(next[key]) === JSON.stringify(payload[key])) {
+              delete next[key];
+            }
+          });
+          editedFieldsRef.current = next;
+          return next;
+        });
+
+        // Update local items state with authoritative server data immediately
+        // This stops the "flicker" where values jump between old/new state during re-loads.
+        setBoqItems((prev: BOMItem[]) => {
+          const updatedMap = new Map((saveResp.updatedItems || []).map((i: any) => [i.id, i]));
+          return prev.map(i => {
+            const up = updatedMap.get(i.id);
+            if (!up) return i;
+            return { ...i, table_data: (up as any).table_data };
+          });
+        });
+
+        // Still reload background data (history) but the primary UI stays smooth
+        loadHistory();
       }
 
       toast({ title: "Success", description: "Draft saved automatically" });
@@ -2264,7 +3158,8 @@ export default function CreateBom() {
                   qty: Number(item.qty) || 1,
                   supply_rate: Number(item.rate) || 0,
                   install_rate: 0,
-                  manual: true
+                  manual: true,
+                  category: "Vendor Proposal"
                 }
               ],
               created_at: new Date().toISOString()
@@ -2507,7 +3402,7 @@ export default function CreateBom() {
       }
 
       XLSX.utils.book_append_sheet(workbook, worksheet, "BOQ");
-      const filename = `${selectedProject?.name || "BOQ"}_${selectedVersion ? `V${selectedVersion.version_number}` : "draft"}_BOQ.xlsx`;
+      const filename = `${selectedProject?.name || "BOQ"}_${selectedVersion ? `V${selectedVersion.version_number}` : "draft"}_BOM.xlsx`;
 
       XLSX.writeFile(workbook, filename);
       toast({ title: "Success", description: `Downloaded ${filename}` });
@@ -2734,7 +3629,7 @@ export default function CreateBom() {
         doc.text("GST Extra", 10, finalY + 6);
       }
 
-      const filename = `${selectedProject?.name || "BOQ"}_${selectedVersion ? `V${selectedVersion.version_number}` : "draft"}_BOQ.pdf`;
+      const filename = `${selectedProject?.name || "BOQ"}_${selectedVersion ? `V${selectedVersion.version_number}` : "draft"}_BOM.pdf`;
       doc.save(filename);
       toast({ title: "Success", description: `Downloaded ${filename}` });
     } catch (err) {
@@ -2757,627 +3652,735 @@ export default function CreateBom() {
     <>
       <Layout>
         <div className="space-y-6 pb-24 md:pb-32">
-          <h1 className="text-2xl font-semibold">Generate BOM</h1>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-2">
+              <h1 className="text-2xl font-semibold font-outfit text-slate-900 tracking-tight flex items-center gap-2">
+                Generate BOM
+                {activeTab === 'approvals' && <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200 uppercase tracking-widest text-[10px]">Approvals View</Badge>}
+              </h1>
 
-          {/* Project Selector */}
-          {/* Project & Version Selector (Compact & Professional) */}
-          <Card className="border-slate-200 shadow-sm overflow-hidden">
-            <CardContent className="p-4 bg-white">
-              <div className="flex flex-col gap-4">
-                {/* Top Row: Selectors & Actions */}
-                {/* Row 1: Project Filters */}
-                <div className="flex items-center gap-3 p-1.5 bg-slate-50 rounded-lg border border-slate-200 w-full">
-                  <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-2 whitespace-nowrap">Project Filters:</Label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {PROJECT_STATUSES.map(s => (
-                      <button
-                        key={s.value}
-                        onClick={() => setProjectStatusFilter(s.value)}
-                        className={cn(
-                          "px-2 py-1 text-[9px] font-bold uppercase rounded-md transition-all border border-transparent",
-                          projectStatusFilter === s.value ? "bg-white text-blue-600 shadow-sm border-blue-100 ring-1 ring-blue-50/50" : "text-slate-500 hover:bg-slate-100"
-                        )}
-                      >
-                        {s.label}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => setProjectStatusFilter("all")}
-                      className={cn(
-                        "px-2 py-1 text-[9px] font-bold uppercase rounded-md transition-all border border-transparent",
-                        projectStatusFilter === "all" ? "bg-white text-blue-600 shadow-sm border-blue-100 ring-1 ring-blue-50/50" : "text-slate-500 hover:bg-slate-100"
+              {(user?.role === 'admin' || user?.role === 'software_team') && (
+                <TabsList className="bg-slate-100 p-1 border border-slate-200 shadow-sm">
+                  <TabsTrigger value="bom" className="px-5 py-1.5 text-xs font-bold data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm transition-all">
+                    BOM Builder
+                  </TabsTrigger>
+                  <TabsTrigger value="approvals" className="px-5 py-1.5 text-xs font-bold data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm transition-all flex items-center gap-2">
+                    Approvals
+                    {approvals.length > 0 && <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] text-white font-bold">{approvals.length}</span>}
+                  </TabsTrigger>
+                </TabsList>
+              )}
+            </div>
+
+            <TabsContent value="bom" className="space-y-6 mt-0">
+
+              {/* Project Selector */}
+              {/* Project & Version Selector (Compact & Professional) */}
+              <Card className="border-slate-200 shadow-sm overflow-hidden">
+                <CardContent className="p-4 bg-white">
+                  <div className="flex flex-col gap-4">
+                    {/* Top Row: Selectors & Actions */}
+                    {/* Row 1: Project Filters */}
+                    <div className="flex items-center gap-3 p-1.5 bg-slate-50 rounded-lg border border-slate-200 w-full">
+                      <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-2 whitespace-nowrap">Project Filters:</Label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {PROJECT_STATUSES.map(s => (
+                          <button
+                            key={s.value}
+                            onClick={() => setProjectStatusFilter(s.value)}
+                            className={cn(
+                              "px-2 py-1 text-[9px] font-bold uppercase rounded-md transition-all border border-transparent",
+                              projectStatusFilter === s.value ? "bg-white text-blue-600 shadow-sm border-blue-100 ring-1 ring-blue-50/50" : "text-slate-500 hover:bg-slate-100"
+                            )}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => setProjectStatusFilter("all")}
+                          className={cn(
+                            "px-2 py-1 text-[9px] font-bold uppercase rounded-md transition-all border border-transparent",
+                            projectStatusFilter === "all" ? "bg-white text-blue-600 shadow-sm border-blue-100 ring-1 ring-blue-50/50" : "text-slate-500 hover:bg-slate-100"
+                          )}
+                        >
+                          All
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Row 2: Select Project & Version Actions */}
+                    <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
+                      <div className="flex-[2] min-w-[350px] space-y-1">
+                        <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-1">Select Project</Label>
+                        <Select onValueChange={v => setSelectedProjectId(v || null)} value={selectedProjectId || ""}>
+                          <SelectTrigger className="w-full bg-slate-50 border-slate-200 h-9 px-3 hover:bg-slate-100/50 transition-colors">
+                            <SelectValue placeholder={projects.length === 0 ? "No projects" : "Choose from filtered list..."} />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-[300px] overflow-hidden flex flex-col">
+                            <div className="sticky top-0 z-10 bg-white p-2 border-b border-slate-100">
+                              <div className="relative">
+                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
+                                <Input
+                                  placeholder="Search projects..."
+                                  value={projectSearchTerm}
+                                  onChange={(e) => setProjectSearchTerm(e.target.value)}
+                                  onKeyDown={(e) => e.stopPropagation()}
+                                  className="pl-7 h-8 text-[11px] border-slate-200 bg-slate-50 focus:bg-white transition-colors w-full"
+                                />
+                              </div>
+                            </div>
+                            <div className="overflow-y-auto max-h-[250px]">
+                              {projects
+                                .filter(p => {
+                                  // Filter by search term
+                                  if (projectSearchTerm && !fuzzySearch(projectSearchTerm, [p.name, p.client])) return false;
+
+                                  // Filter by status
+                                  if (projectStatusFilter === "all") return true;
+                                  return p.project_status === projectStatusFilter;
+                                })
+                                .map((p: Project) => {
+                                  const sm = getProjectStatusMeta(p.project_status);
+                                  return (
+                                    <SelectItem value={p.id} key={p.id}>
+                                      <span className="flex items-center gap-2">
+                                        {p.name}
+                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${sm.color}`}>{sm.label}</span>
+                                      </span>
+                                    </SelectItem>
+                                  );
+                                })}
+                            </div>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {selectedProjectId && (
+                        <div className="flex-[3] min-w-[500px] space-y-1.5 text-slate-900">
+                          <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-1">Version & Actions</Label>
+                          <div className="flex flex-wrap gap-2">
+                            <div className="flex gap-1">
+                              <Select value={selectedVersionId || ""} onValueChange={setSelectedVersionId}>
+                                <SelectTrigger className="flex-1 min-w-[140px] bg-slate-50 border-slate-200 h-9 px-3">
+                                  <SelectValue placeholder="Select version" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {versions.map((v: BOMVersion) => {
+                                    const isManualFinal = (v as any).is_last_final;
+                                    const isLatestApproved = !versions.some(x => (x as any).is_last_final) && v.status === 'approved' && v.version_number === Math.max(...versions.filter(x => x.status === 'approved').map(x => x.version_number), 0);
+                                    const isFinal = isManualFinal || isLatestApproved;
+                                    return (
+                                      <SelectItem value={v.id} key={v.id}>
+                                        <div className="flex items-center justify-between w-full gap-2">
+                                          <span>V{v.version_number} ({VERSION_LABEL[v.status] ?? v.status})</span>
+                                          {isFinal && <span className="bg-green-600 text-white text-[8px] h-3.5 px-1 rounded-sm leading-none uppercase font-bold shrink-0 flex items-center">Last Final</span>}
+                                        </div>
+                                      </SelectItem>
+                                    );
+                                  })}
+                                </SelectContent>
+                              </Select>
+                              {(() => {
+                                const latestApprovedVer = versions.reduce((prev: any, current: any) => {
+                                  if ((current as any).is_last_final) return current;
+                                  if (prev && (prev as any).is_last_final) return prev;
+                                  return (current.status === 'approved' && (!prev || current.version_number > prev.version_number)) ? current : prev;
+                                }, null);
+
+                                const showJump = latestApprovedVer && selectedVersionId !== latestApprovedVer.id;
+                                const currentV = versions.find(v => v.id === selectedVersionId);
+                                const showMark = currentV && currentV.status === 'approved' && !(currentV as any).is_last_final;
+
+                                return (
+                                  <div className="flex items-center gap-1">
+                                    {showJump && (
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-9 w-9 border-green-200 text-green-600 hover:bg-green-50 shadow-sm shrink-0"
+                                        title="Jump to Last Final Version"
+                                        onClick={() => setSelectedVersionId(latestApprovedVer.id)}
+                                      >
+                                        <CheckCircle2 className="h-4 w-4" />
+                                      </Button>
+                                    )}
+
+                                    {showMark && (
+                                      <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-9 w-9 border-slate-200 text-slate-400 hover:text-green-600 hover:border-green-200 shadow-sm shrink-0"
+                                        title="Mark this as Last Final"
+                                        onClick={async () => {
+                                          if (!confirm("Are you sure you want to mark this version as the Last Final version?")) return;
+                                          try {
+                                            const resp = await apiFetch(`/api/boq-versions/${selectedVersionId}/make-final`, { method: "POST" });
+                                            if (resp.ok) {
+                                              toast({ title: "Success", description: "Version marked as Last Final" });
+                                              // Refresh versions
+                                              const boqResp = await apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId!)}?type=bom`);
+                                              if (boqResp.ok) {
+                                                const boqData = await boqResp.json();
+                                                setVersions(boqData.versions || []);
+                                              }
+                                            }
+                                          } catch (e) {
+                                            console.error("Failed to mark final", e);
+                                            toast({ title: "Error", description: "Failed to mark as final", variant: "destructive" });
+                                          }
+                                        }}
+                                      >
+                                        <Star className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-9 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-blue-600 gap-2 font-semibold"
+                              title="View History"
+                              onClick={() => setShowHistoryModal(true)}
+                              disabled={!selectedVersionId || history.length === 0}
+                            >
+                              <History className="h-4 w-4" />
+                              <span>History</span>
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-9 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-red-600 gap-2 font-semibold"
+                              title="Delete Version"
+                              onClick={handleDeleteVersion}
+                              disabled={!selectedVersionId}
+                            >
+                              <XCircle className="h-4 w-4" />
+                              <span>Delete</span>
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-9 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-emerald-600 gap-2 font-semibold"
+                              title="New Version"
+                              onClick={() => {
+                                if (versions.length > 0) {
+                                  const last = versions[0];
+                                  handleCreateNewVersion(confirm(`Copy items from V${last.version_number}?`));
+                                } else {
+                                  handleCreateNewVersion(false);
+                                }
+                              }}
+                            >
+                              <Clock className="h-4 w-4" />
+                              <span>New Version</span>
+                            </Button>
+                          </div>
+                        </div>
                       )}
-                    >
-                      All
-                    </button>
-                  </div>
-                </div>
+                    </div>
 
-                {/* Row 2: Select Project & Version Actions */}
-                <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
-                  <div className="flex-[2] min-w-[350px] space-y-1">
-                    <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-1">Select Project</Label>
-                    <Select onValueChange={v => setSelectedProjectId(v || null)} value={selectedProjectId || ""}>
-                      <SelectTrigger className="w-full bg-slate-50 border-slate-200 h-9 px-3 hover:bg-slate-100/50 transition-colors">
-                        <SelectValue placeholder={projects.length === 0 ? "No projects" : "Choose from filtered list..."} />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-[300px] overflow-hidden flex flex-col">
-                        <div className="sticky top-0 z-10 bg-white p-2 border-b border-slate-100">
-                          <div className="relative">
-                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
+                    {/* Row 3: Project Status & Actions */}
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
+                      {selectedProjectId && (() => {
+                        const selProj = projects.find(p => p.id === selectedProjectId);
+                        return (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-slate-500 font-bold uppercase">Project Status:</span>
+                            <select
+                              className="text-xs border border-slate-200 rounded px-2 py-1 bg-white font-semibold focus:ring-1 ring-blue-400 outline-none"
+                              value={selProj?.project_status || 'started'}
+                              onChange={async (e) => {
+                                const newStatus = e.target.value;
+                                try {
+                                  await apiFetch(`/api/boq-projects/${selectedProjectId}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ project_status: newStatus }),
+                                  });
+                                  setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, project_status: newStatus } : p));
+                                } catch (err) { console.error('Failed to update project status', err); }
+                              }}
+                            >
+                              {PROJECT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                            </select>
+                          </div>
+                        );
+                      })()}
+
+                      <div className="flex gap-2 h-9 ml-auto">
+                        <Button onClick={() => setShowTemplateManager(true)} variant="outline" className="border-slate-200 h-full px-4 text-xs font-bold shadow-sm bg-white flex items-center gap-2" disabled={isVersionSubmitted || !selectedVersionId}>
+                          <History className="h-4 w-4" /> Load Template
+                        </Button>
+
+                        {approvedProposals.length > 0 && (
+                          <Button
+                            onClick={() => {
+                              setSelectedProposalImportIds([]);
+                              setShowProposalImportDialog(true);
+                            }}
+                            variant="outline"
+                            className="border-emerald-200 h-full px-4 text-xs font-bold shadow-sm bg-white flex items-center gap-2 text-emerald-700 hover:bg-emerald-50"
+                            disabled={isVersionSubmitted || !selectedVersionId}
+                          >
+                            <CheckCircle2 className="h-4 w-4" /> Import Approved Proposals ({approvedProposals.length})
+                          </Button>
+                        )}
+                        <Button onClick={() => setShowCompareDialog(true)} variant="outline" className="border-blue-200 h-full px-4 text-xs font-bold shadow-sm bg-blue-50 text-blue-700 hover:bg-blue-100 flex items-center gap-2" disabled={!selectedProjectId}>
+                          <ChevronsUpDown className="h-4 w-4" /> Compare
+                        </Button>
+                        <Button onClick={handleAddProduct} className="bg-primary text-white h-full px-5 text-xs font-bold shadow-sm" disabled={isVersionSubmitted || !selectedVersionId}>+ Add Product</Button>
+                        <Button onClick={handleAddProductManual} variant="outline" className="border-slate-200 h-full px-5 text-xs font-bold shadow-sm bg-white" disabled={isVersionSubmitted || !selectedVersionId}>+ Add Item</Button>
+                      </div>
+                    </div>
+
+
+
+                    {/* Row 4: Project Info Summary & Comment */}
+                    {selectedVersion && (
+                      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 py-2.5 px-4 bg-slate-50/50 border border-slate-100 rounded-lg overflow-hidden">
+                        <div className="flex items-center gap-2 min-w-fit">
+                          <div className="p-1.5 bg-blue-50 rounded text-blue-600"><Briefcase className="h-3.5 w-3.5" /></div>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] leading-none text-slate-400 font-bold uppercase tracking-tight">Client</span>
+                            <span className="text-xs font-semibold text-slate-700">{selectedVersion.project_client || "—"}</span>
+                          </div>
+                        </div>
+
+                        <div className="hidden md:block w-px h-6 bg-slate-200" />
+
+                        <div className="flex items-center gap-2 min-w-fit">
+                          <div className="p-1.5 bg-indigo-50 rounded text-indigo-600"><MapPin className="h-3.5 w-3.5" /></div>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] leading-none text-slate-400 font-bold uppercase tracking-tight">Location</span>
+                            <span className="text-xs font-semibold text-slate-700">{selectedVersion.project_location || "—"}</span>
+                          </div>
+                        </div>
+
+                        <div className="hidden md:block w-px h-6 bg-slate-200" />
+
+                        <div className="flex items-center gap-2 min-w-fit">
+                          <div className="p-1.5 bg-emerald-50 rounded text-emerald-600"><IndianRupee className="h-3.5 w-3.5" /></div>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] leading-none text-slate-400 font-bold uppercase tracking-tight">Budget</span>
+                            <span className="text-xs font-semibold text-slate-700">₹{currentProjectValue.toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        <div className="ml-auto flex items-center gap-3">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-blue-600 gap-2 font-semibold relative"
+                            title="View All Comments"
+                            onClick={() => {
+                              if (!selectedVersionId) return;
+                              setCommentInboxView(true);
+                              setCommentTarget(null);
+                              setShowCommentDialog(true);
+                            }}
+                            disabled={!selectedVersionId}
+                          >
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            <span className="text-xs">Comment</span>
+                            {(() => {
+                              const unreadCount = comments.filter(c => {
+                                if (c.user_id === user?.id) return false;
+                                const isVisible = (!c.visible_to || c.visible_to.length === 0 || c.visible_to.includes(user?.username || ""));
+                                return isVisible && (!c.read_by || !c.read_by.includes(user?.id || ""));
+                              }).length;
+                              return unreadCount > 0 ? (
+                                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] rounded-full h-4 min-w-4 flex items-center justify-center font-bold px-1 shadow-sm border border-white">{unreadCount}</span>
+                              ) : null;
+                            })()}
+                          </Button>
+
+                          {selectedVersion.status === "approved" ? (
+                            <Badge variant="outline" className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[10px] font-bold px-2 py-0 h-6">
+                              <CheckCircle2 className="h-2.5 w-2.5 mr-1" /> APPROVED
+                            </Badge>
+                          ) : selectedVersion.status === "edit_requested" ? (
+                            <Badge variant="outline" className="bg-indigo-100 text-indigo-700 border-indigo-200 text-[10px] font-bold px-2 py-0 h-6">
+                              <Clock className="h-2.5 w-2.5 mr-1" /> EDIT REQUESTED
+                            </Badge>
+                          ) : isVersionSubmitted ? (
+                            <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200 text-[10px] font-bold px-2 py-0 h-6">
+                              <Lock className="h-2.5 w-2.5 mr-1" /> SUBMITTED
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-200 text-[10px] font-bold px-2 py-0 h-6">
+                              <Clock className="h-2.5 w-2.5 mr-1" /> DRAFT
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+
+                {/* History Modal */}
+                <Dialog open={showHistoryModal} onOpenChange={setShowHistoryModal}>
+                  <DialogContent className="sm:max-w-[500px]">
+                    <DialogHeader>
+                      <DialogTitle className="text-lg font-bold flex items-center gap-2">
+                        <History className="h-5 w-5 text-blue-600" />
+                        Approval & Activity History
+                      </DialogTitle>
+                      <DialogDescription>
+                        Tracking all major actions and approval status changes.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4 max-h-[60vh] overflow-y-auto px-1">
+                      <HistorySection history={history} />
+                    </div>
+                    <DialogFooter>
+                      <Button onClick={() => setShowHistoryModal(false)}>Close</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+                <Dialog open={showProposalImportDialog} onOpenChange={setShowProposalImportDialog}>
+                  <DialogContent className="sm:max-w-[700px]">
+                    <DialogHeader>
+                      <DialogTitle className="text-lg font-bold flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                        Finalized Vendor Proposals
+                      </DialogTitle>
+                      <DialogDescription>
+                        Select one or more approved proposals to import their items into your current BOM draft.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                      <div className="border rounded-md overflow-hidden bg-white">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-50 border-b border-slate-200">
+                            <tr>
+                              <th className="w-10 px-4 py-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  className="rounded border-slate-300"
+                                  checked={selectedProposalImportIds.length === approvedProposals.length && approvedProposals.length > 0}
+                                  onChange={(e) => {
+                                    if (e.target.checked) setSelectedProposalImportIds(approvedProposals.map(p => p.id));
+                                    else setSelectedProposalImportIds([]);
+                                  }}
+                                />
+                              </th>
+                              <th className="px-4 py-3 text-left font-bold text-slate-700">Proposal Details</th>
+                              <th className="px-4 py-3 text-right font-bold text-slate-700">Final Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {approvedProposals.map((prop) => (
+                              <React.Fragment key={prop.id}>
+                                <tr
+                                  className={`hover:bg-slate-50 transition-colors cursor-pointer border-t border-slate-100 ${selectedProposalImportIds.includes(prop.id) ? 'bg-emerald-50/20' : ''}`}
+                                  onClick={() => {
+                                    setSelectedProposalImportIds(prev =>
+                                      prev.includes(prop.id) ? prev.filter(id => id !== prop.id) : [...prev, prop.id]
+                                    );
+                                  }}
+                                >
+                                  <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                    <input
+                                      type="checkbox"
+                                      className="rounded border-slate-300 h-4 w-4 accent-emerald-600"
+                                      checked={selectedProposalImportIds.includes(prop.id)}
+                                      onChange={(e) => {
+                                        setSelectedProposalImportIds(prev =>
+                                          e.target.checked ? [...prev, prop.id] : prev.filter(id => id !== prop.id)
+                                        );
+                                      }}
+                                    />
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="flex items-start gap-3">
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); toggleProposalPreview(prop.id); }}
+                                        className="mt-1 p-1 hover:bg-slate-200 rounded transition-colors text-slate-400 hover:text-slate-600"
+                                      >
+                                        {expandedProposalId === prop.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                      </button>
+                                      <div className="flex flex-col">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-bold text-slate-900 text-sm">{prop.vendor_name}</span>
+                                          <Badge className="text-[10px] h-4 bg-emerald-100 text-emerald-700 border-emerald-200 font-bold">V{prop.version_number}</Badge>
+                                        </div>
+                                        <span className="text-[11px] text-slate-500 font-bold mt-0.5">Project: {prop.project_name || selectedProject?.name || "Target Project"}</span>
+                                        <div className="flex items-center gap-3 text-[10px] text-slate-400 mt-1 font-medium">
+                                          <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> Approved: {new Date(prop.updated_at || prop.created_at).toLocaleDateString()}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    <span className="font-extrabold text-slate-950 text-sm">
+                                      ₹{getProposalTotal(prop).toLocaleString()}
+                                    </span>
+                                  </td>
+                                </tr>
+
+                                {/* Expandable Material List Preview */}
+                                {expandedProposalId === prop.id && (
+                                  <tr className="bg-slate-50/50">
+                                    <td colSpan={3} className="px-4 py-0">
+                                      <div className="p-4 border-l-2 border-emerald-500 my-2 ml-10">
+                                        <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
+                                          <table className="w-full text-[11px]">
+                                            <thead className="bg-slate-100/80 text-slate-600 font-bold uppercase tracking-wider border-b">
+                                              <tr>
+                                                <th className="px-3 py-2 text-left">Item Name</th>
+                                                <th className="px-3 py-2 text-center">Qty</th>
+                                                <th className="px-3 py-2 text-center">Unit</th>
+                                                <th className="px-3 py-2 text-right">Rate</th>
+                                                <th className="px-3 py-2 text-right w-24">Total</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                              {loadingPreviewId === prop.id ? (
+                                                <tr>
+                                                  <td colSpan={5} className="px-3 py-4 text-center">
+                                                    <div className="flex items-center justify-center gap-2 text-slate-500">
+                                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                                      <span>Loading materials list...</span>
+                                                    </div>
+                                                  </td>
+                                                </tr>
+                                              ) : (proposalItemsPreview[prop.id]?.length || 0) > 0 ? (
+                                                proposalItemsPreview[prop.id]?.map((item, idx) => (
+                                                  <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                                                    <td className="px-3 py-2 font-medium text-slate-800">{item.item_name}</td>
+                                                    <td className="px-3 py-2 text-center font-bold text-slate-700">{item.qty}</td>
+                                                    <td className="px-3 py-2 text-center text-slate-500">{item.unit || "nos"}</td>
+                                                    <td className="px-3 py-2 text-right font-medium text-slate-600">₹{Number(item.rate).toLocaleString()}</td>
+                                                    <td className="px-3 py-2 text-right font-bold text-slate-900 bg-slate-100/30">₹{(Number(item.rate) * Number(item.qty)).toLocaleString()}</td>
+                                                  </tr>
+                                                ))
+                                              ) : (
+                                                <tr>
+                                                  <td colSpan={5} className="px-3 py-8 text-center text-slate-400 italic">No materials found in this proposal.</td>
+                                                </tr>
+                                              )}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                    <DialogFooter className="bg-slate-50 p-4 rounded-b-lg border-t border-slate-200">
+                      <div className="flex items-center justify-between w-full">
+                        <span className="text-xs font-bold text-slate-500">{selectedProposalImportIds.length} proposals selected</span>
+                        <div className="flex gap-2">
+                          <Button variant="outline" onClick={() => setShowProposalImportDialog(false)}>Cancel</Button>
+                          <Button
+                            disabled={selectedProposalImportIds.length === 0 || isSaving}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                            onClick={handleImportApprovedProposals}
+                          >
+                            {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
+                            Import Selected Items
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+                <ProductPicker open={showProductPicker} onOpenChange={setShowProductPicker} onSelectProduct={handleSelectProduct} selectedProjectId={selectedProjectId!} />
+                <MaterialPicker open={showMaterialPicker} onOpenChange={setShowMaterialPicker} onSelectTemplate={handleSelectMaterialTemplate} />
+
+                {selectedProduct && (
+                  <Step11Preview product={selectedProduct} open={showStep11Preview} onClose={() => { setShowStep11Preview(false); setTimeout(() => setSelectedProduct(null), 300); }} onAddToBoq={handleAddToBom} />
+                )}
+              </Card>
+
+              {/* BOQ Items */}
+              {selectedProjectId && (
+                <Card>
+                  <CardContent className="space-y-4 pt-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-lg font-bold text-gray-800">BOQ Items</h2>
+                      <div className="flex items-center gap-4">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setIsCompactView(!isCompactView)}
+                          className={`h-9 px-3 font-semibold ${isCompactView ? 'bg-blue-50 text-blue-600 border-blue-300' : 'text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                        >
+                          Compact View
+                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Select value={productCategoryFilter} onValueChange={setProductCategoryFilter}>
+                            <SelectTrigger className="h-9 w-[160px] text-xs border-slate-200">
+                              <SelectValue placeholder="Product Category" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Products</SelectItem>
+                              {productCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+
+                          <Select value={itemCategoryFilter} onValueChange={setItemCategoryFilter}>
+                            <SelectTrigger className="h-9 w-[160px] text-xs border-slate-200">
+                              <SelectValue placeholder="Item Category" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Item Categories</SelectItem>
+                              {itemCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+
+                          <div className="relative w-64">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                             <Input
-                              placeholder="Search projects..."
-                              value={projectSearchTerm}
-                              onChange={(e) => setProjectSearchTerm(e.target.value)}
-                              onKeyDown={(e) => e.stopPropagation()}
-                              className="pl-7 h-8 text-[11px] border-slate-200 bg-slate-50 focus:bg-white transition-colors w-full"
+                              placeholder="Search products..."
+                              value={productSearch}
+                              onChange={(e) => setProductSearch(e.target.value)}
+                              className="pl-9 h-9 text-sm border-slate-200 focus:ring-blue-500 shadow-sm"
                             />
                           </div>
                         </div>
-                        <div className="overflow-y-auto max-h-[250px]">
-                          {projects
-                            .filter(p => {
-                              // Filter by search term
-                              if (projectSearchTerm && !fuzzySearch(projectSearchTerm, [p.name, p.client])) return false;
+                      </div>
+                    </div>
+                    {boqItems.length === 0
+                      ? <div className="text-gray-500 text-center py-4">No products added yet. Click Add Product +</div>
+                      : <div className="space-y-6">
+                        {boqItems
+                          .filter(item => {
+                            const td = parseTableData(item.table_data);
+                            const name = td.product_name || item.estimator || "";
+                            const desc = td.finalize_description || "";
+                            const matchesSearch = fuzzySearch(productSearch, [name, desc]);
+                            const isStandaloneItem = !td.product_id;
 
-                              // Filter by status
-                              if (projectStatusFilter === "all") return true;
-                              return p.project_status === projectStatusFilter;
-                            })
-                            .map((p: Project) => {
-                              const sm = getProjectStatusMeta(p.project_status);
-                              return (
-                                <SelectItem value={p.id} key={p.id}>
-                                  <span className="flex items-center gap-2">
-                                    {p.name}
-                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${sm.color}`}>{sm.label}</span>
-                                  </span>
-                                </SelectItem>
-                              );
-                            })}
-                        </div>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                            // Standalone items (Add Item, no product_id) should never appear when
+                            // a real product category filter is active.
+                            if (productCategoryFilter !== "all" && isStandaloneItem) return false;
 
-                  {selectedProjectId && (
-                    <div className="flex-[3] min-w-[500px] space-y-1.5 text-slate-900">
-                      <Label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold ml-1">Version & Actions</Label>
-                      <div className="flex flex-wrap gap-2">
-                        <Select value={selectedVersionId || ""} onValueChange={setSelectedVersionId}>
-                          <SelectTrigger className="flex-1 min-w-[140px] bg-slate-50 border-slate-200 h-9 px-3">
-                            <SelectValue placeholder="Select version" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {versions.map((v: BOMVersion) => <SelectItem value={v.id} key={v.id}>V{v.version_number} ({VERSION_LABEL[v.status] ?? v.status})</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-9 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-blue-600 gap-2 font-semibold"
-                          title="View History"
-                          onClick={() => setShowHistoryModal(true)}
-                          disabled={!selectedVersionId || history.length === 0}
-                        >
-                          <History className="h-4 w-4" />
-                          <span>History</span>
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-9 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-red-600 gap-2 font-semibold"
-                          title="Delete Version"
-                          onClick={handleDeleteVersion}
-                          disabled={!selectedVersionId}
-                        >
-                          <XCircle className="h-4 w-4" />
-                          <span>Delete</span>
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-9 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-emerald-600 gap-2 font-semibold"
-                          title="New Version"
-                          onClick={() => {
-                            if (versions.length > 0) {
-                              const last = versions[0];
-                              handleCreateNewVersion(confirm(`Copy items from V${last.version_number}?`));
-                            } else {
-                              handleCreateNewVersion(false);
+                            const cat = td.category_name || td.category || "General";
+                            const matchesProductCat = productCategoryFilter === "all" || cat === productCategoryFilter;
+
+                            // Item category filter logic
+                            let hasMatchingItem = true;
+                            if (itemCategoryFilter !== "all") {
+                              if (isStandaloneItem) {
+                                // For standalone items, match by their own top-level category
+                                hasMatchingItem = cat === itemCategoryFilter;
+                              } else {
+                                const materialLines = td.materialLines || [];
+                                const step11Items = td.step11_items || [];
+                                hasMatchingItem = materialLines.some((ml: any) => (ml.category || "General") === itemCategoryFilter) ||
+                                  step11Items.some((si: any) => (si.category || "General") === itemCategoryFilter);
+                              }
                             }
-                          }}
-                        >
-                          <Clock className="h-4 w-4" />
-                          <span>New Version</span>
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
 
-                {/* Row 3: Project Status & Actions */}
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
-                  {selectedProjectId && (() => {
-                    const selProj = projects.find(p => p.id === selectedProjectId);
-                    return (
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-slate-500 font-bold uppercase">Project Status:</span>
-                        <select
-                          className="text-xs border border-slate-200 rounded px-2 py-1 bg-white font-semibold focus:ring-1 ring-blue-400 outline-none"
-                          value={selProj?.project_status || 'started'}
-                          onChange={async (e) => {
-                            const newStatus = e.target.value;
-                            try {
-                              await apiFetch(`/api/boq-projects/${selectedProjectId}`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ project_status: newStatus }),
-                              });
-                              setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, project_status: newStatus } : p));
-                            } catch (err) { console.error('Failed to update project status', err); }
-                          }}
-                        >
-                          {PROJECT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                        </select>
-                      </div>
-                    );
-                  })()}
-
-                  <div className="flex gap-2 h-9 ml-auto">
-                    <Button onClick={() => setShowTemplateManager(true)} variant="outline" className="border-slate-200 h-full px-4 text-xs font-bold shadow-sm bg-white flex items-center gap-2" disabled={isVersionSubmitted || !selectedVersionId}>
-                      <History className="h-4 w-4" /> Load Template
-                    </Button>
-
-                    {approvedProposals.length > 0 && (
-                      <Button
-                        onClick={() => {
-                          setSelectedProposalImportIds([]);
-                          setShowProposalImportDialog(true);
-                        }}
-                        variant="outline"
-                        className="border-emerald-200 h-full px-4 text-xs font-bold shadow-sm bg-white flex items-center gap-2 text-emerald-700 hover:bg-emerald-50"
-                        disabled={isVersionSubmitted || !selectedVersionId}
-                      >
-                        <CheckCircle2 className="h-4 w-4" /> Import Approved Proposals ({approvedProposals.length})
-                      </Button>
-                    )}
-                    <Button onClick={handleAddProduct} className="bg-primary text-white h-full px-5 text-xs font-bold shadow-sm" disabled={isVersionSubmitted || !selectedVersionId}>+ Add Product</Button>
-                    <Button onClick={handleAddProductManual} variant="outline" className="border-slate-200 h-full px-5 text-xs font-bold shadow-sm bg-white" disabled={isVersionSubmitted || !selectedVersionId}>+ Add Item</Button>
-                  </div>
-                </div>
-
-                {/* Version Comments Section */}
-                {selectedVersionId && comments.length > 0 && (
-                  <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
-                    <div className="flex items-center gap-2 mb-3">
-                      <MessageSquare className="h-4 w-4 text-blue-600" />
-                      <span className="text-sm font-semibold text-gray-700">Version Comments</span>
-                      <Badge variant="secondary" className="text-xs">{comments.length}</Badge>
-                    </div>
-
-                    <div className="space-y-3 max-h-64 overflow-y-auto">
-                      {comments
-                        .filter(comment => {
-                          // Show comments visible to current user or created by current user
-                          return comment.user_id === user?.id ||
-                            comment.visible_to.length === 0 ||
-                            comment.visible_to.includes(user?.id || '');
-                        })
-                        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-                        .map(comment => {
-                          const isProductComment = !!comment.product_id;
-                          const isItemComment = !!comment.item_id;
-                          const isOverallComment = !comment.item_id && !comment.product_id;
-
-                          return (
-                            <div key={comment.id} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                              <div className="flex items-start justify-between mb-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm font-semibold text-gray-900">{comment.user_full_name}</span>
-                                  <span className="text-xs text-gray-500">v{comment.version_number}</span>
-                                  {isOverallComment && <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Overall</Badge>}
-                                  {isProductComment && <Badge variant="outline" className="text-xs">Product</Badge>}
-                                  {isItemComment && <Badge variant="outline" className="text-xs">Item</Badge>}
-                                </div>
-                                <span className="text-xs text-gray-400">{new Date(comment.created_at).toLocaleString()}</span>
-                              </div>
-                              <p className="text-sm text-gray-700 mb-2">{comment.comment_text}</p>
-                              {comment.visible_to.length > 0 && (
-                                <div className="flex items-center gap-1 text-xs text-gray-500">
-                                  <Users className="h-3 w-3" />
-                                  <span>Visible to: {comment.visible_to.map(id => {
-                                    const visibleUser = users.find(u => u.id === id);
-                                    return visibleUser ? visibleUser.displayName : id;
-                                  }).join(', ')}</span>
-                                </div>
-                              )}
+                            return matchesSearch && matchesProductCat && hasMatchingItem;
+                          })
+                          .map((boqItem: BOMItem, boqIdx: number) => (
+                            <div key={boqItem.id} id={`boq-item-card-${boqItem.id}`} className="transition-all duration-300">
+                              <BoqItemCard boqItem={boqItem} boqIdx={boqIdx} isVersionSubmitted={isVersionSubmitted}
+                                expandedProductIds={expandedProductIds} setExpandedProductIds={setExpandedProductIds}
+                                getEditedValue={getEditedValue} updateEditedField={updateEditedField}
+                                handleDeleteRow={handleDeleteRow} handleFinalizeProduct={handleFinalizeProduct}
+                                handleAddItem={handleAddItem} loadBoqItemsAndEdits={loadBoqItemsAndEdits} setBoqItems={setBoqItems}
+                                checkBudgetEarly={checkBudgetEarly} handleSaveProject={handleSaveProject}
+                                isCardDragOver={cardDragOverIdx === boqIdx}
+                                onCardDragStart={(e) => { cardDragIdxRef.current = boqIdx; e.dataTransfer.effectAllowed = 'move'; }}
+                                onCardDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setCardDragOverIdx(boqIdx); }}
+                                onCardDrop={(e) => {
+                                  e.preventDefault();
+                                  setCardDragOverIdx(null);
+                                  const fromIdx = cardDragIdxRef.current;
+                                  if (fromIdx === null || fromIdx === boqIdx) return;
+                                  const reordered = [...boqItems];
+                                  const [moved] = reordered.splice(fromIdx, 1);
+                                  reordered.splice(boqIdx, 0, moved);
+                                  setBoqItems(reordered);
+                                  // Persist the new order
+                                  apiFetch('/api/boq-items/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemIds: reordered.map(i => i.id) }) }).catch(console.error);
+                                  cardDragIdxRef.current = null;
+                                }}
+                                mismatches={activeMismatches.filter(m => m.boqItemId === boqItem.id)}
+                                isCompactView={isCompactView}
+                                onSaveAsTemplate={(item) => {
+                                  setTemplateToSave(item);
+                                  setNewTemplateName(parseTableData(item.table_data).product_name || item.estimator);
+                                  setShowSaveTemplateDialog(true);
+                                }}
+                                editedFields={editedFields}
+                                comments={comments}
+                                users={users}
+                                currentUser={user}
+                                onAddComment={(versionId: string, itemId?: string) => {
+                                  const productName = parseTableData(boqItem.table_data).product_name || boqItem.estimator;
+                                  setCommentTarget({ type: itemId ? 'item' : 'product', id: itemId || boqItem.id, name: itemId ? `${productName} - Item ${itemId}` : productName });
+                                  setShowCommentDialog(true);
+                                }}
+                                selectedVersionId={selectedVersionId}
+                                totalProducts={boqItems.length}
+                                itemCategoryFilter={itemCategoryFilter}
+                                onProductOrdinalChange={(toIdx) => {
+                                  if (toIdx === boqIdx) return;
+                                  const reordered = [...boqItems];
+                                  const [moved] = reordered.splice(boqIdx, 1);
+                                  reordered.splice(toIdx, 0, moved);
+                                  setBoqItems(reordered);
+                                  // Persist the new order
+                                  apiFetch('/api/boq-items/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemIds: reordered.map(i => i.id) }) }).catch(console.error);
+                                }}
+                              />
                             </div>
-                          );
-                        })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Row 4: Project Info Summary & Comment */}
-                {selectedVersion && (
-                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2 py-2.5 px-4 bg-slate-50/50 border border-slate-100 rounded-lg overflow-hidden">
-                    <div className="flex items-center gap-2 min-w-fit">
-                      <div className="p-1.5 bg-blue-50 rounded text-blue-600"><Briefcase className="h-3.5 w-3.5" /></div>
-                      <div className="flex flex-col">
-                        <span className="text-[10px] leading-none text-slate-400 font-bold uppercase tracking-tight">Client</span>
-                        <span className="text-xs font-semibold text-slate-700">{selectedVersion.project_client || "—"}</span>
+                          ))}
                       </div>
+                    }
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Action Buttons */}
+              {selectedProjectId && selectedVersionId && (
+                <Card>
+                  <CardContent className="space-y-3 pt-6">
+                    {selectedVersion && <VersionStatusBanner version={selectedVersion} />}
+                    <PriceUpdateBanner
+                      mismatches={activeMismatches}
+                      onApplyAll={handleUpdateAllRates}
+                      onApplySingle={handleUpdateSingleMismatch}
+                      onIgnoreSingle={handleIgnoreMismatch}
+                      onViewSingle={handleViewMismatch}
+                      isUpdating={isUpdatingRates}
+                    />
+
+                    {/* Version History Modal */}
+                    <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+                      <Button onClick={withBudgetCheck(() => currentProjectValue, handleSaveProject)} variant="outline" disabled={isVersionSubmitted || Object.keys(editedFields).length === 0}>Save Draft</Button>
+                      <Button onClick={() => handleSubmitVersion("submitted")} variant="outline" className="border-primary text-primary hover:bg-primary/5 font-bold" disabled={isVersionSubmitted || boqItems.length === 0}>Lock Version</Button>
+                      <Button onClick={() => handleSubmitVersion("pending_approval")} variant="default" className="bg-primary hover:bg-primary/90 font-bold" disabled={isVersionSubmitted || boqItems.length === 0}>Submit for Approval</Button>
+                      <Button onClick={handleDownloadExcel} variant="outline" disabled={boqItems.length === 0}>Download Excel</Button>
+                      <Button onClick={handleDownloadPdf} variant="outline" disabled={boqItems.length === 0}>Download PDF</Button>
                     </div>
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
 
-                    <div className="hidden md:block w-px h-6 bg-slate-200" />
-
-                    <div className="flex items-center gap-2 min-w-fit">
-                      <div className="p-1.5 bg-indigo-50 rounded text-indigo-600"><MapPin className="h-3.5 w-3.5" /></div>
-                      <div className="flex flex-col">
-                        <span className="text-[10px] leading-none text-slate-400 font-bold uppercase tracking-tight">Location</span>
-                        <span className="text-xs font-semibold text-slate-700">{selectedVersion.project_location || "—"}</span>
-                      </div>
-                    </div>
-
-                    <div className="hidden md:block w-px h-6 bg-slate-200" />
-
-                    <div className="flex items-center gap-2 min-w-fit">
-                      <div className="p-1.5 bg-emerald-50 rounded text-emerald-600"><IndianRupee className="h-3.5 w-3.5" /></div>
-                      <div className="flex flex-col">
-                        <span className="text-[10px] leading-none text-slate-400 font-bold uppercase tracking-tight">Budget</span>
-                        <span className="text-xs font-semibold text-slate-700">₹{currentProjectValue.toLocaleString()}</span>
-                      </div>
-                    </div>
-
-                    <div className="ml-auto flex items-center gap-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-blue-600 gap-2 font-semibold"
-                        title="Add Overall Comment"
-                        onClick={() => {
-                          if (!selectedVersionId) return;
-                          setCommentTarget({
-                            type: 'product', // Reusing product type for modal title context
-                            id: selectedVersionId,
-                            name: `Version V${versions.find(v => v.id === selectedVersionId)?.version_number || ''} (Overall)`
-                          });
-                          setShowCommentDialog(true);
-                        }}
-                        disabled={!selectedVersionId}
-                      >
-                        <MessageSquare className="h-3.5 w-3.5" />
-                        <span className="text-xs">Comment</span>
-                      </Button>
-
-                      {selectedVersion.status === "approved" ? (
-                        <Badge variant="outline" className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[10px] font-bold px-2 py-0 h-6">
-                          <CheckCircle2 className="h-2.5 w-2.5 mr-1" /> APPROVED
-                        </Badge>
-                      ) : selectedVersion.status === "edit_requested" ? (
-                        <Badge variant="outline" className="bg-indigo-100 text-indigo-700 border-indigo-200 text-[10px] font-bold px-2 py-0 h-6">
-                          <Clock className="h-2.5 w-2.5 mr-1" /> EDIT REQUESTED
-                        </Badge>
-                      ) : isVersionSubmitted ? (
-                        <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200 text-[10px] font-bold px-2 py-0 h-6">
-                          <Lock className="h-2.5 w-2.5 mr-1" /> SUBMITTED
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-200 text-[10px] font-bold px-2 py-0 h-6">
-                          <Clock className="h-2.5 w-2.5 mr-1" /> DRAFT
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-
-            {/* History Modal */}
-            <Dialog open={showHistoryModal} onOpenChange={setShowHistoryModal}>
-              <DialogContent className="sm:max-w-[500px]">
-                <DialogHeader>
-                  <DialogTitle className="text-lg font-bold flex items-center gap-2">
-                    <History className="h-5 w-5 text-blue-600" />
-                    Approval & Activity History
-                  </DialogTitle>
-                  <DialogDescription>
-                    Tracking all major actions and approval status changes.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="py-4 max-h-[60vh] overflow-y-auto px-1">
-                  <HistorySection history={history} />
-                </div>
-                <DialogFooter>
-                  <Button onClick={() => setShowHistoryModal(false)}>Close</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-
-            <Dialog open={showProposalImportDialog} onOpenChange={setShowProposalImportDialog}>
-              <DialogContent className="sm:max-w-[700px]">
-                <DialogHeader>
-                  <DialogTitle className="text-lg font-bold flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                    Finalized Vendor Proposals
-                  </DialogTitle>
-                  <DialogDescription>
-                    Select one or more approved proposals to import their items into your current BOM draft.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="py-4">
-                  <div className="border rounded-md overflow-hidden bg-white">
-                    <table className="w-full text-sm">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                          <th className="w-10 px-4 py-3 text-center">
-                            <input
-                              type="checkbox"
-                              className="rounded border-slate-300"
-                              checked={selectedProposalImportIds.length === approvedProposals.length && approvedProposals.length > 0}
-                              onChange={(e) => {
-                                if (e.target.checked) setSelectedProposalImportIds(approvedProposals.map(p => p.id));
-                                else setSelectedProposalImportIds([]);
-                              }}
-                            />
-                          </th>
-                          <th className="px-4 py-3 text-left font-bold text-slate-700">Proposal Details</th>
-                          <th className="px-4 py-3 text-right font-bold text-slate-700">Final Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {approvedProposals.map((prop) => (
-                          <React.Fragment key={prop.id}>
-                            <tr
-                              className={`hover:bg-slate-50 transition-colors cursor-pointer border-t border-slate-100 ${selectedProposalImportIds.includes(prop.id) ? 'bg-emerald-50/20' : ''}`}
-                              onClick={() => {
-                                setSelectedProposalImportIds(prev =>
-                                  prev.includes(prop.id) ? prev.filter(id => id !== prop.id) : [...prev, prop.id]
-                                );
-                              }}
-                            >
-                              <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                                <input
-                                  type="checkbox"
-                                  className="rounded border-slate-300 h-4 w-4 accent-emerald-600"
-                                  checked={selectedProposalImportIds.includes(prop.id)}
-                                  onChange={(e) => {
-                                    setSelectedProposalImportIds(prev =>
-                                      e.target.checked ? [...prev, prop.id] : prev.filter(id => id !== prop.id)
-                                    );
-                                  }}
-                                />
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-start gap-3">
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); toggleProposalPreview(prop.id); }}
-                                    className="mt-1 p-1 hover:bg-slate-200 rounded transition-colors text-slate-400 hover:text-slate-600"
-                                  >
-                                    {expandedProposalId === prop.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                  </button>
-                                  <div className="flex flex-col">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-bold text-slate-900 text-sm">{prop.vendor_name}</span>
-                                      <Badge className="text-[10px] h-4 bg-emerald-100 text-emerald-700 border-emerald-200 font-bold">V{prop.version_number}</Badge>
-                                    </div>
-                                    <span className="text-[11px] text-slate-500 font-bold mt-0.5">Project: {prop.project_name || selectedProject?.name || "Target Project"}</span>
-                                    <div className="flex items-center gap-3 text-[10px] text-slate-400 mt-1 font-medium">
-                                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> Approved: {new Date(prop.updated_at || prop.created_at).toLocaleDateString()}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 text-right">
-                                <span className="font-extrabold text-slate-950 text-sm">
-                                  ₹{getProposalTotal(prop).toLocaleString()}
-                                </span>
-                              </td>
-                            </tr>
-
-                            {/* Expandable Material List Preview */}
-                            {expandedProposalId === prop.id && (
-                              <tr className="bg-slate-50/50">
-                                <td colSpan={3} className="px-4 py-0">
-                                  <div className="p-4 border-l-2 border-emerald-500 my-2 ml-10">
-                                    <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
-                                      <table className="w-full text-[11px]">
-                                        <thead className="bg-slate-100/80 text-slate-600 font-bold uppercase tracking-wider border-b">
-                                          <tr>
-                                            <th className="px-3 py-2 text-left">Item Name</th>
-                                            <th className="px-3 py-2 text-center">Qty</th>
-                                            <th className="px-3 py-2 text-center">Unit</th>
-                                            <th className="px-3 py-2 text-right">Rate</th>
-                                            <th className="px-3 py-2 text-right w-24">Total</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                          {loadingPreviewId === prop.id ? (
-                                            <tr>
-                                              <td colSpan={5} className="px-3 py-4 text-center">
-                                                <div className="flex items-center justify-center gap-2 text-slate-500">
-                                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                                  <span>Loading materials list...</span>
-                                                </div>
-                                              </td>
-                                            </tr>
-                                          ) : (proposalItemsPreview[prop.id]?.length || 0) > 0 ? (
-                                            proposalItemsPreview[prop.id]?.map((item, idx) => (
-                                              <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
-                                                <td className="px-3 py-2 font-medium text-slate-800">{item.item_name}</td>
-                                                <td className="px-3 py-2 text-center font-bold text-slate-700">{item.qty}</td>
-                                                <td className="px-3 py-2 text-center text-slate-500">{item.unit || "nos"}</td>
-                                                <td className="px-3 py-2 text-right font-medium text-slate-600">₹{Number(item.rate).toLocaleString()}</td>
-                                                <td className="px-3 py-2 text-right font-bold text-slate-900 bg-slate-100/30">₹{(Number(item.rate) * Number(item.qty)).toLocaleString()}</td>
-                                              </tr>
-                                            ))
-                                          ) : (
-                                            <tr>
-                                              <td colSpan={5} className="px-3 py-8 text-center text-slate-400 italic">No materials found in this proposal.</td>
-                                            </tr>
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </React.Fragment>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-                <DialogFooter className="bg-slate-50 p-4 rounded-b-lg border-t border-slate-200">
-                  <div className="flex items-center justify-between w-full">
-                    <span className="text-xs font-bold text-slate-500">{selectedProposalImportIds.length} proposals selected</span>
-                    <div className="flex gap-2">
-                      <Button variant="outline" onClick={() => setShowProposalImportDialog(false)}>Cancel</Button>
-                      <Button
-                        disabled={selectedProposalImportIds.length === 0 || isSaving}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-                        onClick={handleImportApprovedProposals}
-                      >
-                        {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
-                        Import Selected Items
-                      </Button>
-                    </div>
-                  </div>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-
-            <ProductPicker open={showProductPicker} onOpenChange={setShowProductPicker} onSelectProduct={handleSelectProduct} selectedProjectId={selectedProjectId!} />
-            <MaterialPicker open={showMaterialPicker} onOpenChange={setShowMaterialPicker} onSelectTemplate={handleSelectMaterialTemplate} />
-
-            {selectedProduct && (
-              <Step11Preview product={selectedProduct} open={showStep11Preview} onClose={() => { setShowStep11Preview(false); setTimeout(() => setSelectedProduct(null), 300); }} onAddToBoq={handleAddToBom} />
-            )}
-          </Card>
-
-          {/* BOQ Items */}
-          {selectedProjectId && (
-            <Card>
-              <CardContent className="space-y-4 pt-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-bold text-gray-800">BOQ Items</h2>
-                  <div className="flex items-center gap-4">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsCompactView(!isCompactView)}
-                      className={`h-9 px-3 font-semibold ${isCompactView ? 'bg-blue-50 text-blue-600 border-blue-300' : 'text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-                    >
-                      Compact View
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleRefreshRates}
-                      disabled={isUpdatingRates || isVersionSubmitted}
-                      className="h-9 px-3 font-semibold text-emerald-600 border-emerald-200 hover:bg-emerald-50 gap-2"
-                      title="Sync all items with latest market rates"
-                    >
-                      <RefreshCw className={`h-4 w-4 ${isUpdatingRates ? 'animate-spin' : ''}`} />
-                      <span>Refresh Rates</span>
-                    </Button>
-                    <div className="relative w-72">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                      <Input
-                        placeholder="Search products..."
-                        value={productSearch}
-                        onChange={(e) => setProductSearch(e.target.value)}
-                        className="pl-9 h-9 text-sm border-slate-200 focus:ring-blue-500 shadow-sm"
-                      />
-                    </div>
-                  </div>
-                </div>
-                {boqItems.length === 0
-                  ? <div className="text-gray-500 text-center py-4">No products added yet. Click Add Product +</div>
-                  : <div className="space-y-6">
-                    {boqItems
-                      .filter(item => {
-                        const td = parseTableData(item.table_data);
-                        const name = td.product_name || item.estimator || "";
-                        const desc = td.finalize_description || "";
-                        return fuzzySearch(productSearch, [name, desc]);
-                      })
-                      .map((boqItem: BOMItem, boqIdx: number) => (
-                        <div key={boqItem.id} id={`boq-item-card-${boqItem.id}`} className="transition-all duration-300">
-                          <BoqItemCard boqItem={boqItem} boqIdx={boqIdx} isVersionSubmitted={isVersionSubmitted}
-                            expandedProductIds={expandedProductIds} setExpandedProductIds={setExpandedProductIds}
-                            getEditedValue={getEditedValue} updateEditedField={updateEditedField}
-                            handleDeleteRow={handleDeleteRow} handleFinalizeProduct={handleFinalizeProduct}
-                            handleAddItem={handleAddItem} loadBoqItemsAndEdits={loadBoqItemsAndEdits} setBoqItems={setBoqItems}
-                            checkBudgetEarly={checkBudgetEarly} handleSaveProject={handleSaveProject}
-                            isCardDragOver={cardDragOverIdx === boqIdx}
-                            onCardDragStart={(e) => { cardDragIdxRef.current = boqIdx; e.dataTransfer.effectAllowed = 'move'; }}
-                            onCardDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setCardDragOverIdx(boqIdx); }}
-                            onCardDrop={(e) => {
-                              e.preventDefault();
-                              setCardDragOverIdx(null);
-                              const fromIdx = cardDragIdxRef.current;
-                              if (fromIdx === null || fromIdx === boqIdx) return;
-                              const reordered = [...boqItems];
-                              const [moved] = reordered.splice(fromIdx, 1);
-                              reordered.splice(boqIdx, 0, moved);
-                              setBoqItems(reordered);
-                              // Persist the new order
-                              apiFetch('/api/boq-items/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemIds: reordered.map(i => i.id) }) }).catch(console.error);
-                              cardDragIdxRef.current = null;
-                            }}
-                            mismatches={activeMismatches.filter(m => m.boqItemId === boqItem.id)}
-                            isCompactView={isCompactView}
-                            onSaveAsTemplate={(item) => {
-                              setTemplateToSave(item);
-                              setNewTemplateName(parseTableData(item.table_data).product_name || item.estimator);
-                              setShowSaveTemplateDialog(true);
-                            }}
-                            editedFields={editedFields}
-                            comments={comments}
-                            users={users}
-                            onAddComment={(versionId: string, itemId?: string) => {
-                              const productName = parseTableData(boqItem.table_data).product_name || boqItem.estimator;
-                              setCommentTarget({ type: itemId ? 'item' : 'product', id: itemId || boqItem.id, name: itemId ? `${productName} - Item ${itemId}` : productName });
-                              setShowCommentDialog(true);
-                            }}
-                            selectedVersionId={selectedVersionId}
-                          />
-                        </div>
-                      ))}
-                  </div>
-                }
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Action Buttons */}
-          {selectedProjectId && selectedVersionId && (
-            <Card>
-              <CardContent className="space-y-3 pt-6">
-                {selectedVersion && <VersionStatusBanner version={selectedVersion} />}
-                <PriceUpdateBanner
-                  mismatches={activeMismatches}
-                  onApplyAll={handleUpdateAllRates}
-                  onApplySingle={handleUpdateSingleMismatch}
-                  onIgnoreSingle={handleIgnoreMismatch}
-                  onViewSingle={handleViewMismatch}
-                  isUpdating={isUpdatingRates}
-                />
-
-                {/* Version History Modal */}
-                <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-                  <Button onClick={withBudgetCheck(() => currentProjectValue, handleSaveProject)} variant="outline" disabled={isVersionSubmitted || Object.keys(editedFields).length === 0}>Save Draft</Button>
-                  <Button onClick={() => handleSubmitVersion("submitted")} variant="outline" className="border-primary text-primary hover:bg-primary/5 font-bold" disabled={isVersionSubmitted || boqItems.length === 0}>Lock Version</Button>
-                  <Button onClick={() => handleSubmitVersion("pending_approval")} variant="default" className="bg-primary hover:bg-primary/90 font-bold" disabled={isVersionSubmitted || boqItems.length === 0}>Submit for Approval</Button>
-                  <Button onClick={handleDownloadExcel} variant="outline" disabled={boqItems.length === 0}>Download Excel</Button>
-                  <Button onClick={handleDownloadPdf} variant="outline" disabled={boqItems.length === 0}>Download PDF</Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+            <TabsContent value="approvals" className="mt-0">
+              <ApprovalsList
+                approvals={approvals}
+                onPreview={handlePreviewApproval}
+                onAction={handleApprovalAction}
+                actionLoading={approvalActionLoading}
+              />
+            </TabsContent>
+          </Tabs>
         </div>
       </Layout>
 
@@ -3385,6 +4388,14 @@ export default function CreateBom() {
       <div className="fixed right-6 bottom-24 z-50 flex flex-col items-end gap-2 md:gap-3">
         <Button onClick={handleAddProduct} className="bg-primary text-white h-8 px-3 text-xs font-semibold shadow-sm" disabled={isVersionSubmitted || !selectedVersionId} title="Add Product">+ Add Product</Button>
         <Button onClick={handleAddProductManual} variant="outline" className="border-slate-200 h-8 px-3 text-xs font-semibold shadow-sm bg-white" disabled={isVersionSubmitted || !selectedVersionId} title="Add Item">+ Add Item</Button>
+        <Button
+          onClick={() => setIsCompactView(!isCompactView)}
+          variant="outline"
+          className={`h-8 px-3 text-xs font-semibold shadow-sm ${isCompactView ? 'bg-blue-50 text-blue-600 border-blue-300' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+          title="Toggle Compact View"
+        >
+          Compact View
+        </Button>
       </div>
 
       {/* Target Qty Modal */}
@@ -3550,6 +4561,12 @@ export default function CreateBom() {
               />
             </div>
           </div>
+          {!selectedVersionId && (
+            <div className="mx-0 mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="text-xs font-bold text-red-800">⚠️ No Version Selected</div>
+              <div className="text-xs text-red-700">Please select or create a BOQ version first to apply templates.</div>
+            </div>
+          )}
           <div className="py-2">
             <Tabs defaultValue="bom" className="w-full">
               <TabsList className="grid w-full grid-cols-2 mb-4">
@@ -3698,143 +4715,400 @@ export default function CreateBom() {
         />
       )}
 
-      {/* Comment Dialog */}
-      <Dialog open={showCommentDialog} onOpenChange={setShowCommentDialog}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <MessageSquare className="h-5 w-5 text-blue-600" />
-              Add Comment
-            </DialogTitle>
-            <DialogDescription>
-              Add a comment for {commentTarget?.name}. Select members who should see this comment.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="comment" className="text-sm font-medium">Comment</Label>
-              <Textarea
-                id="comment"
-                placeholder="Enter your comment..."
-                value={newComment}
-                onChange={(e) => setNewComment(e.target.value)}
-                className="mt-1"
-                rows={3}
-              />
-            </div>
-            <div>
-              <Label className="text-sm font-medium">Visible to Members</Label>
-              <Popover>
-                <PopoverTrigger asChild>
+      {/* Chat Comment Dialog */}
+      <Dialog open={showCommentDialog} onOpenChange={(open) => {
+        if (!open) {
+          setShowCommentDialog(false);
+          setCommentTarget(null);
+          setReplyingTo(null);
+          setCommentInboxView(false);
+          setIsSelectingThread(false);
+        }
+        setShowCommentDialog(open);
+      }}>
+        <DialogContent className="sm:max-w-[420px] md:max-w-[480px] max-h-[520px] h-[520px] flex flex-col p-0 overflow-hidden bg-[#f0f2f5] gap-0">
+          {(commentInboxView && !commentTarget) ? (
+            <>
+              <DialogHeader className="p-4 border-b bg-white shrink-0 flex flex-row items-center gap-3">
+                <div className="bg-blue-600 p-2 rounded-full">
+                  <MessageSquare className="h-5 w-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <DialogTitle className="text-lg font-bold text-gray-900 leading-tight">
+                    {isSelectingThread ? "New Chat" : "Discussions"}
+                  </DialogTitle>
+                  <div className="text-xs text-gray-500">
+                    {isSelectingThread ? "Choose a product to start a discussion" : "Stay updated on all BOQ threads"}
+                  </div>
+                </div>
+                {!isSelectingThread ? (
                   <Button
-                    variant="outline"
-                    role="combobox"
-                    className="w-full justify-between mt-1"
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-full h-8 w-8 text-blue-600 hover:bg-blue-50"
+                    onClick={() => {
+                      setIsSelectingThread(true);
+                      setThreadSearchQuery("");
+                    }}
+                    title="Start New Discussion"
                   >
-                    {selectedMembers.length === 0
-                      ? "Select members..."
-                      : `${selectedMembers.length} member${selectedMembers.length === 1 ? '' : 's'} selected`
-                    }
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    <Plus className="h-5 w-5" />
                   </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-full p-0">
-                  <Command>
-                    <CommandInput placeholder="Search members..." />
-                    <CommandList>
-                      <CommandEmpty>No members found.</CommandEmpty>
-                      <CommandGroup>
-                        {users.map((user) => (
-                          <CommandItem
-                            key={user.id}
-                            onSelect={() => {
-                              setSelectedMembers(prev =>
-                                prev.includes(user.username)
-                                  ? prev.filter(m => m !== user.username)
-                                  : [...prev, user.username]
-                              );
-                            }}
-                          >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                selectedMembers.includes(user.username) ? "opacity-100" : "opacity-0"
-                              )}
-                            />
-                            {user.displayName} ({user.role})
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-              {selectedMembers.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedMembers.map((member) => {
-                    const user = users.find(u => u.username === member);
-                    return (
-                      <Badge key={member} variant="secondary" className="text-xs">
-                        {user?.displayName || member}
-                        <X
-                          className="ml-1 h-3 w-3 cursor-pointer"
-                          onClick={() => setSelectedMembers(prev => prev.filter(m => m !== member))}
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-gray-500 text-xs font-semibold"
+                    onClick={() => setIsSelectingThread(false)}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </DialogHeader>
+              <div className="flex-1 overflow-y-auto bg-white flex flex-col">
+                {isSelectingThread ? (
+                  <div className="flex flex-col">
+                    {/* Search Bar */}
+                    <div className="p-3 bg-gray-50 border-b sticky top-0 z-10">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                        <Input
+                          placeholder="Search products or topics..."
+                          className="pl-9 h-9 bg-white border-gray-200 text-xs rounded-lg"
+                          value={threadSearchQuery}
+                          onChange={e => setThreadSearchQuery(e.target.value)}
+                          autoFocus
                         />
-                      </Badge>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto">
+                      {/* Overall Version Option - only show if matches search or search is empty */}
+                      {("Overall Version Discussion".toLowerCase().includes(threadSearchQuery.toLowerCase())) && (
+                        <div
+                          className="flex items-center gap-4 p-4 hover:bg-gray-50 cursor-pointer border-b"
+                          onClick={() => {
+                            setCommentTarget({ type: 'overall', id: selectedVersionId!, name: 'Overall Version Discussion' });
+                            setCommentInboxView(false);
+                            setIsSelectingThread(false);
+                            setThreadSearchQuery("");
+                          }}
+                        >
+                          <div className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600">
+                            <Users className="h-5 w-5" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-bold text-sm text-gray-900">Overall Version</div>
+                            <div className="text-[10px] text-gray-500 uppercase tracking-tighter">Budget • Timeline • General Info</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Filtered Products */}
+                      {Array.isArray(boqItems) && boqItems
+                        .filter(bi => {
+                          const td = parseTableData(bi.table_data);
+                          const name = td.product_name || bi.estimator;
+                          return name.toLowerCase().includes(threadSearchQuery.toLowerCase());
+                        })
+                        .map(bi => {
+                          const td = parseTableData(bi.table_data);
+                          const pName = td.product_name || bi.estimator;
+                          return (
+                            <div
+                              key={bi.id}
+                              className="flex items-center gap-4 p-4 hover:bg-gray-50 cursor-pointer border-b"
+                              onClick={() => {
+                                setCommentTarget({ type: 'product', id: bi.id, name: pName });
+                                setCommentInboxView(false);
+                                setIsSelectingThread(false);
+                                setThreadSearchQuery("");
+                              }}
+                            >
+                              <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                                <Briefcase className="h-5 w-5" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="font-bold text-sm text-gray-900 truncate">{pName}</div>
+                                <div className="text-[10px] text-gray-500 uppercase tracking-tighter truncate">Product ID: {bi.id.slice(0, 8)}...</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                      {boqItems.length > 0 && boqItems.filter(bi => (parseTableData(bi.table_data).product_name || bi.estimator).toLowerCase().includes(threadSearchQuery.toLowerCase())).length === 0 && (
+                        <div className="p-10 text-center text-gray-400 text-xs">
+                          No products match your search.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (() => {
+                  const threads: Record<string, { lastComment: BOMComment, count: number, name: string, type: 'product' | 'item' | 'overall', id: string }> = {};
+
+                  comments
+                    .filter(c => !c.visible_to || c.visible_to.length === 0 || c.visible_to.includes(user?.username || "") || c.user_id === user?.id)
+                    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                    .forEach(c => {
+                      const id = c.item_id || c.product_id || 'overall';
+                      const type = c.item_id ? 'item' : (c.product_id ? 'product' : 'overall');
+
+                      let name = "Overall Version";
+                      if (type === 'product') {
+                        const boqItem = (boqItems as BOMItem[]).find(bi => bi.id === c.product_id);
+                        name = boqItem ? (parseTableData(boqItem.table_data).product_name || boqItem.estimator) : "Product Discussion";
+                      } else if (type === 'item') {
+                        const productId = c.item_id!.split('_')[0];
+                        const boqItem = (boqItems as BOMItem[]).find(bi => bi.id === productId);
+                        const productName = boqItem ? (parseTableData(boqItem.table_data).product_name || boqItem.estimator) : "BOM Item";
+                        name = `${productName} (Material)`;
+                      }
+
+                      threads[id] = {
+                        lastComment: c,
+                        count: (threads[id]?.count || 0) + 1,
+                        name,
+                        type,
+                        id: c.item_id || c.product_id || 'overall'
+                      };
+                    });
+
+                  const sortedThreads = Object.values(threads).sort((a, b) =>
+                    new Date(b.lastComment.created_at).getTime() - new Date(a.lastComment.created_at).getTime()
+                  );
+
+                  if (sortedThreads.length === 0) return (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-400 p-10 text-center">
+                      <MessageSquare className="h-12 w-12 mb-4 opacity-20" />
+                      <div className="font-semibold">No discussions yet</div>
+                      <div className="text-xs">Individual item chats will appear here.</div>
+                    </div>
+                  );
+
+                  return sortedThreads.map(thread => {
+                    const unread = comments.filter(c => {
+                      const contextId = c.item_id || c.product_id || 'overall';
+                      if (contextId !== thread.id) return false;
+                      if (c.user_id === user?.id) return false; // my own sent messages aren't unread
+                      const isVisible = (!c.visible_to || c.visible_to.length === 0 || c.visible_to.includes(user?.username || ""));
+                      return isVisible && (!c.read_by || !c.read_by.includes(user?.id || ""));
+                    }).length;
+
+                    return (
+                      <div
+                        key={thread.id}
+                        className="flex items-center gap-3 p-3 border-b hover:bg-gray-50 cursor-pointer transition-colors"
+                        onClick={() => {
+                          if (thread.type === 'overall' && !selectedVersionId) return;
+                          setCommentTarget({ type: thread.type, id: thread.id === 'overall' ? (selectedVersionId || "") : thread.id, name: thread.name });
+                        }}
+                      >
+                        <div className={`h-12 w-12 rounded-full flex items-center justify-center shrink-0 ${thread.type === 'overall' ? 'bg-indigo-100 text-indigo-600' : thread.type === 'product' ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'}`}>
+                          {thread.type === 'overall' ? <Users className="h-6 w-6" /> : thread.type === 'product' ? <Briefcase className="h-6 w-6" /> : <MessageSquare className="h-6 w-6" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between items-start mb-0.5">
+                            <h4 className="font-bold text-gray-900 truncate text-sm">{thread.name}</h4>
+                            <span className="text-[10px] text-gray-400 whitespace-nowrap ml-2">
+                              {new Date(thread.lastComment.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <p className="text-xs text-gray-500 truncate italic pr-4">
+                              {thread.lastComment.user_full_name}: {thread.lastComment.comment_text}
+                            </p>
+                            {unread > 0 && (
+                              <Badge className="bg-[#25D366] text-white text-[10px] rounded-full h-5 min-w-5 flex items-center justify-center px-1 font-bold shadow-sm border-0">
+                                {unread}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </>
+          ) : (
+            <>
+              <DialogHeader className="p-3 border-b bg-gray-50 shrink-0 flex flex-row items-center gap-3">
+                {commentInboxView && (
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-gray-500 hover:bg-gray-200" onClick={() => setCommentTarget(null)}>
+                    <ArrowLeft className="h-5 w-5" />
+                  </Button>
+                )}
+                <div className={`${commentTarget?.type === 'overall' ? 'bg-indigo-100 text-indigo-600' : commentTarget?.type === 'product' ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'} p-2 rounded-full`}>
+                  {commentTarget?.type === 'overall' ? <Users className="h-5 w-5" /> : commentTarget?.type === 'product' ? <Briefcase className="h-5 w-5" /> : <MessageSquare className="h-5 w-5" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <DialogTitle className="text-base font-bold text-gray-900 leading-tight truncate">
+                    {commentTarget?.name}
+                  </DialogTitle>
+                  <div className="text-xs text-gray-500">Chat Discussion</div>
+                </div>
+              </DialogHeader>
+              <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")' }}>
+                {comments
+                  .filter(c => commentTarget && (
+                    commentTarget.type === 'product' ? c.product_id === commentTarget.id : (commentTarget.type === 'overall' ? (!c.product_id && !c.item_id) : c.item_id === commentTarget.id)
+                  ))
+                  .filter(c => {
+                    if (!c.visible_to || c.visible_to.length === 0) return true;
+                    return c.visible_to.includes(user?.username || "") || c.user_id === user?.id;
+                  })
+                  .map(c => {
+                    const isMine = c.user_id === user?.id;
+                    return (
+                      <div key={c.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'} group`}>
+                        <div className={`max-w-[85%] rounded-lg px-3 py-1.5 shadow-sm relative ${isMine ? 'bg-[#dcf8c6] text-gray-900 rounded-tr-none' : 'bg-white text-gray-900 rounded-tl-none'}`}>
+                          <div className="flex justify-between items-start gap-4">
+                            {!isMine && <div className="text-[11px] font-bold text-blue-600 mb-0.5">{c.user_full_name}</div>}
+                            <button
+                              onClick={() => {
+                                setReplyingTo(c);
+                                const ta = document.querySelector('textarea');
+                                if (ta) ta.focus();
+                              }}
+                              className={`${isMine ? 'opacity-0 group-hover:opacity-100' : 'opacity-70 hover:opacity-100'} transition-opacity text-gray-400 hover:text-blue-500 p-0`}
+                              title="Reply"
+                            >
+                              <Reply className="h-4 w-4" />
+                            </button>
+                          </div>
+
+                          {c.parent_id && (
+                            <div className="bg-black/5 border-l-4 border-blue-500 rounded p-1.5 mb-1 text-[11px] flex flex-col">
+                              <span className="font-bold text-blue-600">{c.reply_to_user}</span>
+                              <span className="text-gray-600 truncate">{c.reply_to_text}</span>
+                            </div>
+                          )}
+
+                          {c.visible_to && c.visible_to.length > 0 && (
+                            <div className="text-[9px] font-semibold text-blue-500/80 mb-0.5 uppercase tracking-tighter">
+                              <span className="text-gray-400 mr-1">@</span>{c.visible_to.join(', ')}
+                            </div>
+                          )}
+                          <div className="text-[13px] leading-snug break-words pr-10">{c.comment_text}</div>
+                          <div className="text-[9px] text-gray-500 text-right mt-1 absolute bottom-1 right-2 flex items-center justify-end">
+                            {new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {isMine && <Check className="h-3 w-3 ml-1 text-blue-500" />}
+                          </div>
+                        </div>
+                      </div>
                     );
                   })}
+              </div>
+              {/* message input area */}
+              <div className="p-3 bg-gray-50 border-t shrink-0 flex flex-col gap-2 bottom-0">
+                {selectedMembers.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-1 px-1">
+                    {selectedMembers.map(mUsername => {
+                      const u = users.find(user => user.username === mUsername);
+                      return (
+                        <Badge key={mUsername} variant="secondary" className="text-[10px] py-0 h-5 bg-blue-100 text-blue-700">
+                          @{u?.fullName || u?.username || mUsername}
+                          <X className="h-2.5 w-2.5 ml-1 cursor-pointer" onClick={() => setSelectedMembers(prev => prev.filter(x => x !== mUsername))} />
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                )}
+                {replyingTo && (
+                  <div className="bg-white/80 border-l-4 border-blue-500 p-2 rounded relative mb-1 mx-1 animate-in slide-in-from-bottom-2">
+                    <div className="text-[11px] font-bold text-blue-600">{replyingTo.user_full_name}</div>
+                    <div className="text-[12px] text-gray-600 truncate pr-6">{replyingTo.comment_text}</div>
+                    <button onClick={() => setReplyingTo(null)} className="absolute top-1 right-1 text-gray-400 hover:text-gray-600">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+                <div className="flex gap-2 items-center">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="ghost" size="sm" className="h-10 w-10 p-0 rounded-full text-gray-400 hover:text-blue-500 hover:bg-blue-50">
+                        <Users className="h-5 w-5" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-64 p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Tag members..." />
+                        <CommandList>
+                          <CommandEmpty>No members found.</CommandEmpty>
+                          <CommandGroup heading="Group Participants">
+                            {users
+                              .map((u) => (
+                                <CommandItem
+                                  key={u.id}
+                                  onSelect={() => {
+                                    setSelectedMembers(prev =>
+                                      prev.includes(u.username)
+                                        ? prev.filter(m => m !== u.username)
+                                        : [...prev, u.username]
+                                    );
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      selectedMembers.includes(u.username) ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  <div className="flex flex-col">
+                                    <span className="font-bold text-sm">{u.fullName || u.username}</span>
+                                    <span className="text-[10px] text-gray-500 uppercase font-medium">{u.role} {u.department ? `• ${u.department}` : ''}</span>
+                                  </div>
+                                </CommandItem>
+                              ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+
+                  <Textarea
+                    value={newComment}
+                    onChange={e => setNewComment(e.target.value)}
+                    placeholder="Type a message..."
+                    className="flex-1 rounded-2xl bg-white border-none py-2.5 px-4 resize-none shadow-sm h-10 min-h-[40px] max-h-32 text-sm focus-visible:ring-0"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendComment();
+                      }
+                    }}
+                  />
+                  <Button
+                    onClick={handleSendComment}
+                    disabled={!newComment.trim() || isSaving}
+                    className="rounded-full h-10 w-10 p-0 bg-[#00a884] hover:bg-[#008f6f] text-white flex shrink-0 items-center justify-center shadow-sm"
+                  >
+                    <ArrowUp className="h-5 w-5 ml-0.5" />
+                  </Button>
                 </div>
-              )}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setShowCommentDialog(false);
-              setNewComment("");
-              setSelectedMembers([]);
-              setCommentTarget(null);
-            }}>
-              Cancel
-            </Button>
-            <Button
-              onClick={async () => {
-                if (!newComment.trim() || !commentTarget || !selectedVersionId) return;
-
-                try {
-                  const res = await apiFetch("/api/boq-comments", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      version_id: selectedVersionId,
-                      product_id: commentTarget.name.includes('(Overall)') ? null : (commentTarget.type === 'product' ? commentTarget.id : null),
-                      item_id: commentTarget.type === 'item' ? commentTarget.id : null,
-                      comment_text: newComment.trim(),
-                      visible_to: selectedMembers
-                    })
-                  });
-
-                  if (res.ok) {
-                    await loadComments();
-                    toast({ title: "Comment Added", description: "Your comment has been added successfully." });
-                    setShowCommentDialog(false);
-                    setNewComment("");
-                    setSelectedMembers([]);
-                    setCommentTarget(null);
-                  } else {
-                    toast({ title: "Error", description: "Failed to add comment", variant: "destructive" });
-                  }
-                } catch (err) {
-                  console.error("Failed to add comment", err);
-                  toast({ title: "Error", description: "Failed to add comment", variant: "destructive" });
-                }
-              }}
-              disabled={!newComment.trim()}
-            >
-              Add Comment
-            </Button>
-          </DialogFooter>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
+      <BomSketchCompareDialog
+        isOpen={showCompareDialog}
+        onClose={() => setShowCompareDialog(false)}
+        projectId={selectedProjectId}
+        currentBomVersionId={selectedVersionId}
+        onItemAdded={() => {
+          loadBoqItemsAndEdits();
+        }}
+      />
+      <ApprovalPreviewDialog
+        approval={approvals.find(a => a.id === previewApprovalId)}
+        items={previewApprovalItems}
+        loading={loadingPreviewItems}
+        open={!!previewApprovalId}
+        onClose={() => setPreviewApprovalId(null)}
+        onAction={handleApprovalAction}
+        actionLoading={approvalActionLoading}
+      />
     </>
   );
 }
