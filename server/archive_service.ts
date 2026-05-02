@@ -137,6 +137,19 @@ export class ArchiveService {
   }
 
   /**
+   * Restores an item by its original database ID and module name
+   */
+  public restoreByOriginId(module: string, originId: string): boolean {
+    const initialLength = this.items.length;
+    this.items = this.items.filter((i) => !(i.module === module && i.originId === originId));
+    if (this.items.length !== initialLength) {
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Removes from the local dictionary so it can be truly deleted from Postgres,
    * returning true so the caller actually performs the DB query.
    */
@@ -181,7 +194,7 @@ export class ArchiveService {
           // Since we can't do async DB drops easily inside this sync cleanup without cross-dependencies,
           // we will just assume keeping it 'trashed' OR giving it an "expired" status is better.
           // Let's actually delete it from Postgres! To do this cleanly, the caller should handle it.
-          
+
           modified = true;
           return false; // remove from archive Items forever
         }

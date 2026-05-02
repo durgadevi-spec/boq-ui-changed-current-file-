@@ -6732,12 +6732,18 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Name and config are required" });
       }
 
-      await query(
+      const upsertResult = await query(
         `INSERT INTO boq_templates (name, config, updated_at) 
          VALUES ($1, $2, NOW()) 
-         ON CONFLICT (name) DO UPDATE SET config = $2, updated_at = NOW()`,
+         ON CONFLICT (name) DO UPDATE SET config = $2, updated_at = NOW()
+         RETURNING id`,
         [name, JSON.stringify(config)]
       );
+
+      // Ensure it's not hidden if it was previously deleted/archived
+      if (upsertResult.rows[0]) {
+        archiveService.restoreByOriginId('boq_templates', upsertResult.rows[0].id);
+      }
 
       res.json({ message: "Template saved successfully" });
     } catch (err) {
@@ -6790,12 +6796,18 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Name and config are required" });
       }
 
-      await query(
+      const upsertResult = await query(
         `INSERT INTO bom_templates (name, config, updated_at) 
          VALUES ($1, $2, NOW()) 
-         ON CONFLICT (name) DO UPDATE SET config = $2, updated_at = NOW()`,
+         ON CONFLICT (name) DO UPDATE SET config = $2, updated_at = NOW()
+         RETURNING id`,
         [name, JSON.stringify(config)]
       );
+
+      // Ensure it's not hidden if it was previously deleted/archived
+      if (upsertResult.rows[0]) {
+        archiveService.restoreByOriginId('bom_templates', upsertResult.rows[0].id);
+      }
 
       res.json({ message: "BOM Template saved successfully" });
     } catch (err) {
