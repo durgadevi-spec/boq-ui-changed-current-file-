@@ -5,24 +5,52 @@ import { authMiddleware, requireRole } from "./middleware";
 import { sendSketchPlanEmail } from "./email";
 
 /**
- * Helper to parse numeric values safely from strings (e.g. "₹ 1,500.00")
- * Copied from main routes.ts to maintain independence
+ * Optimized image serving to allow browser caching and reduce JSON payload size
  */
-const parseSafeNumeric = (val: any): number | null => {
-  if (val === undefined || val === null || val === "") return null;
-  if (typeof val === "number") return isNaN(val) ? null : val;
-
+const serveBase64Resource = async (res: Response, table: string, id: string, column: string) => {
   try {
-    const cleaned = String(val).replace(/[^0-9.-]/g, "");
-    const parsed = parseFloat(cleaned);
-    return isNaN(parsed) ? null : parsed;
-  } catch {
-    return null;
+    const result = await query(`SELECT ${column} FROM ${table} WHERE id = $1`, [id]);
+    if (result.rows.length === 0) return res.status(404).send("Not found");
+    
+    const dataUrl = result.rows[0][column];
+    if (!dataUrl || !dataUrl.startsWith("data:")) {
+       return res.send(dataUrl);
+    }
+
+    const matches = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    if (!matches) return res.send(dataUrl);
+
+    const contentType = matches[1];
+    const base64Data = matches[2];
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(buffer);
+  } catch (err) {
+    console.error(`Error serving ${table}.${column}:`, err);
+    res.status(500).send("Internal Server Error");
   }
+};
+
+// Helper to parse numeric values safely
+const parseSafeNumeric = (val: any) => {
+  if (val === null || val === undefined || val === '') return 0;
+  const parsed = parseFloat(val);
+  return isNaN(parsed) ? 0 : parsed;
 };
 
 export async function registerSketchRoutes(app: Express) {
   const { archiveService } = await import("./archive_service");
+
+  // Optimized Resource Serving Endpoints
+  app.get("/api/sketch-images/:id", authMiddleware, (req, res) => {
+    serveBase64Resource(res, 'sketch_plan_images', req.params.id, 'image_url');
+  });
+
+  app.get("/api/sketch-attachments/:id", authMiddleware, (req, res) => {
+    serveBase64Resource(res, 'sketch_plan_attachments', req.params.id, 'file_url');
+  });
 
   // Add versioning columns to sketch_plans (safe migration)
   try {
@@ -321,8 +349,14 @@ export async function registerSketchRoutes(app: Express) {
       res.json({
         plan: planRes.rows[0],
         items: itemsRes.rows || [],
-        images: imagesRes.rows || [],
-        attachments: attachmentsRes.rows || []
+        images: (imagesRes.rows || []).map(img => ({
+          ...img,
+          image_url: `/api/sketch-images/${img.id}`
+        })),
+        attachments: (attachmentsRes.rows || []).map(att => ({
+          ...att,
+          file_url: `/api/sketch-attachments/${att.id}`
+        }))
       });
     } catch (err) {
       console.error("GET /api/sketch-plans/:id error", err);
@@ -440,164 +474,206 @@ export async function registerSketchRoutes(app: Express) {
     }
   });
 
-  // PUT /api/sketch-plans/:id - Update sketch plan
+  // PUT /api/sketch-plans/:id - Update sketch plan (Optimized Delta Save)
   app.put("/api/sketch-plans/:id", authMiddleware, async (req: Request, res: Response) => {
+    let client;
     try {
       const { id } = req.params;
-      const { name, project_id, location, plan_date, items, images, attachments } = req.body;
+      const { name, project_id, location, plan_date, items, images, attachments, deletedItemIds, deletedImageIds, deletedAttachmentIds, isDelta } = req.body;
 
-      const client = await pool.connect();
-      try {
-        await client.query("BEGIN");
-        const lockRes = await client.query("SELECT id FROM sketch_plans WHERE id = $1 FOR UPDATE", [id]);
-        if (lockRes.rows.length === 0) {
-          await client.query("ROLLBACK");
-          return res.status(404).json({ message: "Plan not found" });
+      client = await pool.connect();
+      await client.query("BEGIN");
+      
+      const lockRes = await client.query("SELECT id FROM sketch_plans WHERE id = $1 FOR UPDATE", [id]);
+      if (lockRes.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "Plan not found" });
+      }
+
+      const finalPlanDate = (plan_date && plan_date.trim() !== "") ? plan_date : null;
+      await client.query(
+        `UPDATE sketch_plans SET name = $1, project_id = $2, location = $3, plan_date = $4, updated_at = NOW() WHERE id = $5`,
+        [name, project_id || null, location || null, finalPlanDate, id]
+      );
+
+      // Handle deletions
+      if (isDelta) {
+        if (deletedItemIds && Array.isArray(deletedItemIds) && deletedItemIds.length > 0) {
+          await client.query("DELETE FROM sketch_plan_items WHERE plan_id = $1 AND id IN (SELECT unnest($2::text[]))", [id, deletedItemIds]);
         }
-
-        const finalPlanDate = (plan_date && plan_date.trim() !== "") ? plan_date : null;
-        await client.query(
-          `UPDATE sketch_plans SET name = $1, project_id = $2, location = $3, plan_date = $4, updated_at = NOW() WHERE id = $5`,
-          [name, project_id || null, location || null, finalPlanDate, id]
-        );
-
-        // Intelligent update: Delete items not in the request, and upsert others
-        const incomingItemIds = (items || []).map((it: any) => it.id).filter((id: any) => id);
-
-        // 1. Handle items: Remove those not in incoming list, then upsert
+        if (deletedImageIds && Array.isArray(deletedImageIds) && deletedImageIds.length > 0) {
+          await client.query("DELETE FROM sketch_plan_images WHERE plan_id = $1 AND id IN (SELECT unnest($2::text[]))", [id, deletedImageIds]);
+        }
+        if (deletedAttachmentIds && Array.isArray(deletedAttachmentIds) && deletedAttachmentIds.length > 0) {
+          await client.query("DELETE FROM sketch_plan_attachments WHERE plan_id = $1 AND id IN (SELECT unnest($2::text[]))", [id, deletedAttachmentIds]);
+        }
+      } else {
+        const incomingItemIds = (items || []).map((it: any) => it.id).filter((iid: any) => iid && iid.startsWith('ski-'));
         if (incomingItemIds.length > 0) {
           await client.query("DELETE FROM sketch_plan_items WHERE plan_id = $1 AND id NOT IN (SELECT unnest($2::text[]))", [id, incomingItemIds]);
         } else {
           await client.query("DELETE FROM sketch_plan_items WHERE plan_id = $1", [id]);
         }
-
-        // 2. Handle images: Clear all existing images for this plan to prevent duplicates
         await client.query("DELETE FROM sketch_plan_images WHERE plan_id = $1", [id]);
-
-        if (items && Array.isArray(items)) {
-          // Batch item upserts
-          await Promise.all(items.map((item, i) => {
-            const itemId = (item.id && item.id.startsWith('ski-')) ? item.id : `ski-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-            item.id = itemId; // Sync ID for image mapping
-            return client.query(
-              `INSERT INTO sketch_plan_items (
-                id, plan_id, item_name, description, length, width, height, qty, unit, 
-                remarks, material_id, dimension_unit, assigned_vendor_id, vendor_name, 
-                dimensions, assigned_user_id, assigned_user_name, user_task_status, category
-              ) 
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-               ON CONFLICT (id) DO UPDATE SET 
-                 item_name = EXCLUDED.item_name,
-                 description = EXCLUDED.description,
-                 length = EXCLUDED.length,
-                 width = EXCLUDED.width,
-                 height = EXCLUDED.height,
-                 qty = EXCLUDED.qty,
-                 unit = EXCLUDED.unit,
-                 remarks = EXCLUDED.remarks,
-                 material_id = EXCLUDED.material_id,
-                 dimension_unit = EXCLUDED.dimension_unit,
-                 assigned_vendor_id = EXCLUDED.assigned_vendor_id,
-                 vendor_name = EXCLUDED.vendor_name,
-                 dimensions = EXCLUDED.dimensions,
-                 assigned_user_id = EXCLUDED.assigned_user_id,
-                 assigned_user_name = EXCLUDED.assigned_user_name,
-                 user_task_status = EXCLUDED.user_task_status,
-                 category = EXCLUDED.category`,
-              [
-                itemId, id, item.item_name, item.description,
-                parseSafeNumeric(item.length),
-                parseSafeNumeric(item.width),
-                parseSafeNumeric(item.height),
-                parseSafeNumeric(item.qty),
-                item.unit, item.remarks,
-                item.material_id || null,
-                item.dimension_unit || 'feet',
-                item.assigned_vendor_id || null,
-                item.vendor_name || null,
-                item.dimensions ? JSON.stringify(item.dimensions) : null,
-                item.assigned_user_id || null,
-                item.assigned_user_name || null,
-                item.user_task_status || 'unassigned',
-                item.category || null
-              ]
-            );
-          }));
-
-          // Batch all images
-          const allImages: any[] = [];
-          items.forEach(item => {
-            if (item.images && Array.isArray(item.images)) {
-              item.images.forEach(img => {
-                allImages.push({
-                  item_id: item.id,
-                  url: typeof img === "string" ? img : (img.url || img.image_url),
-                  name: typeof img === "string" ? null : (img.name || img.image_name)
-                });
-              });
-            }
-          });
-          if (images && Array.isArray(images)) {
-            images.forEach(img => {
-              if (!img.item_id) {
-                allImages.push({
-                  item_id: null,
-                  url: typeof img === "string" ? img : (img.image_url || img.url),
-                  name: typeof img === "string" ? null : (img.name || img.image_name)
-                });
-              }
-            });
-          }
-
-          if (allImages.length > 0) {
-            await Promise.all(allImages.map(img => {
-              const imgId = `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-              return client.query(
-                `INSERT INTO sketch_plan_images (id, plan_id, item_id, image_url, image_name) VALUES ($1, $2, $3, $4, $5)`,
-                [imgId, id, img.item_id, img.url, img.name]
-              );
-            }));
-          }
-        }
-
-        // 3. Handle attachments: Clear and re-insert
         await client.query("DELETE FROM sketch_plan_attachments WHERE plan_id = $1", [id]);
-        if (attachments && Array.isArray(attachments)) {
-          await Promise.all(attachments.map(att => {
-            const attId = `att-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-            return client.query(
-              `INSERT INTO sketch_plan_attachments (id, plan_id, file_url, file_name, file_type) 
-               VALUES ($1, $2, $3, $4, $5)`,
-              [attId, id, att.file_url || att.url, att.file_name || att.name, att.file_type || att.type]
-            );
-          }));
-        }
-
-        await client.query("COMMIT");
-
-        // Refetch full plan to return to client (sync IDs)
-        const itemsRes = await client.query(`
-          SELECT spi.*
-          FROM sketch_plan_items spi
-          WHERE spi.plan_id = $1 ORDER BY spi.created_at ASC, spi.id ASC`, [id]);
-        const imagesRes = await client.query("SELECT id, item_id, image_url, image_name FROM sketch_plan_images WHERE plan_id = $1", [id]);
-        const attachmentsRes = await client.query("SELECT id, file_url, file_name, file_type FROM sketch_plan_attachments WHERE plan_id = $1", [id]);
-
-        res.json({
-          message: "Sketch plan updated successfully",
-          items: itemsRes.rows || [],
-          images: imagesRes.rows || [],
-          attachments: attachmentsRes.rows || []
-        });
-      } catch (err) {
-        if (client) await client.query("ROLLBACK");
-        throw err;
-      } finally {
-        if (client) client.release();
       }
+
+      // 1. Resolve all Proxy URLs to raw data before starting the loop
+      const proxyUrlsToResolve = new Set<string>();
+      const addProxies = (obj: any) => {
+        const url = obj.url || obj.image_url || obj.file_url;
+        if (url && (url.startsWith('/api/sketch-images/') || url.startsWith('/api/sketch-attachments/'))) {
+           proxyUrlsToResolve.add(url);
+        }
+      };
+      if (items && Array.isArray(items)) {
+        items.forEach(it => {
+          if (it.images) it.images.forEach(addProxies);
+          if (it.preImages) it.preImages.forEach(addProxies);
+          if (it.postImages) it.postImages.forEach(addProxies);
+        });
+      }
+      if (images && Array.isArray(images)) images.forEach(addProxies);
+      if (attachments && Array.isArray(attachments)) attachments.forEach(addProxies);
+
+      const resolvedProxyMap = new Map<string, string>();
+      if (proxyUrlsToResolve.size > 0) {
+        const urls = Array.from(proxyUrlsToResolve);
+        const imageIds = urls.filter(u => u.startsWith('/api/sketch-images/')).map(u => u.split('?')[0].split('/').pop());
+        const attIds = urls.filter(u => u.startsWith('/api/sketch-attachments/')).map(u => u.split('?')[0].split('/').pop());
+
+        if (imageIds.length > 0) {
+          const res = await client.query("SELECT id, image_url FROM sketch_plan_images WHERE id IN (SELECT unnest($1::text[]))", [imageIds]);
+          res.rows.forEach(r => resolvedProxyMap.set(`/api/sketch-images/${r.id}`, r.image_url));
+        }
+        if (attIds.length > 0) {
+          const res = await client.query("SELECT id, file_url FROM sketch_plan_attachments WHERE id IN (SELECT unnest($1::text[]))", [attIds]);
+          res.rows.forEach(r => resolvedProxyMap.set(`/api/sketch-attachments/${r.id}`, r.file_url));
+        }
+      }
+
+      const getResolvedData = (url: string) => {
+        if (!url) return null;
+        const base = url.split('?')[0];
+        return resolvedProxyMap.get(base) || (url.startsWith('data:') ? url : null);
+      };
+
+      // 2. Upsert items and their images
+      if (items && Array.isArray(items)) {
+        for (const item of items) {
+          const itemId = (item.id && item.id.startsWith('ski-')) ? item.id : `ski-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+          await client.query(
+            `INSERT INTO sketch_plan_items (
+              id, plan_id, item_name, description, length, width, height, qty, unit, 
+              remarks, material_id, dimension_unit, assigned_vendor_id, vendor_name, 
+              dimensions, assigned_user_id, assigned_user_name, user_task_status, category
+            ) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+             ON CONFLICT (id) DO UPDATE SET 
+               item_name = EXCLUDED.item_name, description = EXCLUDED.description,
+               length = EXCLUDED.length, width = EXCLUDED.width, height = EXCLUDED.height,
+               qty = EXCLUDED.qty, unit = EXCLUDED.unit, remarks = EXCLUDED.remarks,
+               material_id = EXCLUDED.material_id, dimension_unit = EXCLUDED.dimension_unit,
+               assigned_vendor_id = EXCLUDED.assigned_vendor_id, vendor_name = EXCLUDED.vendor_name,
+               dimensions = EXCLUDED.dimensions, assigned_user_id = EXCLUDED.assigned_user_id,
+               assigned_user_name = EXCLUDED.assigned_user_name, user_task_status = EXCLUDED.user_task_status,
+               category = EXCLUDED.category`,
+            [
+              itemId, id, item.item_name, item.description,
+              parseSafeNumeric(item.length), parseSafeNumeric(item.width), parseSafeNumeric(item.height), parseSafeNumeric(item.qty),
+              item.unit, item.remarks, item.material_id || null, item.dimension_unit || 'feet',
+              item.assigned_vendor_id || null, item.vendor_name || null,
+              item.dimensions ? JSON.stringify(item.dimensions) : null,
+              item.assigned_user_id || null, item.assigned_user_name || null,
+              item.user_task_status || 'unassigned', item.category || null
+            ]
+          );
+
+          if (item.images && Array.isArray(item.images)) {
+            for (const img of item.images) {
+              const rawImgUrl = typeof img === "string" ? img : (img.image_url || img.url);
+              const imgName = typeof img === "string" ? null : (img.name || img.image_name);
+              const imgId = (img.id && img.id.startsWith('img-')) ? img.id : `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              const resolvedData = getResolvedData(rawImgUrl);
+              
+              if (resolvedData) {
+                await client.query(
+                  `INSERT INTO sketch_plan_images (id, plan_id, item_id, image_url, image_name) 
+                   VALUES ($1, $2, $3, $4, $5)
+                   ON CONFLICT (id) DO UPDATE SET item_id = $3, image_url = $4, image_name = $5`,
+                  [imgId, id, itemId, resolvedData, imgName]
+                );
+              }
+            }
+          }
+        }
+      }
+
+      // 3. Upsert standalone plan images
+      if (images && Array.isArray(images)) {
+        for (const img of images) {
+          if (img.item_id) continue;
+          const rawImgUrl = typeof img === "string" ? img : (img.image_url || img.url);
+          const imgName = typeof img === "string" ? null : (img.name || img.image_name);
+          const imgId = (img.id && img.id.startsWith('img-')) ? img.id : `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          const resolvedData = getResolvedData(rawImgUrl);
+
+          if (resolvedData) {
+            await client.query(
+              `INSERT INTO sketch_plan_images (id, plan_id, item_id, image_url, image_name) 
+               VALUES ($1, $2, NULL, $3, $4)
+               ON CONFLICT (id) DO UPDATE SET item_id = NULL, image_url = $3, image_name = $4`,
+              [imgId, id, resolvedData, imgName]
+            );
+          }
+        }
+      }
+
+      // 4. Upsert attachments
+      if (attachments && Array.isArray(attachments)) {
+        for (const att of attachments) {
+          const attId = (att.id && att.id.startsWith('att-')) ? att.id : `att-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          const rawAttUrl = att.file_url || att.url;
+          const resolvedData = resolvedProxyMap.get(rawAttUrl.split('?')[0]) || (rawAttUrl.startsWith('data:') ? rawAttUrl : null);
+
+          if (resolvedData) {
+            await client.query(
+              `INSERT INTO sketch_plan_attachments (id, plan_id, file_url, file_name, file_type) 
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (id) DO UPDATE SET file_url = $3, file_name = $4, file_type = $5`,
+              [attId, id, resolvedData, att.file_name || att.name, att.file_type || att.type]
+            );
+          }
+        }
+      }
+
+      await client.query("COMMIT");
+
+      const itemsRes = await client.query(`
+        SELECT spi.*
+        FROM sketch_plan_items spi
+        WHERE spi.plan_id = $1 ORDER BY spi.created_at ASC, spi.id ASC`, [id]);
+      const imagesRes = await client.query("SELECT id, item_id, image_name FROM sketch_plan_images WHERE plan_id = $1", [id]);
+      const attachmentsRes = await client.query("SELECT id, file_name, file_type FROM sketch_plan_attachments WHERE plan_id = $1", [id]);
+
+      res.json({
+        message: "Sketch plan updated successfully",
+        items: itemsRes.rows || [],
+        images: (imagesRes.rows || []).map(img => ({
+          ...img,
+          image_url: `/api/sketch-images/${img.id}`
+        })),
+        attachments: (attachmentsRes.rows || []).map(att => ({
+          ...att,
+          file_url: `/api/sketch-attachments/${att.id}`
+        }))
+      });
     } catch (err) {
+      if (client) await client.query("ROLLBACK");
       console.error("PUT /api/sketch-plans/:id error", err);
       res.status(500).json({ message: "Failed to update sketch plan" });
+    } finally {
+      if (client) client.release();
     }
   });
 
@@ -696,7 +772,7 @@ export async function registerSketchRoutes(app: Express) {
           id, 
           name, 
           created_at as last_updated,
-          COALESCE(jsonb_array_length(template_data::jsonb), 0) as item_count
+          COALESCE(jsonb_array_length((template_data::jsonb)->'items'), 0) as item_count
         FROM sketch_templates 
         ORDER BY created_at DESC
       `);

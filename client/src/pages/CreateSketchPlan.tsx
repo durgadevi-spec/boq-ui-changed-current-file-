@@ -88,6 +88,14 @@ const parseImages = (imageField: any): string[] => {
   }
 };
 
+// Helper to append auth token to URLs for <img> and <a> tags
+const appendAuthToken = (url: string) => {
+  if (!url || url.startsWith('data:')) return url;
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("authToken") : null;
+  if (!token) return url;
+  return url.includes('?') ? `${url}&token=${token}` : `${url}?token=${token}`;
+};
+
 // Helper Component for Image Columns (Pre/Post)
 const PhotoColumn = ({
   item, idx, category, images, isLocked, isCompact,
@@ -769,6 +777,12 @@ export default function CreateSketchPlan() {
   const [saving, setSaving] = useState(false);
   const [planImages, setPlanImages] = useState<PlanImage[]>([]);
   const [attachments, setAttachments] = useState<PlanAttachment[]>([]);
+  
+  // Delta tracking for faster saves
+  const [deletedItemIds, setDeletedItemIds] = useState<string[]>([]);
+  const [deletedImageIds, setDeletedImageIds] = useState<string[]>([]);
+  const [deletedAttachmentIds, setDeletedAttachmentIds] = useState<string[]>([]);
+  
   const [sketchTarget, setSketchTarget] = useState<string>("main"); // "main" or row id/index
   const [openPopoverIdx, setOpenPopoverIdx] = useState<number | null>(null);
 
@@ -1176,7 +1190,7 @@ export default function CreateSketchPlan() {
               const postImages: PlanImage[] = [];
               itemImages.forEach((img: any) => {
                 const cleanedName = (img.image_name || img.name || "").replace(/^(PRE_|POST_)/, "");
-                const mappedImg = { id: img.id, url: img.image_url, name: cleanedName || `Photo ${img.id.split('-').pop()}` };
+                const mappedImg = { id: img.id, url: appendAuthToken(img.image_url), name: cleanedName || `Photo ${img.id.split('-').pop()}` };
                 if ((img.image_name || img.name || "").startsWith("POST_")) postImages.push(mappedImg);
                 else preImages.push(mappedImg);
               });
@@ -1187,11 +1201,11 @@ export default function CreateSketchPlan() {
 
           const plImages = (data.images || [])
             .filter((img: any) => !img.item_id)
-            .map((img: any) => ({ id: img.id, url: img.image_url, name: img.image_name || img.name || `Site Photo ${img.id.split('-').pop()}` }));
+            .map((img: any) => ({ id: img.id, url: appendAuthToken(img.image_url), name: img.image_name || img.name || `Site Photo ${img.id.split('-').pop()}` }));
           setPlanImages(plImages);
 
           if (data.attachments && Array.isArray(data.attachments)) {
-            setAttachments(data.attachments.map((att: any) => ({ id: att.id, url: att.file_url, name: att.file_name, type: att.file_type as any })));
+            setAttachments(data.attachments.map((att: any) => ({ id: att.id, url: appendAuthToken(att.file_url), name: att.file_name, type: att.file_type as any })));
           }
 
           lastSavedRef.current = JSON.stringify({
@@ -1320,6 +1334,10 @@ export default function CreateSketchPlan() {
   const removeItem = useCallback((idx: number) => {
     setItems(prev => {
       if (prev.length === 1) return prev;
+      const itemToRemove = prev[idx];
+      if (itemToRemove && itemToRemove.id) {
+        setDeletedItemIds(d => [...d, itemToRemove.id]);
+      }
       const next = [...prev];
       next.splice(idx, 1);
       return next;
@@ -1542,10 +1560,14 @@ export default function CreateSketchPlan() {
 
   const removeRowImage = (itemIdx: number, imgIdx: number, category: "pre" | "post") => {
     const newItems = [...items];
+    let removedImg;
     if (category === "pre") {
-      newItems[itemIdx].preImages.splice(imgIdx, 1);
+      removedImg = newItems[itemIdx].preImages.splice(imgIdx, 1)[0];
     } else {
-      newItems[itemIdx].postImages.splice(imgIdx, 1);
+      removedImg = newItems[itemIdx].postImages.splice(imgIdx, 1)[0];
+    }
+    if (removedImg?.id) {
+       setDeletedImageIds(prev => [...prev, removedImg.id!]);
     }
     setItems(newItems);
   };
@@ -1695,16 +1717,43 @@ export default function CreateSketchPlan() {
     setSaving(true);
 
     try {
+      // Delta-based saving: only send what changed
+      let lastSaved: any = {};
+      try { lastSaved = JSON.parse(lastSavedRef.current || "{}"); } catch(e) {}
+
+      // Identify modified items
+      const modifiedItems = items.filter(item => {
+        const original = (lastSaved.items || []).find((it: any) => it.id === item.id);
+        if (!original) return true; // New item
+        
+        // Simple structural comparison
+        const currentClean = { ...item, images: [] };
+        const originalClean = { ...original, images: [] };
+        return JSON.stringify(currentClean) !== JSON.stringify(originalClean);
+      });
+
+      // Identify modified plan images
+      const modifiedPlanImages = planImages.filter(img => {
+        const original = (lastSaved.images || []).find((it: any) => it.id === img.id);
+        return !original || JSON.stringify(img) !== JSON.stringify(original);
+      });
+
+      // Identify modified attachments
+      const modifiedAttachments = attachments.filter(att => {
+        const original = (lastSaved.attachments || []).find((it: any) => it.id === att.id);
+        return !original || JSON.stringify(att) !== JSON.stringify(original);
+      });
+
       const payload = {
         name,
         project_id: projectId === "none" ? null : projectId,
         location: locationStr,
         plan_date: planDate,
-        items: items.map(it => {
+        items: modifiedItems.map(it => {
           const flattenedImages = [
             ...(it.preImages || []).map(img => ({ ...img, name: `PRE_${img.name}` })),
             ...(it.postImages || []).map(img => ({ ...img, name: `POST_${img.name}` }))
-          ];
+          ].filter(img => img.url); // Ensure URL exists
           return {
             ...it,
             images: flattenedImages,
@@ -1712,8 +1761,12 @@ export default function CreateSketchPlan() {
             vendor_name: it.vendor_name
           };
         }),
-        images: planImages.map((img: any) => ({ item_id: null, image_url: img.url, name: img.name })),
-        attachments: attachments.map(att => ({ file_url: att.url, file_name: att.name, file_type: att.type }))
+        images: modifiedPlanImages.filter(img => img.url).map((img: any) => ({ ...img, item_id: null, image_url: img.url, name: img.name })),
+        attachments: modifiedAttachments.filter(att => att.url).map(att => ({ ...att, file_url: att.url, file_name: att.name, file_type: att.type })),
+        deletedItemIds,
+        deletedImageIds,
+        deletedAttachmentIds,
+        isDelta: true
       };
 
       const res = await apiFetch(currentId ? `/api/sketch-plans/${currentId}` : "/api/sketch-plans", {
@@ -1753,7 +1806,7 @@ export default function CreateSketchPlan() {
               const postImages: PlanImage[] = [];
               itemImages.forEach((img: any) => {
                 const cleanedName = (img.image_name || img.name || "").replace(/^(PRE_|POST_)/, "");
-                const mappedImg = { id: img.id, url: img.image_url, name: cleanedName || `Photo ${img.id.split('-').pop()}` };
+                const mappedImg = { id: img.id, url: appendAuthToken(img.image_url), name: cleanedName || `Photo ${img.id.split('-').pop()}` };
                 if ((img.image_name || img.name || "").startsWith("POST_")) postImages.push(mappedImg);
                 else preImages.push(mappedImg);
               });
@@ -1761,9 +1814,36 @@ export default function CreateSketchPlan() {
             });
 
           if (syncedItems.length > 0) setItems(syncedItems);
+
+          // Update plan images and attachments too
+          if (data.images && Array.isArray(data.images)) {
+            const plImages = data.images
+              .filter((img: any) => !img.item_id)
+              .map((img: any) => ({ id: img.id, url: appendAuthToken(img.image_url), name: img.image_name || img.name || `Site Photo ${img.id.split('-').pop()}` }));
+            setPlanImages(plImages);
+          }
+          if (data.attachments && Array.isArray(data.attachments)) {
+            setAttachments(data.attachments.map((att: any) => ({ id: att.id, url: appendAuthToken(att.file_url), name: att.file_name, type: att.file_type as any })));
+          }
+
+          // Update lastSavedRef to prevent next save from being too large
+          lastSavedRef.current = JSON.stringify({
+            name,
+            project_id: projectId === "none" ? null : projectId,
+            location: locationStr,
+            plan_date: planDate,
+            items: syncedItems,
+            images: data.images?.filter((img: any) => !img.item_id),
+            attachments: data.attachments || []
+          });
         }
 
         toast({ title: "Success", description: "Plan saved successfully" });
+
+        // Clear delta trackers after successful save
+        setDeletedItemIds([]);
+        setDeletedImageIds([]);
+        setDeletedAttachmentIds([]);
       } else {
         const errorData = await res.json().catch(() => ({ message: "Unknown error" }));
         toast({ title: "Error", description: errorData.message || "Failed to save plan", variant: "destructive" });
