@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Reorder, useDragControls } from "framer-motion";
-import { ChevronUp, ChevronDown, Loader2, CheckCircle2, XCircle, Lock, History, Clock, Briefcase, MapPin, IndianRupee, GripVertical, Search, ArrowUp, ArrowLeft, ArrowRight, ArrowDown, Plus, Trash2, Save, MessageSquare, Users, ChevronsUpDown, Check, X, RefreshCw, Star, Edit, Reply } from "lucide-react";
+import { ChevronUp, ChevronDown, Loader2, CheckCircle2, XCircle, Lock, History, Clock, Briefcase, MapPin, IndianRupee, GripVertical, Search, ArrowUp, ArrowLeft, ArrowRight, ArrowDown, Plus, Trash2, Save, MessageSquare, Users, ChevronsUpDown, Check, X, RefreshCw, Star, Edit, Reply, AlertTriangle } from "lucide-react";
 import { fuzzySearch, cn } from "@/lib/utils";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -36,6 +36,7 @@ import {
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { Textarea } from "../components/ui/textarea";
+import { Checkbox } from "../components/ui/checkbox";
 import { useData } from "../lib/store";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -1848,6 +1849,11 @@ export default function CreateBom() {
   const [expandedProposalId, setExpandedProposalId] = useState<string | null>(null);
   const [proposalItemsPreview, setProposalItemsPreview] = useState<Record<string, any[]>>({});
   const [loadingPreviewId, setLoadingPreviewId] = useState<string | null>(null);
+
+  // Duplicate Check State
+  const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
+  const [duplicateGroups, setDuplicateGroups] = useState<any[][]>([]);
+  const [selectedDuplicateIndices, setSelectedDuplicateIndices] = useState<Set<number>>(new Set());
   const [replyingTo, setReplyingTo] = useState<BOMComment | null>(null);
   const [commentInboxView, setCommentInboxView] = useState(false);
   const [isSelectingThread, setIsSelectingThread] = useState(false);
@@ -2960,6 +2966,88 @@ export default function CreateBom() {
   };
   const handleSelectProduct = (product: Product) => { setSelectedProduct(product); setShowStep11Preview(true); };
   const handleAddItem = (boqItemId: string) => { setTargetBoqItemId(boqItemId); setShowMaterialPicker(true); };
+
+  const findDuplicatesInBOM = () => {
+    const groups: Record<string, BOMItem[]> = {};
+    const debugKeys: { id: string; name: string; key: string }[] = [];
+    
+    boqItems.forEach(item => {
+      const td = parseTableData(item.table_data);
+      
+      const cleanStr = (s: string) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+      
+      const category = cleanStr(td.category_name || td.category || "General");
+      const productName = cleanStr(td.product_name || td.item || td.name || "Unnamed Item");
+      const targetQty = Number(td.targetRequiredQty || td.finalize_qty || 1);
+      
+      // Extremely permissive key: If they have the same category, same exact name, and same target quantity, they are duplicates.
+      // We ignore price calculations here because visually identical items might have different internal engine structures 
+      // (e.g. manual vs engine-based) which caused them to miss the duplicate check.
+      const key = `${category}|${productName}|${targetQty}`;
+
+      debugKeys.push({ id: item.id, name: productName, key });
+
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(item);
+    });
+    
+    // Filter debug keys to show relevant ones (like the sprinklers)
+    const relevantDebugKeys = debugKeys.filter(k => k.name.includes("removing") || k.name.includes("sprinkler") || k.name.includes("remo"));
+    
+    // Store debug info in a global variable or state for viewing
+    (window as any).__duplicateDebug = debugKeys;
+    console.log("Duplicate Check Keys:", debugKeys);
+
+    const duplicates = Object.values(groups).filter(group => group.length > 1);
+    
+    // If no duplicates, let's force the dialog open to show the debug keys
+    if (duplicates.length === 0) {
+      const debugText = relevantDebugKeys.length > 0 
+        ? JSON.stringify(relevantDebugKeys, null, 2) 
+        : JSON.stringify(debugKeys.slice(0, 5), null, 2);
+        
+      setDuplicateGroups(([[ { table_data: { product_name: "DEBUG INFO (Keys for matching items)", finalize_description: debugText } } ]] as any));
+    } else {
+      setDuplicateGroups(duplicates);
+    }
+    
+    setSelectedDuplicateIndices(new Set(duplicates.map((_, i) => i)));
+    setShowDuplicateDialog(true);
+  };
+
+  const cleanUpDuplicates = async () => {
+    const idsToRemove = new Set<string>();
+    duplicateGroups.forEach((group, idx) => {
+      if (selectedDuplicateIndices.has(idx)) {
+        // Keep group[0], remove the rest
+        for (let i = 1; i < group.length; i++) {
+          idsToRemove.add(group[i].id);
+        }
+      }
+    });
+
+    if (idsToRemove.size > 0) {
+      try {
+        const newItems = boqItems.filter(item => !idsToRemove.has(item.id));
+        setBoqItems(newItems);
+        
+        // Remove from database
+        for (const id of idsToRemove) {
+          await apiFetch(`/api/boq-items/${id}`, { method: "DELETE" });
+        }
+
+        toast({ title: "Duplicates Cleaned", description: `Removed ${idsToRemove.size} redundant products.` });
+        setDuplicateGroups([]);
+        setSelectedDuplicateIndices(new Set());
+        setShowDuplicateDialog(false);
+      } catch (err) {
+        console.error(err);
+        toast({ title: "Error", description: "Failed to remove some duplicates from database", variant: "destructive" });
+      }
+    } else {
+      setShowDuplicateDialog(false);
+    }
+  };
 
   const handleSelectMaterialTemplate = async (template: any) => {
     // ask for quantity before adding
@@ -4142,6 +4230,9 @@ export default function CreateBom() {
                             <CheckCircle2 className="h-4 w-4" /> Import Approved Proposals ({approvedProposals.length})
                           </Button>
                         )}
+                        <Button onClick={findDuplicatesInBOM} variant="outline" className="border-amber-200 h-full px-4 text-xs font-bold shadow-sm bg-amber-50 text-amber-700 hover:bg-amber-100 flex items-center gap-2" disabled={!selectedProjectId}>
+                          <AlertTriangle className="h-4 w-4" /> Check Duplicates
+                        </Button>
                         <Button onClick={() => setShowCompareDialog(true)} variant="outline" className="border-blue-200 h-full px-4 text-xs font-bold shadow-sm bg-blue-50 text-blue-700 hover:bg-blue-100 flex items-center gap-2" disabled={!selectedProjectId}>
                           <ChevronsUpDown className="h-4 w-4" /> Compare
                         </Button>
@@ -5485,6 +5576,79 @@ export default function CreateBom() {
         isOpen={!!analysisProduct}
         onClose={() => setAnalysisProduct(null)}
       />
+
+      {/* Duplicate Checker Dialog */}
+      <Dialog open={showDuplicateDialog} onOpenChange={setShowDuplicateDialog}>
+        <DialogContent className="sm:max-w-[600px] max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="h-5 w-5" />
+              Duplicate Products Found
+            </DialogTitle>
+            <DialogDescription>
+              {duplicateGroups.length > 0
+                ? `Found ${duplicateGroups.length} groups of exact duplicate products. Cleaning up will keep one instance of each and remove the rest.`
+                : "Great! No exact duplicates were found in your BOM."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {duplicateGroups.length > 0 && (
+            <div className="flex-1 overflow-y-auto pr-2 space-y-4 custom-scrollbar">
+              {duplicateGroups.map((group, idx) => {
+                const td = parseTableData(group[0].table_data);
+                return (
+                  <div key={idx} className={`border rounded-md p-3 flex gap-3 transition-colors ${selectedDuplicateIndices.has(idx) ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-slate-50 opacity-70'}`}>
+                    <div className="pt-1">
+                      <Checkbox
+                        checked={selectedDuplicateIndices.has(idx)}
+                        onCheckedChange={(checked) => {
+                          const next = new Set(selectedDuplicateIndices);
+                          if (checked) next.add(idx);
+                          else next.delete(idx);
+                          setSelectedDuplicateIndices(next);
+                        }}
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <h4 className={`font-bold text-sm ${selectedDuplicateIndices.has(idx) ? 'text-amber-800' : 'text-slate-700'}`}>{td.product_name || "Unnamed Product"}</h4>
+                          <p className={`text-xs ${selectedDuplicateIndices.has(idx) ? 'text-amber-600' : 'text-slate-500'}`}>Repeated <strong>{group.length} times</strong></p>
+                        </div>
+                        <Badge variant="outline" className="bg-white">Qty: {td.targetRequiredQty || 1}</Badge>
+                      </div>
+                      {td.finalize_description && (
+                        <p className="text-xs text-slate-600 italic line-clamp-2 mt-1">"{td.finalize_description}"</p>
+                      )}
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {(td.step11_items || []).slice(0, 3).map((it: any, i: number) => (
+                          <Badge key={i} variant="secondary" className="text-[9px] px-1 h-4 bg-slate-100 text-slate-500">{it.title || it.item_name}</Badge>
+                        ))}
+                        {(td.step11_items || []).length > 3 && <span className="text-[9px] text-slate-400">+{td.step11_items.length - 3} more</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <DialogFooter className="mt-4 pt-4 border-t">
+            <Button variant="outline" onClick={() => setShowDuplicateDialog(false)}>
+              {duplicateGroups.length > 0 ? "Cancel" : "Close"}
+            </Button>
+            {duplicateGroups.length > 0 && (
+              <Button
+                onClick={cleanUpDuplicates}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                disabled={selectedDuplicateIndices.size === 0}
+              >
+                Clean Up {selectedDuplicateIndices.size === duplicateGroups.length ? "All" : "Selected"} Duplicates
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

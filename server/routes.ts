@@ -6573,7 +6573,7 @@ export async function registerRoutes(
   app.put(
     "/api/boq-items/:id",
     authMiddleware,
-    requireRole("admin", "software_team", "purchase_team", "product_manager", "pre_sales"),
+    requireRole("admin", "software_team", "purchase_team", "product_manager", "pre_sales", "finance_team"),
     async (req: Request, res: Response) => {
       try {
         const { id } = req.params;
@@ -10662,23 +10662,35 @@ ${list.rows.map((row: any) => `- ${row.name}`).join('\n')}`;
           const step11 = Array.isArray(td.step11_items) ? td.step11_items : [];
 
           const finalizeQty = td.finalize_qty !== undefined && td.finalize_qty !== null ? parseFloat(td.finalize_qty) : null;
-          const finalizeOverrideRate = td.finalize_override_rate !== undefined && td.finalize_override_rate !== null ? parseFloat(td.finalize_override_rate) : null;
+          const finalizeOverrideRateInput = td.finalize_override_rate !== undefined && td.finalize_override_rate !== null ? parseFloat(td.finalize_override_rate) : null;
+          const finalizeOverrideType = td.finalize_override_type || 'value'; // Default to 'value' for backward compatibility
 
           for (const it of step11) {
             const qty = finalizeQty !== null ? finalizeQty : (parseFloat(it.qty) || 0);
             const supplyRate = parseFloat(it.supply_rate || it.rate || 0);
             const installRate = parseFloat(it.install_rate || 0);
+            const systemTotal = qty * (supplyRate + installRate);
 
             supplyRateTotal += supplyRate;
             supplyAmountTotal += qty * supplyRate;
             labourRateTotal += installRate;
             labourAmountTotal += qty * installRate;
 
-            if (finalizeOverrideRate !== null) {
-              overrideRateTotal += finalizeOverrideRate;
-              overrideTotal += qty * finalizeOverrideRate;
+            // Calculate effective override rate based on type
+            if (finalizeOverrideRateInput !== null) {
+              let effectiveOverrideRate = 0;
+              if (finalizeOverrideType === 'percentage') {
+                // Override rate is a percentage - compute effective rate
+                effectiveOverrideRate = systemTotal * finalizeOverrideRateInput / 100 / qty;
+              } else {
+                // Override rate is a direct value
+                effectiveOverrideRate = finalizeOverrideRateInput;
+              }
+              
+              overrideRateTotal += effectiveOverrideRate;
+              overrideTotal += effectiveOverrideRate * qty;
             } else {
-              overrideTotal += qty * (supplyRate + installRate);
+              overrideTotal += systemTotal;
             }
           }
         }
