@@ -150,19 +150,19 @@ export function SupplierSupport({
       <div className="flex flex-col h-[calc(100vh-64px)] lg:h-screen bg-[#F0F2F5] overflow-hidden">
         
         {/* Support Header */}
-        <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-10 shadow-sm">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-100">
-              <ShieldCheck size={24} strokeWidth={2.5} />
+        <div className="bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between z-10 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md">
+              <ShieldCheck size={20} strokeWidth={2} />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="font-black text-slate-900 tracking-tight">Software Support Team</h2>
-                <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-[10px] h-5 px-1.5 animate-pulse">ACTIVE</Badge>
+                <h2 className="font-bold text-slate-900 tracking-tight">Software Support Team</h2>
+                <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-[9px] h-4.5 px-1.5 animate-pulse rounded-sm">ACTIVE</Badge>
               </div>
               <div className="flex items-center gap-1.5 mt-0.5">
-                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-                <span className="text-[11px] text-slate-400 font-bold uppercase tracking-widest">Protocol Online</span>
+                <div className="w-1 h-1 bg-emerald-500 rounded-full" />
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Protocol Online</span>
               </div>
             </div>
           </div>
@@ -194,18 +194,18 @@ export function SupplierSupport({
                 <div key={msg.id} className="space-y-4">
                   {/* Supplier Message (Right) */}
                   <div className="flex justify-end group">
-                    <div className="relative max-w-[85%] lg:max-w-[70%] bg-[#dcf8c6] p-2.5 rounded-2xl rounded-tr-none shadow-sm border-l-4 border-l-green-200">
+                    <div className="relative max-w-[85%] lg:max-w-[70%] bg-[#dcf8c6] p-2.5 rounded-xl rounded-tr-none shadow-sm border-l-4 border-l-green-200">
                       <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
                         {msg.message}
                       </p>
                       <div className="flex items-center justify-end gap-1 mt-1">
-                        <span className="text-[10px] text-gray-500 font-medium whitespace-nowrap">
+                        <span className="text-[9px] text-gray-500 font-medium whitespace-nowrap">
                           {new Date(msg.submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                         {msg.is_read ? (
-                          <CheckCheck size={14} className="text-blue-500" />
+                          <CheckCheck size={12} className="text-blue-500" />
                         ) : (
-                          <Check size={14} className="text-gray-400" />
+                          <Check size={12} className="text-gray-400" />
                         )}
                       </div>
                       <button 
@@ -220,13 +220,13 @@ export function SupplierSupport({
                   {/* Admin Reply (Left) */}
                   {msg.admin_reply && (
                     <div className="flex justify-start">
-                      <div className="relative max-w-[85%] lg:max-w-[70%] bg-white p-2.5 rounded-2xl rounded-tl-none shadow-sm border-l-4 border-l-blue-200">
-                        <p className="text-[10px] font-black text-blue-600 uppercase tracking-tighter mb-1">Support Team</p>
+                      <div className="relative max-w-[85%] lg:max-w-[70%] bg-white p-2.5 rounded-xl rounded-tl-none shadow-sm border-l-4 border-l-blue-200">
+                        <p className="text-[9px] font-bold text-blue-600 uppercase tracking-tight mb-1">Support Team</p>
                         <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
                           {msg.admin_reply}
                         </p>
                         <div className="flex items-center justify-end mt-1">
-                          <span className="text-[10px] text-gray-400 font-medium">
+                          <span className="text-[9px] text-gray-400 font-medium">
                             {new Date(msg.submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
@@ -240,11 +240,11 @@ export function SupplierSupport({
         </div>
 
         {/* Input Bar */}
-        <div className="bg-[#f0f2f5] px-4 py-3 border-t border-gray-200">
-          <div className="flex items-center gap-3 max-w-4xl mx-auto">
-            <div className="flex items-center gap-3 text-gray-500">
-              <Smile size={24} className="cursor-pointer hover:text-gray-700" />
-              <Paperclip size={24} className="cursor-pointer hover:text-gray-700" />
+        <div className="bg-[#f0f2f5] px-4 py-2 border-t border-gray-200">
+          <div className="flex items-center gap-2.5 max-w-4xl mx-auto">
+            <div className="flex items-center gap-2.5 text-gray-400">
+              <Smile size={22} className="cursor-pointer hover:text-gray-600" />
+              <Paperclip size={22} className="cursor-pointer hover:text-gray-600" />
             </div>
             
             <div className="flex-1 relative">
@@ -258,7 +258,7 @@ export function SupplierSupport({
                     handleSubmit();
                   }
                 }}
-                className="min-h-[44px] max-h-32 py-3 px-4 rounded-xl border-none focus:ring-0 resize-none shadow-sm leading-tight bg-white"
+                className="min-h-[40px] max-h-32 py-2.5 px-4 rounded-lg border-none focus:ring-0 resize-none shadow-sm text-sm leading-tight bg-white"
               />
             </div>
 
@@ -266,18 +266,18 @@ export function SupplierSupport({
               onClick={() => handleSubmit()}
               disabled={submitting || !message.trim()}
               className={`
-                h-11 w-11 rounded-full p-0 flex items-center justify-center transition-all
-                ${message.trim() ? "bg-blue-600 hover:bg-blue-700 shadow-lg scale-100" : "bg-gray-400 opacity-50 scale-90"}
+                h-10 w-10 rounded-full p-0 flex items-center justify-center transition-all
+                ${message.trim() ? "bg-blue-600 hover:bg-blue-700 shadow-md scale-100" : "bg-gray-400 opacity-50 scale-90"}
               `}
             >
               {submitting ? (
-                <Loader2 size={20} className="animate-spin text-white" />
+                <Loader2 size={18} className="animate-spin text-white" />
               ) : (
-                <Send size={20} className="text-white ml-0.5" />
+                <Send size={18} className="text-white ml-0.5" />
               )}
             </Button>
           </div>
-          <p className="text-[10px] text-center text-gray-400 mt-2 font-medium">
+          <p className="text-[9px] text-center text-gray-400 mt-1.5 font-medium">
             Shift + Enter for new line
           </p>
         </div>

@@ -86,7 +86,7 @@ export function SupplierDashboardPage({
       "bg-amber-500": "text-amber-600 bg-amber-50",
       "bg-rose-500": "text-rose-600 bg-rose-50",
     };
-    
+
     const colors = colorMap[colorClass] || "text-slate-600 bg-slate-50";
 
     return (
@@ -111,7 +111,7 @@ export function SupplierDashboardPage({
     <SupplierLayout shopName={shopName} shopLocation={shopLocation} shopApproved={true}>
       <div className="min-h-screen bg-[#FDFDFD]">
         <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-8">
-          
+
           {/* Hero Section */}
           <div className="bg-white p-8 rounded-3xl shadow-[0_2px_15px_rgba(0,0,0,0.03)] border border-slate-100">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
@@ -127,7 +127,7 @@ export function SupplierDashboardPage({
                   Monitor your operations, manage material catalogue, and track submissions in real-time.
                 </p>
               </div>
-              
+
               <div className="flex items-center gap-6 md:border-l md:border-slate-100 md:pl-8">
                 <div className="text-left md:text-right">
                   <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-1">Active Outlet</p>
@@ -249,7 +249,7 @@ export function SupplierDashboardPage({
                 <p className="text-sm text-slate-500 font-medium leading-relaxed">
                   Connect with our procurement experts for catalogue optimization or commercial inquiries.
                 </p>
-                
+
                 <div className="space-y-3">
                   {[
                     { label: "Material Catalogue Guidance", icon: Package },

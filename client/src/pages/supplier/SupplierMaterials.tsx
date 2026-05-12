@@ -265,17 +265,17 @@ export default function SupplierMaterials() {
       <div className="min-h-screen bg-[#FDFDFD]">
         <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-8">
           {/* Header Section */}
-          <div className="bg-white p-8 rounded-3xl shadow-[0_2px_15px_rgba(0,0,0,0.03)] border border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div className="space-y-2">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-[10px] font-bold uppercase tracking-wider">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-600 text-[9px] font-bold uppercase tracking-wider">
                 Inventory & Catalog
               </div>
-              <h1 className="text-3xl font-black tracking-tight text-slate-900">
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900">
                 Manage Materials
               </h1>
               <p className="text-slate-500 max-w-2xl text-sm font-medium leading-relaxed">
                 {isSupplier
-                  ? "Select from available material templates, fill in the essentials (rate, unit, brand), and submit for approval"
+                  ? "Select from available material templates, fill in the essentials, and submit for approval"
                   : "Select material templates, fill in all required details, select shop, and submit for approval"
                 }
               </p>
@@ -284,30 +284,30 @@ export default function SupplierMaterials() {
 
           <div className="grid gap-8">
             {/* Available Templates Section */}
-            <div className="space-y-6">
+            <div className="space-y-4">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-50 rounded-xl text-blue-600">
-                  <Package size={20} className="w-5 h-5" strokeWidth={2.5} />
+                <div className="p-1.5 bg-blue-50 rounded-lg text-blue-600">
+                  <Package size={18} className="w-4.5 h-4.5" strokeWidth={2} />
                 </div>
-                <h2 className="text-xl font-bold text-slate-900">Available Templates</h2>
-                <Badge className="bg-slate-900 text-white font-bold">{templates.length} Total</Badge>
+                <h2 className="text-lg font-bold text-slate-900">Available Templates</h2>
+                <Badge className="bg-slate-900 text-white text-[10px] font-bold px-1.5 py-0 rounded-sm">{templates.length} Total</Badge>
               </div>
 
               <div className="space-y-3 mb-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label className="text-sm mb-2 block font-bold text-slate-700">Search Templates</Label>
+                    <Label className="text-xs mb-1.5 block font-bold text-slate-700">Search Templates</Label>
                     <Input
                       value={templatesSearch}
                       onChange={(e) => setTemplatesSearch(e.target.value)}
                       placeholder="Search by name or code..."
-                      className="h-11 rounded-xl"
+                      className="h-10 rounded-lg text-sm"
                     />
                   </div>
                   <div>
-                    <Label className="text-sm mb-2 block font-bold text-slate-700">Filter by Vendor Category</Label>
+                    <Label className="text-xs mb-1.5 block font-bold text-slate-700">Filter by Vendor Category</Label>
                     <Select value={vendorCategoryFilter} onValueChange={setVendorCategoryFilter}>
-                      <SelectTrigger className="h-11 rounded-xl">
+                      <SelectTrigger className="h-10 rounded-lg text-sm">
                         <SelectValue placeholder="All categories" />
                       </SelectTrigger>
                       <SelectContent>
@@ -331,19 +331,19 @@ export default function SupplierMaterials() {
                   <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
                 </div>
               ) : (
-                <div className="border border-slate-100 rounded-2xl max-h-[400px] overflow-y-auto shadow-sm bg-white divide-y divide-slate-50">
+                <div className="border border-slate-100 rounded-xl max-h-[400px] overflow-y-auto shadow-sm bg-white divide-y divide-slate-50">
                   {templates
                     .filter(t => (t.name + ' ' + t.code + ' ' + (t.category || '')).toLowerCase().includes(templatesSearch.toLowerCase()))
                     .filter(t => !vendorCategoryFilter || t.vendor_category === vendorCategoryFilter)
                     .map((template) => (
-                      <div key={template.id} className="py-3 px-6 hover:bg-slate-50 transition-all duration-200 cursor-pointer group flex items-center justify-between gap-4">
-                        <div className="flex-1 min-w-0 flex items-center gap-3">
-                          <span className="font-bold text-slate-900 truncate">{template.name}</span>
-                          <span className="text-xs font-medium text-slate-400">({template.code})</span>
+                      <div key={template.id} className="py-2.5 px-5 hover:bg-slate-50 transition-all duration-200 cursor-pointer group flex items-center justify-between gap-4">
+                        <div className="flex-1 min-w-0 flex items-center gap-2.5">
+                          <span className="font-semibold text-slate-900 text-sm truncate">{template.name}</span>
+                          <span className="text-[11px] font-medium text-slate-400">({template.code})</span>
                         </div>
                         <Button 
                           size="sm" 
-                          className="h-8 rounded-lg font-bold bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white border-none"
+                          className="h-7 px-3 rounded-md text-[11px] font-bold bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white border-none"
                           variant="outline" 
                           onClick={(e) => { e.stopPropagation(); handleSelectTemplate(template); }}
                         >
@@ -357,36 +357,36 @@ export default function SupplierMaterials() {
 
             {/* Submission Form Section */}
             {selectedTemplate && (
-              <Card id="material-form" className="shadow-[0_2px_15px_rgba(0,0,0,0.03)] border-slate-100 bg-white rounded-3xl overflow-hidden scroll-mt-20">
-                <CardHeader className="border-b border-slate-50 bg-[#FCFDFF] p-8">
+              <Card id="material-form" className="shadow-sm border-slate-100 bg-white rounded-xl overflow-hidden scroll-mt-20">
+                <CardHeader className="border-b border-slate-50 bg-[#FCFDFF] p-6">
                   <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-100">
-                      <Plus size={24} strokeWidth={2.5} />
+                    <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md">
+                      <Plus size={20} strokeWidth={2} />
                     </div>
                     <div>
-                      <CardTitle className="text-2xl font-black text-slate-900 tracking-tight">
+                      <CardTitle className="text-xl font-bold text-slate-900 tracking-tight">
                         Submit Material Details
                       </CardTitle>
-                      <CardDescription className="text-slate-500 font-medium">
-                        Completing submission for: <span className="text-blue-600">{selectedTemplate.name}</span> ({selectedTemplate.code})
+                      <CardDescription className="text-[13px] text-slate-500 font-medium">
+                        Completing submission for: <span className="text-blue-600 font-semibold">{selectedTemplate.name}</span>
                       </CardDescription>
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="p-8">
-                  <form onSubmit={handleSubmitMaterial} className="space-y-10">
+                <CardContent className="p-6">
+                  <form onSubmit={handleSubmitMaterial} className="space-y-8">
                     <div className="space-y-4">
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Outlet & Commercials</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        <div className="space-y-2">
-                          <Label className="text-slate-700 font-bold">Outlet Location <Required /></Label>
+                      <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Outlet & Commercials</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                        <div className="space-y-1.5">
+                          <Label className="text-slate-700 font-bold text-xs">Outlet Location <Required /></Label>
                           {isSupplier ? (
-                            <div className="h-12 flex items-center px-4 bg-slate-50 rounded-xl border border-slate-100 font-bold text-slate-900">
+                            <div className="h-10 flex items-center px-4 bg-slate-50 rounded-lg border border-slate-100 font-semibold text-sm text-slate-900">
                               {shopName || "Loading..."}
                             </div>
                           ) : (
                             <Select value={selectedShop} onValueChange={setSelectedShop}>
-                              <SelectTrigger className="h-12 rounded-xl border-slate-200">
+                              <SelectTrigger className="h-10 rounded-lg border-slate-200 text-sm">
                                 <SelectValue placeholder="Choose outlet" />
                               </SelectTrigger>
                               <SelectContent>
@@ -398,22 +398,22 @@ export default function SupplierMaterials() {
                           )}
                         </div>
 
-                        <div className="space-y-2">
-                          <Label className="text-slate-700 font-bold">Standard Rate <Required /></Label>
+                        <div className="space-y-1.5">
+                          <Label className="text-slate-700 font-bold text-xs">Standard Rate <Required /></Label>
                           <Input
                             type="number"
                             step="0.01"
                             placeholder="0.00"
                             value={formData.rate}
                             onChange={(e) => setFormData({ ...formData, rate: e.target.value })}
-                            className="h-12 rounded-xl border-slate-200 font-bold text-slate-900"
+                            className="h-10 rounded-lg border-slate-200 font-semibold text-sm text-slate-900"
                           />
                         </div>
 
-                        <div className="space-y-2">
-                          <Label className="text-slate-700 font-bold">Billing Unit <Required /></Label>
+                        <div className="space-y-1.5">
+                          <Label className="text-slate-700 font-bold text-xs">Billing Unit <Required /></Label>
                           <Select value={formData.unit} onValueChange={(val) => setFormData({ ...formData, unit: val })}>
-                            <SelectTrigger className="h-12 rounded-xl border-slate-200">
+                            <SelectTrigger className="h-10 rounded-lg border-slate-200 text-sm">
                               <SelectValue placeholder="Unit" />
                             </SelectTrigger>
                             <SelectContent>
@@ -427,34 +427,34 @@ export default function SupplierMaterials() {
                     </div>
 
                     <div className="space-y-4">
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Additional Information</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                          <Label className="text-slate-700 font-bold">Brand / Make</Label>
+                      <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Additional Information</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div className="space-y-1.5">
+                          <Label className="text-slate-700 font-bold text-xs">Brand / Make</Label>
                           <Input
                             placeholder="Company Name"
                             value={formData.brandname}
                             onChange={(e) => setFormData({ ...formData, brandname: e.target.value })}
-                            className="h-12 rounded-xl border-slate-200"
+                            className="h-10 rounded-lg border-slate-200 text-sm"
                           />
                         </div>
-                        <div className="space-y-2">
-                          <Label className="text-slate-700 font-bold">Model Number</Label>
+                        <div className="space-y-1.5">
+                          <Label className="text-slate-700 font-bold text-xs">Model Number</Label>
                           <Input
                             placeholder="Model #"
                             value={formData.modelnumber}
                             onChange={(e) => setFormData({ ...formData, modelnumber: e.target.value })}
-                            className="h-12 rounded-xl border-slate-200"
+                            className="h-10 rounded-lg border-slate-200 text-sm"
                           />
                         </div>
                       </div>
-                      <div className="space-y-2">
-                        <Label className="text-slate-700 font-bold">Technical Specifications</Label>
+                      <div className="space-y-1.5">
+                        <Label className="text-slate-700 font-bold text-xs">Technical Specifications</Label>
                         <Textarea
                           placeholder="Detail the technical parameters..."
                           value={formData.technicalspecification}
                           onChange={(e) => setFormData({ ...formData, technicalspecification: e.target.value })}
-                          className="min-h-[100px] rounded-2xl border-slate-200"
+                          className="min-h-[80px] rounded-lg border-slate-200 text-sm"
                         />
                       </div>
                     </div>
@@ -475,11 +475,11 @@ export default function SupplierMaterials() {
                       </div>
                     )}
 
-                    <div className="pt-8 border-t border-slate-50 flex flex-wrap gap-4">
+                    <div className="pt-6 border-t border-slate-50 flex flex-wrap gap-3">
                       <Button
                         type="submit"
                         disabled={submitting}
-                        className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-14 px-10 rounded-2xl shadow-xl transition-all active:scale-95"
+                        className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-11 px-8 rounded-lg shadow-sm transition-all active:scale-95 text-sm"
                       >
                         {submitting ? <Loader2 className="animate-spin mr-2" /> : "Submit for Approval"}
                       </Button>
@@ -487,7 +487,7 @@ export default function SupplierMaterials() {
                         type="button"
                         variant="outline"
                         onClick={handleAddEntry}
-                        className="h-14 px-10 rounded-2xl border-2 border-slate-200 font-bold hover:bg-slate-50"
+                        className="h-11 px-8 rounded-lg border border-slate-200 font-bold hover:bg-slate-50 text-sm"
                       >
                         Add to Queue
                       </Button>
@@ -495,7 +495,7 @@ export default function SupplierMaterials() {
                         type="button"
                         variant="ghost"
                         onClick={() => setSelectedTemplate(null)}
-                        className="h-14 px-8 rounded-2xl text-slate-400 font-bold"
+                        className="h-11 px-6 rounded-lg text-slate-400 font-bold text-sm"
                       >
                         Cancel
                       </Button>

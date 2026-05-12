@@ -228,12 +228,12 @@ export default function SupplierShops() {
       <LayoutComponent {...(isSupplier ? { shopName, shopLocation, shopApproved: true } : {})}>
       <div className="min-h-screen bg-[#FDFDFD]">
         <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-8">
-          <div className="bg-white p-8 rounded-3xl shadow-[0_2px_15px_rgba(0,0,0,0.03)] border border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div className="space-y-2">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-[10px] font-bold uppercase tracking-wider">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-600 text-[9px] font-bold uppercase tracking-wider">
                 Retail Outlets
               </div>
-              <h1 className="text-3xl font-black tracking-tight text-slate-900">
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900">
                 Shop Management
               </h1>
               <p className="text-slate-500 max-w-2xl text-sm font-medium leading-relaxed">
@@ -243,9 +243,9 @@ export default function SupplierShops() {
             {!showForm && (
               <Button
                 onClick={() => setShowForm(true)}
-                className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-6 h-12 shadow-lg shadow-slate-200 rounded-xl flex items-center gap-2 group transition-all"
+                className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-5 h-10 shadow-sm rounded-lg flex items-center gap-2 group transition-all text-sm"
               >
-                <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-300" /> 
+                <Plus className="h-4 w-4 group-hover:rotate-90 transition-transform duration-300" /> 
                 Add New Shop
               </Button>
             )}
@@ -253,41 +253,41 @@ export default function SupplierShops() {
 
         <div className="grid gap-10">
           {showForm && (
-            <Card className="border-slate-200 shadow-xl overflow-hidden rounded-xl animate-in fade-in slide-in-from-top-4 duration-500">
-              <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+            <Card className="border-slate-200 shadow-lg overflow-hidden rounded-xl animate-in fade-in slide-in-from-top-4 duration-500">
+              <div className="bg-slate-50 border-b border-slate-200 px-5 py-3.5 flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
                     {editingShopId ? "Edit Regional Outlet" : "Register New Shop Outlet"}
                   </h2>
-                  <p className="text-xs text-slate-500">All fields marked with <Required /> are mandatory</p>
+                  <p className="text-[10px] text-slate-500">All fields marked with <Required /> are mandatory</p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={resetForm} className="text-slate-400 hover:text-slate-600">
-                  <X className="h-5 w-5" />
+                <Button variant="ghost" size="sm" onClick={resetForm} className="text-slate-400 hover:text-slate-600 h-8 w-8 p-0">
+                  <X className="h-4 w-4" />
                 </Button>
               </div>
-              <CardContent className="p-8">
-                <form onSubmit={handleSubmitShop} className="space-y-8">
+              <CardContent className="p-6">
+                <form onSubmit={handleSubmitShop} className="space-y-6">
                   {/* Basic Information */}
-                  <div className="space-y-6">
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 border-b pb-2">Technical Information</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
-                      <div className="space-y-2.5">
-                        <Label className="text-xs font-bold text-slate-700">Official Shop Name <Required /></Label>
+                  <div className="space-y-4">
+                    <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b pb-1.5">Technical Information</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px] font-bold text-slate-700">Official Shop Name <Required /></Label>
                         <Input
-                          placeholder="e.g. Galaxy Hardware & Logistics"
+                          placeholder="e.g. Galaxy Hardware"
                           value={formData.name}
                           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                          className="h-11 border-slate-200 focus:border-slate-400 focus:ring-0 rounded-lg"
+                          className="h-10 border-slate-200 focus:border-slate-400 focus:ring-0 rounded-lg text-sm"
                         />
                       </div>
-                      <div className="space-y-2.5">
-                        <Label className="text-xs font-bold text-slate-700">Primary Contact Number <Required /></Label>
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px] font-bold text-slate-700">Primary Contact Number <Required /></Label>
                         <div className="flex gap-2">
                           <Select
                             value={formData.phoneCountryCode}
                             onValueChange={(val) => setFormData({ ...formData, phoneCountryCode: val })}
                           >
-                            <SelectTrigger className="w-[100px] h-11 border-slate-200 rounded-lg">
+                            <SelectTrigger className="w-[80px] h-10 border-slate-200 rounded-lg text-sm">
                               <SelectValue placeholder="+91" />
                             </SelectTrigger>
                             <SelectContent>
@@ -301,7 +301,7 @@ export default function SupplierShops() {
                             value={formData.contactNumber}
                             onChange={(e) => setFormData({ ...formData, contactNumber: e.target.value })}
                             type="tel"
-                            className="flex-1 h-11 border-slate-200 focus:border-slate-400 focus:ring-0 rounded-lg"
+                            className="flex-1 h-10 border-slate-200 focus:border-slate-400 focus:ring-0 rounded-lg text-sm"
                           />
                         </div>
                       </div>
@@ -463,20 +463,20 @@ export default function SupplierShops() {
                     </div>
                   </div>
 
-                  <div className="pt-8 border-t flex flex-col sm:flex-row gap-4">
+                  <div className="pt-6 border-t flex flex-col sm:flex-row gap-3">
                     <Button
                       type="submit"
                       disabled={submitting}
-                      className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-12 px-8 rounded-lg shadow-lg flex-1 transition-all active:scale-95"
+                      className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-11 px-8 rounded-lg shadow-sm flex-1 transition-all active:scale-95 text-sm"
                     >
-                      {submitting ? "Processing Request..." : (editingShopId ? "Synchronize Changes" : "Register Shop Configuration")}
+                      {submitting ? "Processing..." : (editingShopId ? "Save Changes" : "Register Shop")}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       onClick={resetForm}
                       disabled={submitting}
-                      className="border-slate-300 text-slate-600 font-semibold h-12 px-8 rounded-lg"
+                      className="border-slate-300 text-slate-600 font-semibold h-11 px-8 rounded-lg text-sm"
                     >
                       Discard
                     </Button>
@@ -487,10 +487,10 @@ export default function SupplierShops() {
           )}
 
           {/* Shops List */}
-          <div className="space-y-6">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-              Our Registered Establishments 
-              {!loadingShops && <Badge variant="secondary" className="bg-slate-100 text-slate-600 ml-2">{shops.length}</Badge>}
+          <div className="space-y-5">
+            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+              Registered Establishments 
+              {!loadingShops && <Badge variant="secondary" className="bg-slate-100 text-slate-600 ml-1 text-[10px] px-1.5 py-0 h-4 rounded-sm">{shops.length}</Badge>}
             </h2>
             
             {loadingShops ? (
@@ -502,72 +502,72 @@ export default function SupplierShops() {
             ) : shops.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {shops.map((shop) => (
-                  <Card key={shop.id} className="group border-slate-200 hover:border-slate-300 hover:shadow-xl transition-all duration-300 rounded-xl overflow-hidden bg-white">
-                    <div className="relative h-2 bg-slate-100 group-hover:bg-slate-900 transition-colors" />
-                    <CardHeader className="pb-4">
+                  <Card key={shop.id} className="group border-slate-200 hover:border-blue-200 hover:shadow-md transition-all duration-300 rounded-xl overflow-hidden bg-white">
+                    <div className="relative h-1.5 bg-slate-100 group-hover:bg-blue-600 transition-colors" />
+                    <CardHeader className="pb-3 pt-4 px-5">
                       <div className="flex justify-between items-start">
                         <div className="space-y-1">
-                          <CardTitle className="text-lg font-extrabold text-slate-900 transition-colors">{shop.name}</CardTitle>
+                          <CardTitle className="text-base font-bold text-slate-900 transition-colors">{shop.name}</CardTitle>
                           <Badge 
                             variant={shop.approved ? "default" : "secondary"}
                             className={cn(
-                              "text-[10px] uppercase font-black px-2 py-0.5 border-none",
-                              shop.approved ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                              "text-[9px] uppercase font-bold px-1.5 py-0 border-none rounded-sm",
+                              shop.approved ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
                             )}
                           >
-                            {shop.approved ? "Active" : "Pending Verification"}
+                            {shop.approved ? "Active" : "Pending"}
                           </Badge>
                         </div>
                         <Button 
                           variant="ghost" 
                           size="sm" 
-                          className="h-8 w-8 p-0 text-slate-400 hover:text-slate-900 rounded-full"
+                          className="h-7 w-7 p-0 text-slate-400 hover:text-slate-900 rounded-md"
                           onClick={() => startEdit(shop)}
                         >
-                          <FileText className="h-4 w-4" />
+                          <FileText className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                     </CardHeader>
-                    <CardContent className="space-y-6">
-                      <div className="space-y-3">
-                        <div className="flex items-start gap-2.5">
-                          <MapPin className="h-3.5 w-3.5 text-slate-400 mt-0.5 shrink-0" />
-                          <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                    <CardContent className="space-y-5 px-5 pb-5">
+                      <div className="space-y-2.5">
+                        <div className="flex items-start gap-2">
+                          <MapPin className="h-3 w-3 text-slate-400 mt-0.5 shrink-0" />
+                          <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
                             {shop.location}, {shop.city}, {shop.state} - {shop.pincode}
                           </p>
                         </div>
-                        <div className="flex items-center gap-2.5">
-                          <Phone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                          <p className="text-xs text-slate-600 font-bold tracking-tight">
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-3 w-3 text-slate-400 shrink-0" />
+                          <p className="text-[11px] text-slate-600 font-bold tracking-tight">
                             {shop.phoneCountryCode} {shop.contactNumber}
                           </p>
                         </div>
                         {shop.vendor_category && (
-                          <div className="flex flex-wrap gap-1.5 pt-1">
+                          <div className="flex flex-wrap gap-1 pt-1">
                             {shop.vendor_category.split(",").slice(0, 3).map((cat: string) => (
-                              <Badge key={cat} variant="outline" className="text-[9px] bg-slate-50 border-slate-200 text-slate-500 font-bold px-1.5 py-0 h-4">
+                              <Badge key={cat} variant="outline" className="text-[8px] bg-slate-50 border-slate-100 text-slate-500 font-bold px-1 py-0 h-3.5 rounded-sm">
                                 {cat.trim()}
                               </Badge>
                             ))}
                             {shop.vendor_category.split(",").length > 3 && (
-                              <span className="text-[9px] text-slate-400 font-bold">+{shop.vendor_category.split(",").length - 3}</span>
+                              <span className="text-[8px] text-slate-400 font-bold">+{shop.vendor_category.split(",").length - 3}</span>
                             )}
                           </div>
                         )}
                       </div>
 
-                      <div className="pt-4 border-t border-slate-50 flex items-center justify-between">
+                      <div className="pt-3 border-t border-slate-50 flex items-center justify-between">
                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-black uppercase text-slate-400 tracking-tighter">GST COMPLIANCE:</span>
-                            <span className="text-[10px] font-bold text-slate-700">{shop.gstNo || shop.gstno || "Not Specified"}</span>
+                            <span className="text-[9px] font-bold uppercase text-slate-400 tracking-tighter">GST:</span>
+                            <span className="text-[9px] font-bold text-slate-600">{shop.gstNo || shop.gstno || "N/A"}</span>
                          </div>
                          <Button 
                           variant="link" 
                           size="sm" 
-                          className="text-slate-900 font-bold text-xs p-0 h-auto hover:no-underline"
+                          className="text-blue-600 font-bold text-[10px] p-0 h-auto hover:no-underline"
                           onClick={() => startEdit(shop)}
                          >
-                           CONFIGURE →
+                           EDIT DETAILS →
                          </Button>
                       </div>
                     </CardContent>

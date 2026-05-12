@@ -169,65 +169,64 @@ export function AddShopForm({ onShopAdded }: AddShopFormProps) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC] p-4">
       <div className="w-full max-w-2xl">
         {/* Header Section */}
         <div className="mb-8 text-center">
           <div className="flex justify-center mb-4">
-            <div className="p-4 bg-blue-100 rounded-full">
-              <Building2 size={32} className="text-blue-600" />
+            <div className="p-3 bg-blue-50 rounded-xl">
+              <Building2 size={24} className="text-blue-600" />
             </div>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Add Your Shop</h1>
-          <p className="text-gray-500 text-sm">
+          <h1 className="text-2xl font-bold text-slate-900 mb-1.5">Add Your Shop</h1>
+          <p className="text-slate-500 text-sm font-medium">
             Complete your supplier profile by adding your shop details
           </p>
         </div>
 
         {/* Info Card */}
-        <Card className="mb-6 border-blue-200 bg-blue-50">
-          <CardContent className="pt-5 pb-4">
+        <Card className="mb-6 border-blue-100 bg-blue-50/50 shadow-none">
+          <CardContent className="py-4">
             <div className="flex gap-3">
-              <AlertCircle className="text-blue-600 flex-shrink-0 mt-0.5" size={18} />
-              <p className="text-sm text-gray-700">
-                <strong>Shop Approval Required — </strong>
-                After you submit, our team reviews your details within 24–48 hours. You'll be notified once approved.
+              <AlertCircle className="text-blue-600 flex-shrink-0 mt-0.5" size={16} />
+              <p className="text-[13px] text-blue-900/80 font-medium leading-relaxed">
+                <strong className="text-blue-900">Shop Approval Required — </strong>
+                After submission, our team reviews your details within 24–48 hours. 
               </p>
             </div>
           </CardContent>
         </Card>
 
         {/* Form Card */}
-        <Card className="shadow-md border border-slate-200">
-          <CardHeader className="border-b border-slate-100 pb-4">
+        <Card className="shadow-sm border border-slate-200 rounded-xl overflow-hidden">
+          <CardHeader className="border-b border-slate-50 p-6 bg-[#FCFDFF]">
             <CardTitle className="text-lg font-bold text-slate-800">Shop Information</CardTitle>
-            <CardDescription>Provide accurate details about your shop</CardDescription>
+            <CardDescription className="text-xs font-medium">Provide accurate details about your shop</CardDescription>
           </CardHeader>
-          <CardContent className="pt-6">
+          <CardContent className="p-6">
             <form onSubmit={handleSubmitShop} className="space-y-5">
-              {/* Shop Name */}
               <div>
-                <Label htmlFor="name" className="text-sm font-semibold text-slate-700">
+                <Label htmlFor="name" className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">
                   Shop Name <Required />
                 </Label>
                 <Input
                   id="name"
                   type="text"
-                  placeholder="Enter your shop name"
+                  placeholder="e.g. Galaxy Hardware"
                   value={formData.name}
                   onChange={(e) => handleInputChange("name", e.target.value)}
                   required
-                  className="mt-1.5"
+                  className="h-10 rounded-lg text-sm border-slate-200"
                 />
               </div>
 
               {/* Vendor Category Multi-Select */}
               <div>
-                <Label className="text-sm font-semibold text-slate-700">
+                <Label className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">
                   Vendor Category <Required />
                 </Label>
-                <p className="text-xs text-slate-500 mt-0.5 mb-1.5">
-                  Select all categories your shop supplies. This determines which material templates are shown to you.
+                <p className="text-[11px] text-slate-500 font-medium mb-2 leading-tight">
+                  Select all categories your shop supplies. This determines your material catalogue.
                 </p>
 
                 {/* Selected Tags */}
@@ -256,14 +255,14 @@ export function AddShopForm({ onShopAdded }: AddShopFormProps) {
                   <button
                     type="button"
                     onClick={() => setCategoryDropdownOpen(!categoryDropdownOpen)}
-                    className="w-full flex items-center justify-between px-3 py-2 border border-slate-300 rounded-md bg-white text-sm text-slate-700 hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-300 transition"
+                    className="w-full flex items-center justify-between h-10 px-3 border border-slate-200 rounded-lg bg-white text-sm text-slate-700 hover:border-blue-400 focus:outline-none transition"
                   >
-                    <span className={selectedCategories.length === 0 ? "text-slate-400" : "text-slate-700"}>
+                    <span className={selectedCategories.length === 0 ? "text-slate-400" : "text-slate-700 font-medium"}>
                       {selectedCategories.length === 0
-                        ? "Select vendor categories..."
+                        ? "Select categories..."
                         : `${selectedCategories.length} selected`}
                     </span>
-                    <ChevronDown size={16} className={`text-slate-400 transition-transform ${categoryDropdownOpen ? "rotate-180" : ""}`} />
+                    <ChevronDown size={14} className={`text-slate-400 transition-transform ${categoryDropdownOpen ? "rotate-180" : ""}`} />
                   </button>
 
                   {categoryDropdownOpen && (
@@ -304,8 +303,8 @@ export function AddShopForm({ onShopAdded }: AddShopFormProps) {
 
               {/* Address and City */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="location" className="text-sm font-semibold text-slate-700">
+                <div className="space-y-1.5">
+                  <Label htmlFor="location" className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
                     Address <Required />
                   </Label>
                   <Input
@@ -315,11 +314,11 @@ export function AddShopForm({ onShopAdded }: AddShopFormProps) {
                     value={formData.location}
                     onChange={(e) => handleInputChange("location", e.target.value)}
                     required
-                    className="mt-1.5"
+                    className="h-10 rounded-lg text-sm border-slate-200"
                   />
                 </div>
-                <div>
-                  <Label htmlFor="city" className="text-sm font-semibold text-slate-700">
+                <div className="space-y-1.5">
+                  <Label htmlFor="city" className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
                     City <Required />
                   </Label>
                   <Input
@@ -329,46 +328,46 @@ export function AddShopForm({ onShopAdded }: AddShopFormProps) {
                     value={formData.city}
                     onChange={(e) => handleInputChange("city", e.target.value)}
                     required
-                    className="mt-1.5"
+                    className="h-10 rounded-lg text-sm border-slate-200"
                   />
                 </div>
               </div>
 
               {/* New Location and Pincode */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="new_location" className="text-sm font-semibold text-slate-700">Location</Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="new_location" className="text-xs font-bold text-slate-700 uppercase tracking-wider block">Landmark</Label>
                   <Input
                     id="new_location"
                     type="text"
-                    placeholder="Additional location info"
+                    placeholder="e.g. Near Market"
                     value={formData.new_location}
                     onChange={(e) => handleInputChange("new_location", e.target.value)}
-                    className="mt-1.5"
+                    className="h-10 rounded-lg text-sm border-slate-200"
                   />
                 </div>
-                <div>
-                  <Label htmlFor="pincode" className="text-sm font-semibold text-slate-700">Pin Code</Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="pincode" className="text-xs font-bold text-slate-700 uppercase tracking-wider block">Pin Code</Label>
                   <Input
                     id="pincode"
                     type="text"
-                    placeholder="Enter pin code"
+                    placeholder="600001"
                     value={formData.pincode}
                     onChange={(e) => handleInputChange("pincode", e.target.value)}
-                    className="mt-1.5"
+                    className="h-10 rounded-lg text-sm border-slate-200"
                   />
                 </div>
               </div>
 
               {/* State and Country */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="state" className="text-sm font-semibold text-slate-700">State</Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="state" className="text-xs font-bold text-slate-700 uppercase tracking-wider block">State</Label>
                   <Select
                     value={formData.state}
                     onValueChange={(value) => handleInputChange("state", value)}
                   >
-                    <SelectTrigger className="mt-1.5">
+                    <SelectTrigger className="h-10 rounded-lg text-sm border-slate-200">
                       <SelectValue placeholder="Select state" />
                     </SelectTrigger>
                     <SelectContent>
@@ -380,36 +379,36 @@ export function AddShopForm({ onShopAdded }: AddShopFormProps) {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label htmlFor="country" className="text-sm font-semibold text-slate-700">Country</Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="country" className="text-xs font-bold text-slate-700 uppercase tracking-wider block">Country</Label>
                   <Input
                     id="country"
                     type="text"
-                    placeholder="Country"
+                    placeholder="India"
                     value={formData.country}
                     onChange={(e) => handleInputChange("country", e.target.value)}
-                    className="mt-1.5"
+                    className="h-10 rounded-lg text-sm border-slate-200"
                   />
                 </div>
               </div>
 
               {/* Contact Number */}
-              <div>
-                <Label className="text-sm font-semibold text-slate-700">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
                   Contact Number <Required />
                 </Label>
-                <div className="flex gap-2 mt-1.5">
+                <div className="flex gap-2">
                   <Select
                     value={formData.phoneCountryCode}
                     onValueChange={(value) => handleInputChange("phoneCountryCode", value)}
                   >
-                    <SelectTrigger className="w-32">
+                    <SelectTrigger className="w-28 h-10 rounded-lg text-sm border-slate-200">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       {COUNTRY_CODES.map((item) => (
                         <SelectItem key={item.code} value={item.code}>
-                          {item.code} {item.country}
+                          {item.code}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -420,34 +419,21 @@ export function AddShopForm({ onShopAdded }: AddShopFormProps) {
                     value={formData.contactNumber}
                     onChange={(e) => handleInputChange("contactNumber", e.target.value)}
                     required
-                    className="flex-1"
+                    className="flex-1 h-10 rounded-lg text-sm border-slate-200"
                   />
                 </div>
               </div>
 
               {/* GST Number */}
-              <div>
-                <Label htmlFor="gstNo" className="text-sm font-semibold text-slate-700">GST Number</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="gstNo" className="text-xs font-bold text-slate-700 uppercase tracking-wider block">GST Number</Label>
                 <Input
                   id="gstNo"
                   type="text"
-                  placeholder="Enter GST number (optional)"
+                  placeholder="Optional"
                   value={formData.gstNo}
                   onChange={(e) => handleInputChange("gstNo", e.target.value)}
-                  className="mt-1.5"
-                />
-              </div>
-
-              {/* Terms and Conditions */}
-              <div>
-                <Label htmlFor="terms_and_conditions" className="text-sm font-semibold text-slate-700">Terms and Conditions</Label>
-                <Input
-                  id="terms_and_conditions"
-                  type="text"
-                  placeholder="Enter terms and conditions"
-                  value={formData.terms_and_conditions}
-                  onChange={(e) => handleInputChange("terms_and_conditions", e.target.value)}
-                  className="mt-1.5"
+                  className="h-10 rounded-lg text-sm border-slate-200"
                 />
               </div>
 
@@ -455,25 +441,25 @@ export function AddShopForm({ onShopAdded }: AddShopFormProps) {
               <Button
                 type="submit"
                 disabled={submitting}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold mt-2"
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold h-11 rounded-lg mt-2 text-sm shadow-sm transition-all active:scale-[0.98]"
               >
                 {submitting ? (
                   <>
-                    <span className="animate-spin mr-2">⏳</span>
-                    Submitting...
+                    <Loader2 className="animate-spin mr-2 h-4 w-4" />
+                    Registering...
                   </>
                 ) : (
-                  "Submit for Approval"
+                  "Complete Registration"
                 )}
               </Button>
             </form>
 
             {/* Bottom Info */}
-            <div className="mt-5 p-4 bg-slate-50 rounded-lg border border-slate-200">
+            <div className="mt-6 p-4 bg-emerald-50/50 rounded-lg border border-emerald-100">
               <div className="flex gap-3">
-                <CheckCircle2 className="text-green-600 flex-shrink-0 mt-0.5" size={18} />
-                <p className="text-sm text-slate-600">
-                  <strong>What happens next?</strong> After submitting, our approval team will review your shop details within 24–48 hours.
+                <CheckCircle2 className="text-emerald-600 flex-shrink-0 mt-0.5" size={16} />
+                <p className="text-[12px] text-emerald-800/80 font-medium leading-relaxed">
+                  <strong className="text-emerald-900">What's next?</strong> Our approval team will review your shop details within 24–48 hours.
                 </p>
               </div>
             </div>

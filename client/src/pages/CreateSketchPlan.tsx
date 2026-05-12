@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Save, ArrowLeft, Camera, Pencil, Layers, X, GripVertical, FileText, Search, MessageSquare, Image as ImageIcon, Move, Lock, Unlock, ShieldAlert, Cloud, Check, AlertCircle, AlertTriangle, FileUp, FileSpreadsheet, Download, Paperclip, ArrowUp, ArrowDown, ArrowUpToLine, ArrowDownToLine, GitBranch, Store, ChevronDown, ChevronLeft, ChevronRight, ArrowUpDown, ArrowDownAz, Users, Copy } from "lucide-react";
+import { Plus, Trash2, Save, ArrowLeft, Camera, Pencil, Layers, X, GripVertical, FileText, Search, MessageSquare, Image as ImageIcon, Move, Lock, Unlock, ShieldAlert, Cloud, Check, AlertCircle, AlertTriangle, FileUp, FileSpreadsheet, Download, Paperclip, ArrowUp, ArrowDown, ArrowUpToLine, ArrowDownToLine, GitBranch, Store, ChevronDown, ChevronLeft, ChevronRight, ArrowUpDown, ArrowDownAz, Users, Copy, Loader2 } from "lucide-react";
 import { Reorder, useDragControls } from "framer-motion";
 import { SketchPad } from "@/components/SketchPad";
 import apiFetch from "@/lib/api";
@@ -234,9 +234,12 @@ const SketchPlanRow = React.memo(({
   handleRowImageUpload, isLocked, isFiltering, isCompact, setPreviewImage,
   setSketchTarget, setSketchInitialData, lastSketchItemIdxRef, toast, setSketchDialogOpen,
   isSelected, toggleSelect, userRole, onImageDragStart, onImageDrop,
-  addDimension, removeDimension, updateDimension, cloneItem, categories
+  addDimension, removeDimension, updateDimension, cloneItem, categories,
+  includeSupply, setIncludeSupply, includeLabour, setIncludeLabour,
+  openNotesIdx
 }: any) => {
   const [itemSearchTab, setItemSearchTab] = useState<"all" | "material" | "product">("all");
+  const [showQuickSelection, setShowQuickSelection] = useState(true);
   const dragControls = useDragControls();
   const isSupplier = userRole === "supplier";
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -281,7 +284,15 @@ const SketchPlanRow = React.memo(({
         </Select>
       </td>
       <td className={cn("px-1", isCompact ? "py-0 w-[130px] min-w-[130px]" : "py-2 w-[220px] min-w-[220px] max-w-[220px]")}>
-        <Dialog>
+        <Dialog onOpenChange={(open) => {
+          if (open) {
+            setOpenNotesIdx(idx);
+            setMaterialSearch(item.description || "");
+          } else if (openNotesIdx === idx) {
+            setOpenNotesIdx(null);
+            setMaterialSearch("");
+          }
+        }}>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -312,14 +323,135 @@ const SketchPlanRow = React.memo(({
             </DialogHeader>
             <div className="flex-1 overflow-y-auto p-6 pt-2 custom-scrollbar space-y-4">
               <div>
-                <Label className="text-xs font-bold uppercase text-slate-500 mb-2 block">Main Item Notes (Site Specifications)</Label>
+                <div className="flex items-center justify-between mb-2">
+                  <Label className="text-xs font-bold uppercase text-slate-500">Main Item Notes (Site Specifications)</Label>
+                  <div className="flex items-center gap-4 px-3 py-1 bg-slate-50 rounded-full border border-slate-200">
+                    <div className="flex items-center space-x-1.5">
+                      <Checkbox
+                        id={`notes-supply-${idx}`}
+                        checked={includeSupply}
+                        onCheckedChange={(checked) => setIncludeSupply(!!checked)}
+                        className="h-3.5 w-3.5"
+                      />
+                      <Label htmlFor={`notes-supply-${idx}`} className="text-[10px] font-bold text-slate-600 cursor-pointer">Supply</Label>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <Checkbox
+                        id={`notes-labour-${idx}`}
+                        checked={includeLabour}
+                        onCheckedChange={(checked) => setIncludeLabour(!!checked)}
+                        className="h-3.5 w-3.5"
+                      />
+                      <Label htmlFor={`notes-labour-${idx}`} className="text-[10px] font-bold text-slate-600 cursor-pointer">Labour</Label>
+                    </div>
+                  </div>
+                </div>
                 <Textarea
                   value={item.description}
-                  onChange={(e) => updateItem(idx, "description", e.target.value)}
-                  placeholder="Enter detailed site notes or specifications..."
-                  className="min-h-[120px] resize-none"
+                  onChange={(e) => {
+                    updateItem(idx, "description", e.target.value);
+                    setMaterialSearch(e.target.value);
+                  }}
+                  onFocus={() => {
+                    setOpenNotesIdx(idx);
+                    setMaterialSearch(item.description || "");
+                  }}
+                  placeholder="Enter detailed site notes or specifications... (Typing here searches items from database)"
+                  className="min-h-[100px] resize-none focus:ring-2 focus:ring-indigo-500/20"
                   disabled={isLocked}
                 />
+                
+                {/* Embedded Search Results inside Notes Dialog */}
+                {materialSearch.trim().length >= 2 && (
+                  <div className="mt-2 border rounded-lg bg-white shadow-sm overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div 
+                      className="bg-slate-50 px-3 py-1.5 border-b flex items-center justify-between cursor-pointer hover:bg-slate-100 transition-colors"
+                      onClick={() => setShowQuickSelection(!showQuickSelection)}
+                    >
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                        {showQuickSelection ? <ChevronDown className="w-3 h-3 text-indigo-500" /> : <ChevronRight className="w-3 h-3 text-slate-400" />}
+                        Quick Item Selection {searching && "..."}
+                      </span>
+                      {searching && <Loader2 className="w-3 h-3 animate-spin text-indigo-500" />}
+                    </div>
+                    {showQuickSelection && (
+                      <div className="max-h-[200px] overflow-y-auto divide-y divide-slate-100 custom-scrollbar">
+                      {searchResults
+                        .filter((m: any) => {
+                          if (m.type === "Template") return false;
+
+                          const nameLower = (m.name || "").toLowerCase();
+                          const labourKeywords = ["labour", "service", "installation", "install", "refixing", "removing", "fixing", "fitting", "work", "charges", "repair", "maintenance"];
+                          const isLabourItem = labourKeywords.some(key => nameLower.includes(key));
+                          const isSupplyItem = !isLabourItem;
+
+                          // Both checked -> Only show Products
+                          if (includeSupply && includeLabour) {
+                            return m.type === "Product";
+                          }
+                          
+                          // Supply checked -> Only show Materials that are supply items
+                          if (includeSupply && !includeLabour) {
+                            return m.type === "Material" && isSupplyItem;
+                          }
+
+                          // Labour checked -> Only show Materials that are labour items
+                          if (!includeSupply && includeLabour) {
+                            return m.type === "Material" && isLabourItem;
+                          }
+
+                          // Both unchecked -> show both Materials and Products as fallback
+                          return m.type === "Material" || m.type === "Product";
+                        })
+                        .sort((a: any, b: any) => {
+                          // Prioritize Products in the results
+                          if (a.type === 'Product' && b.type !== 'Product') return -1;
+                          if (a.type !== 'Product' && b.type === 'Product') return 1;
+                          return (a.name || "").localeCompare(b.name || "");
+                        })
+                        .slice(0, 15) // Show a few more for better choice
+                        .map((m: any) => {
+                          const nLower = (m.name || "").toLowerCase();
+                          const labourKeywords = ["labour", "service", "installation", "install", "refixing", "removing", "fixing", "fitting", "work", "charges", "repair", "maintenance"];
+                          const isLabour = labourKeywords.some(key => nLower.includes(key));
+                          const isProduct = m.type === 'Product';
+                          return (
+                            <div 
+                              key={`${m.type}-${m.id}`}
+                              className={cn(
+                                "p-2 hover:bg-indigo-50 cursor-pointer transition-colors flex items-center justify-between group",
+                                isProduct && "bg-blue-50/30 border-l-2 border-l-blue-400"
+                              )}
+                              onClick={() => {
+                                selectMaterial(idx, m);
+                                setMaterialSearch("");
+                                toast({ title: "Item Updated", description: `Selected ${m.type}: ${m.name}` });
+                              }}
+                            >
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                  <span className={cn("font-semibold text-xs text-slate-700", isProduct && "text-blue-700")}>{m.name}</span>
+                                  <Badge variant={isProduct ? "default" : "outline"} className={cn("text-[8px] h-3.5 px-1 uppercase tracking-tighter scale-90", isProduct && "bg-blue-600")}>{m.type}</Badge>
+                                  {isLabour ? (
+                                    <Badge className="bg-orange-100 text-orange-700 border-none text-[8px] h-3.5 px-1 font-bold">LABOUR</Badge>
+                                  ) : (
+                                    <Badge className="bg-blue-100 text-blue-700 border-none text-[8px] h-3.5 px-1 font-bold">SUPPLY</Badge>
+                                  )}
+                                </div>
+                                <span className="text-[9px] text-slate-400 font-medium italic truncate max-w-[400px]">
+                                  {m.category || "Uncategorized"} {m.code ? `• ${m.code}` : ''}
+                                </span>
+                              </div>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-indigo-600">
+                                <Plus className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+              )}
               </div>
 
               <div className="border-t pt-4">
@@ -362,7 +494,7 @@ const SketchPlanRow = React.memo(({
                         <Label className="text-[10px] text-slate-400 font-bold mb-1.5 block text-center uppercase tracking-tight">Dimensions (L / W / H)</Label>
                         <div className="flex gap-1 px-1">
                           <Input
-                            value={dim.length}
+                            value={Number(dim.length) === 0 ? "" : dim.length}
                             onChange={(e) => updateDimension(idx, dIdx, "length", e.target.value)}
                             placeholder="L"
                             className="h-9 text-[11px] text-center px-0.5 font-bold bg-white border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
@@ -370,7 +502,7 @@ const SketchPlanRow = React.memo(({
                           />
                           <div className="flex items-center text-slate-300 px-0.5">/</div>
                           <Input
-                            value={dim.width}
+                            value={Number(dim.width) === 0 ? "" : dim.width}
                             onChange={(e) => updateDimension(idx, dIdx, "width", e.target.value)}
                             placeholder="W"
                             className="h-9 text-[11px] text-center px-0.5 font-bold bg-white border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
@@ -378,7 +510,7 @@ const SketchPlanRow = React.memo(({
                           />
                           <div className="flex items-center text-slate-300 px-0.5">/</div>
                           <Input
-                            value={dim.height}
+                            value={Number(dim.height) === 0 ? "" : dim.height}
                             onChange={(e) => updateDimension(idx, dIdx, "height", e.target.value)}
                             placeholder="H"
                             className="h-9 text-[11px] text-center px-0.5 font-bold bg-white border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
@@ -517,37 +649,51 @@ const SketchPlanRow = React.memo(({
                       Products
                     </button>
                   </div>
+
                   <CommandList className="max-h-[280px]">
                     {searching && <CommandEmpty>Loading...</CommandEmpty>}
                     {!searching && searchResults.length === 0 && <CommandEmpty>No items found.</CommandEmpty>}
                     {!searching && searchResults.length > 0 && (
-                      <CommandGroup heading={`${itemSearchTab === 'all' ? 'All Items' : itemSearchTab === 'material' ? 'Materials' : 'Products'} (${searchResults.filter((m: any) => (itemSearchTab === 'all' && m.type !== 'Template') || (itemSearchTab === 'material' && m.type === 'Material') || (itemSearchTab === 'product' && m.type === 'Product')).length})`}>
+                      <CommandGroup heading={`${itemSearchTab === 'all' ? 'All Items' : itemSearchTab === 'material' ? 'Materials' : 'Products'} (${searchResults.filter((m: any) => {
+                        if (itemSearchTab === "material") return m.type === "Material";
+                        if (itemSearchTab === "product") return m.type === "Product";
+                        return m.type !== "Template"; // 'all' shows Materials and Products
+                      }).length})`}>
                         {searchResults
                           .filter((m: any) => {
-                            if (itemSearchTab === "all") return m.type !== "Template";
                             if (itemSearchTab === "material") return m.type === "Material";
                             if (itemSearchTab === "product") return m.type === "Product";
-                            return true;
+                            return m.type !== "Template";
                           })
                           .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""))
-                          .map((m: any) => (
-                            <CommandItem
-                              key={`${m.type}-${m.id}`}
-                              onSelect={() => { selectMaterial(idx, m); setOpenPopoverIdx(null); }}
-                              className="cursor-pointer"
-                            >
-                              <div className="flex flex-col">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-semibold text-sm">{m.name}</span>
-                                  <Badge variant="outline" className="text-[10px] scale-90">{m.type}</Badge>
+                          .map((m: any) => {
+                            const nameLower = (m.name || "").toLowerCase();
+                            const isLabourItem = nameLower.includes("labour") || nameLower.includes("service") || nameLower.includes("installation") || nameLower.includes("install");
+                            
+                            return (
+                              <CommandItem
+                                key={`${m.type}-${m.id}`}
+                                onSelect={() => { selectMaterial(idx, m); setOpenPopoverIdx(null); }}
+                                className="cursor-pointer"
+                              >
+                                <div className="flex flex-col">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-semibold text-sm">{m.name}</span>
+                                    <Badge variant="outline" className="text-[10px] scale-90">{m.type}</Badge>
+                                    {isLabourItem ? (
+                                      <Badge className="bg-orange-100 text-orange-700 border-none text-[9px] h-4 font-bold">LABOUR</Badge>
+                                    ) : (
+                                      <Badge className="bg-blue-100 text-blue-700 border-none text-[9px] h-4 font-bold">SUPPLY</Badge>
+                                    )}
+                                  </div>
+                                  <div className="flex gap-2 text-[10px] text-slate-500">
+                                    {m.code && <span>Code: {m.code}</span>}
+                                    {m.category && <span>Category: {m.category}</span>}
+                                  </div>
                                 </div>
-                                <div className="flex gap-2 text-[10px] text-slate-500">
-                                  {m.code && <span>Code: {m.code}</span>}
-                                  {m.category && <span>Category: {m.category}</span>}
-                                </div>
-                              </div>
-                            </CommandItem>
-                          ))}
+                              </CommandItem>
+                            );
+                          })}
                       </CommandGroup>
                     )}
                   </CommandList>
@@ -791,12 +937,13 @@ export default function CreateSketchPlan() {
   
   const [sketchTarget, setSketchTarget] = useState<string>("main"); // "main" or row id/index
   const [openPopoverIdx, setOpenPopoverIdx] = useState<number | null>(null);
+  const [openNotesIdx, setOpenNotesIdx] = useState<number | null>(null);
 
   // PDF / Export State
   const [isPdfDialogOpen, setIsPdfDialogOpen] = useState(false);
   const [includePlanPhotosInExport, setIncludePlanPhotosInExport] = useState(true);
   const [includeSubNotesInExport, setIncludeSubNotesInExport] = useState(true);
-  const [selectedPdfCols, setSelectedPdfCols] = useState<string[]>(["#", "Item", "Notes", "L", "W", "H", "Qty", "Unit", "Pre Photos", "Post Photos"]
+  const [selectedPdfCols, setSelectedPdfCols] = useState<string[]>(["#", "Category", "Item", "Notes", "L", "W", "H", "Qty", "Unit", "Pre Photos", "Post Photos"]
   );
   const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
   const [recipientEmail, setRecipientEmail] = useState("");
@@ -822,6 +969,8 @@ export default function CreateSketchPlan() {
   const [materialSearch, setMaterialSearch] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
+  const [includeSupply, setIncludeSupply] = useState(true);
+  const [includeLabour, setIncludeLabour] = useState(true);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [vendors, setVendors] = useState<any[]>([]);
@@ -1339,10 +1488,10 @@ export default function CreateSketchPlan() {
   // Re-run search when user types (debounced)
   useEffect(() => {
     const q = materialSearch.trim();
-    if (openPopoverIdx === null) return; // only search when panel is open
+    if (openPopoverIdx === null && openNotesIdx === null) return; // only search when panel or notes are open
     const timer = setTimeout(() => loadMaterials(q), q.length >= 2 ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [materialSearch, openPopoverIdx, loadMaterials]);
+  }, [materialSearch, openPopoverIdx, openNotesIdx, loadMaterials]);
 
   const addItem = useCallback(() => {
     // Clear filters to ensure the new item is visible
@@ -1639,6 +1788,7 @@ export default function CreateSketchPlan() {
     const newItems = [...items];
     newItems[idx].material_id = material.id;
     newItems[idx].item_name = material.name;
+    newItems[idx].rate = parseFloat(material.rate) || 0;
     if (updateCategory && material.category) newItems[idx].category = material.category;
     if (material.unit) {
       newItems[idx].unit = material.unit;
@@ -1660,6 +1810,85 @@ export default function CreateSketchPlan() {
             name: `Template_${material.name}`
           };
           newItems[idx].preImages = [...(newItems[idx].preImages || []), materialImage];
+        }
+      }
+    }
+
+    // Smart Supply & Labour Auto Matching
+    if (includeSupply && includeLabour) {
+      const name = (material.name || "").toLowerCase();
+      const labourKeywords = ["labour", "service", "installation", "install", "refixing", "removing", "fixing", "fitting", "work", "charges", "repair", "maintenance"];
+      const isLabour = labourKeywords.some(key => name.includes(key));
+      const isSupply = !isLabour;
+
+      if (isSupply || isLabour) {
+        // More robust base name extraction
+        const baseName = material.name
+          .replace(/\b(supply|labour|service|installation|install)\b/gi, "")
+          .replace(/[-\s]+$/, "")
+          .replace(/^[-\s]+/, "")
+          .trim();
+        
+        if (baseName.length > 2) {
+          const oppositeType = isSupply ? "labour" : "supply";
+          const baseWords = baseName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+          
+          // Look for the pair in current search results
+          const pair = searchResults.find(m => {
+            if (m.id === material.id) return false;
+            const mName = (m.name || "").toLowerCase();
+            const mIsLabour = mName.includes("labour") || mName.includes("service") || mName.includes("installation") || mName.includes("install");
+            
+            // Type must be opposite
+            if (isSupply && !mIsLabour) return false;
+            if (isLabour && mIsLabour) return false;
+
+            // Name must contain the primary keywords of the base name
+            // For example, if searching 'Grid Ceiling', the pair must also have 'Grid' and 'Ceiling'
+            return baseWords.every(word => mName.includes(word));
+          });
+
+          if (pair) {
+            // Check if it's already in the items list to avoid duplicates
+            const alreadyExists = newItems.some(it => 
+              it.item_name === pair.name && 
+              it.category === (pair.category || newItems[idx].category)
+            );
+            
+            if (!alreadyExists) {
+              const pairedItem: PlanItem = {
+                id: `ski-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                item_name: pair.name,
+                material_id: pair.id,
+                rate: parseFloat(pair.rate) || 0,
+                description: newItems[idx].description,
+                length: newItems[idx].length,
+                width: newItems[idx].width,
+                height: newItems[idx].height,
+                qty: newItems[idx].qty,
+                unit: pair.unit || newItems[idx].unit,
+                dimension_unit: newItems[idx].dimension_unit,
+                category: pair.category || newItems[idx].category,
+                remarks: "",
+                preImages: [],
+                postImages: [],
+                images: []
+              };
+              
+              if (pair.image) {
+                const pairUrls = parseImages(pair.image);
+                if (pairUrls.length > 0) {
+                  pairedItem.preImages = [{ url: pairUrls[0], name: `Template_${pair.name}` }];
+                }
+              }
+
+              newItems.splice(idx + 1, 0, pairedItem);
+              toast({ 
+                title: "Smart Matching", 
+                description: `Automatically added matching ${oppositeType === 'labour' ? 'Labour' : 'Supply'} item: ${pair.name}` 
+              });
+            }
+          }
         }
       }
     }
@@ -1969,6 +2198,8 @@ export default function CreateSketchPlan() {
           headers.forEach(h => {
             if (h === "#") {
               row.push(dIdx === 0 ? sortedAllItems.findIndex(it => it.id === item.id) + 1 : "");
+            } else if (h === "Category") {
+              row.push(dIdx === 0 ? item.category || "" : "");
             } else if (h === "Item") {
               row.push(dIdx === 0 ? item.item_name : "");
             } else if (h === "Notes") {
@@ -2157,6 +2388,7 @@ export default function CreateSketchPlan() {
         itemDims.forEach((dim: any, dIdx: number) => {
           const row: any = {};
           if (selectedPdfCols.includes("#")) row["S.No"] = dIdx === 0 ? sortedAllItems.findIndex(it => it.id === item.id) + 1 : "";
+          row["Category"] = dIdx === 0 ? item.category || "" : "";
           if (selectedPdfCols.includes("Item")) row["Item Name"] = dIdx === 0 ? item.item_name : "";
           if (selectedPdfCols.includes("Notes")) row["Notes"] = dIdx === 0 ? item.description : (dim.note || "");
           if (selectedPdfCols.includes("L")) row["L"] = dim.length || "";
@@ -2182,6 +2414,7 @@ export default function CreateSketchPlan() {
       // 5. Basic cell width adjustments (approximation)
       const colWidths = [
         { wch: 8 },  // S.No
+        { wch: 15 }, // Category
         { wch: 25 }, // Item Name
         { wch: 35 }, // Notes
         { wch: 8 },  // L
@@ -3018,6 +3251,12 @@ export default function CreateSketchPlan() {
                             updateDimension={updateDimension}
                             cloneItem={cloneItem}
                             categories={categories}
+                            includeSupply={includeSupply}
+                            setIncludeSupply={setIncludeSupply}
+                            includeLabour={includeLabour}
+                            setIncludeLabour={setIncludeLabour}
+                            openNotesIdx={openNotesIdx}
+                            setOpenNotesIdx={setOpenNotesIdx}
                           />
                           );
                         })}

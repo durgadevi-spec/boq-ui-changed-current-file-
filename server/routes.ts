@@ -317,6 +317,10 @@ export async function registerRoutes(
     await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS is_locked BOOLEAN DEFAULT FALSE");
     await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS last_template_snapshot JSONB");
     await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS is_last_final BOOLEAN DEFAULT FALSE");
+    await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS final_budget NUMERIC");
+    await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS final_revenue NUMERIC");
+    await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS final_profit NUMERIC");
+    await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS final_margin NUMERIC");
 
     // Fix unique constraint to include type
     try {
@@ -2119,41 +2123,76 @@ export async function registerRoutes(
       let templatesRows: any[] = [];
       let productsRows: any[] = [];
 
-      // Query materials table (independent try/catch)
       try {
-        const r = hasQuery
-          ? await query(`SELECT m.id::text, m.name, COALESCE(m.code,'') as code, m.rate, m.unit, m.category, COALESCE(m.image, t.image) as image, 'Material' as type FROM materials m LEFT JOIN material_templates t ON m.template_id = t.id WHERE m.name ILIKE $1 OR COALESCE(m.code,'') ILIKE $1 OR COALESCE(m.category,'') ILIKE $1 OR COALESCE(m.subcategory,'') ILIKE $1 ORDER BY m.name ASC LIMIT 500`, [searchPattern])
-          : await query(`SELECT m.id::text, m.name, COALESCE(m.code,'') as code, m.rate, m.unit, m.category, COALESCE(m.image, t.image) as image, 'Material' as type FROM materials m LEFT JOIN material_templates t ON m.template_id = t.id ORDER BY m.name ASC LIMIT 500`);
-        materialsRows = r.rows || [];
-        console.log(`[api/search] materials: ${materialsRows.length}`);
+        // Multi-word search optimization
+        const queryStr = String(q || "").trim();
+        const words = queryStr.split(/\s+/).filter(w => w.length > 0);
+        const searchPattern = words.length > 0 ? `%${words.join('%')}%` : '%';
+        const compactPattern = queryStr ? `%${queryStr.replace(/\s+/g, "")}%` : '%';
+
+        // Query materials table
+        const materialsRes = hasQuery
+          ? await query(`
+              SELECT m.id::text, m.name, COALESCE(m.code,'') as code, m.rate, m.unit, m.category, COALESCE(m.image, t.image) as image, 'Material' as type 
+              FROM materials m 
+              LEFT JOIN material_templates t ON m.template_id = t.id 
+              WHERE (m.name ILIKE $1 OR REPLACE(m.name, ' ', '') ILIKE $2
+                 OR COALESCE(m.code,'') ILIKE $1 OR COALESCE(m.category,'') ILIKE $1)
+                 AND m.approved IS TRUE
+              ORDER BY m.name ASC LIMIT 100`, [searchPattern, compactPattern])
+          : await query(`SELECT m.id::text, m.name, COALESCE(m.code,'') as code, m.rate, m.unit, m.category, COALESCE(m.image, t.image) as image, 'Material' as type FROM materials m LEFT JOIN material_templates t ON m.template_id = t.id WHERE m.approved IS TRUE ORDER BY m.name ASC LIMIT 100`);
+        materialsRows = materialsRes.rows || [];
+
+        // Query templates table
+        const templatesRes = hasQuery
+          ? await query(`
+              SELECT id::text, name, COALESCE(code,'') as code, null as rate, null as unit, COALESCE(category,'') as category, image, 'Template' as type 
+              FROM material_templates 
+              WHERE name ILIKE $1 OR REPLACE(name, ' ', '') ILIKE $2
+                 OR COALESCE(code,'') ILIKE $1 OR COALESCE(category,'') ILIKE $1
+              ORDER BY name ASC LIMIT 100`, [searchPattern, compactPattern])
+          : await query(`SELECT id::text, name, COALESCE(code,'') as code, null as rate, null as unit, COALESCE(category,'') as category, image, 'Template' as type FROM material_templates ORDER BY name ASC LIMIT 100`);
+        templatesRows = templatesRes.rows || [];
+
+        // Query products table - only approved products with at least one approved config
+        const productsRes = hasQuery
+          ? await query(`
+              SELECT DISTINCT ON (p.name) p.id::text, p.name, null as code, null as rate, null as unit, COALESCE(p.subcategory, '') as category, null as image, 'Product' as type 
+              FROM products p 
+              WHERE (p.name ILIKE $1 OR REPLACE(p.name, ' ', '') ILIKE $2)
+                AND EXISTS (
+                  SELECT 1 FROM product_approvals pa WHERE pa.product_id = p.id AND pa.status = 'approved'
+                )
+              ORDER BY p.name ASC LIMIT 100`, [searchPattern, compactPattern])
+          : await query(`
+              SELECT DISTINCT ON (p.name) p.id::text, p.name, null as code, null as rate, null as unit, COALESCE(p.subcategory, '') as category, null as image, 'Product' as type 
+              FROM products p 
+              WHERE EXISTS (
+                SELECT 1 FROM product_approvals pa WHERE pa.product_id = p.id AND pa.status = 'approved'
+              )
+              ORDER BY p.name ASC LIMIT 100`);
+        productsRows = productsRes.rows || [];
+
+        console.log(`[api/search] results: materials=${materialsRows.length}, templates=${templatesRows.length}, products=${productsRows.length}`);
       } catch (e) {
-        console.error("[api/search] materials query error:", e);
+        console.error("[api/search] search query error:", e);
       }
 
-      // Query material_templates table (independent try/catch)
-      try {
-        const r = hasQuery
-          ? await query(`SELECT id::text, name, COALESCE(code,'') as code, null as rate, null as unit, COALESCE(category,'') as category, image, 'Template' as type FROM material_templates WHERE name ILIKE $1 OR COALESCE(code,'') ILIKE $1 OR COALESCE(category,'') ILIKE $1 ORDER BY name ASC LIMIT 500`, [searchPattern])
-          : await query(`SELECT id::text, name, COALESCE(code,'') as code, null as rate, null as unit, COALESCE(category,'') as category, image, 'Template' as type FROM material_templates ORDER BY name ASC LIMIT 500`);
-        templatesRows = r.rows || [];
-        console.log(`[api/search] templates: ${templatesRows.length}`);
-      } catch (e) {
-        console.error("[api/search] material_templates query error:", e);
-      }
+      // Filter out archived/trashed products and materials (same logic as /api/products)
+      const archivedProductIds = archiveService.getArchivedItemIds('products');
+      const trashedProductIds = archiveService.getTrashedItemIds('products');
+      const archivedMaterialIds = archiveService.getArchivedItemIds('materials');
+      const trashedMaterialIds = archiveService.getTrashedItemIds('materials');
 
-      // Query products table (independent try/catch)
-      // Join material_subcategories -> material_categories to get the parent category name
-      try {
-        const r = hasQuery
-          ? await query(`SELECT p.id::text, p.name, null as code, null as rate, null as unit, COALESCE(mc.name, ms.category, p.subcategory, '') as category, p.image, 'Product' as type FROM products p LEFT JOIN material_subcategories ms ON LOWER(TRIM(p.subcategory)) = LOWER(TRIM(ms.name)) LEFT JOIN material_categories mc ON LOWER(TRIM(ms.category)) = LOWER(TRIM(mc.name)) WHERE p.name ILIKE $1 OR COALESCE(mc.name, ms.category, p.subcategory, '') ILIKE $1 ORDER BY p.name ASC LIMIT 500`, [searchPattern])
-          : await query(`SELECT p.id::text, p.name, null as code, null as rate, null as unit, COALESCE(mc.name, ms.category, p.subcategory, '') as category, p.image, 'Product' as type FROM products p LEFT JOIN material_subcategories ms ON LOWER(TRIM(p.subcategory)) = LOWER(TRIM(ms.name)) LEFT JOIN material_categories mc ON LOWER(TRIM(ms.category)) = LOWER(TRIM(mc.name)) ORDER BY p.name ASC LIMIT 500`);
-        productsRows = r.rows || [];
-        console.log(`[api/search] products: ${productsRows.length}`);
-      } catch (e) {
-        console.error("[api/search] products query error:", e);
-      }
+      const filteredProducts = productsRows.filter(
+        (r: any) => !archivedProductIds.includes(r.id) && !trashedProductIds.includes(r.id)
+      );
+      const filteredMaterials = materialsRows.filter(
+        (r: any) => !archivedMaterialIds.includes(r.id) && !trashedMaterialIds.includes(r.id)
+      );
 
-      const combined = [...materialsRows, ...templatesRows, ...productsRows];
+      console.log(`[api/search] after archive filter: products=${filteredProducts.length} (removed ${productsRows.length - filteredProducts.length} archived/trashed)`);
+      const combined = [...filteredMaterials, ...templatesRows, ...filteredProducts];
       console.log(`[api/search] total: ${combined.length} results for "${q || '(all)'}"`);
       res.json({ materials: combined });
     } catch (err) {
@@ -5286,6 +5325,8 @@ export async function registerRoutes(
   app.post("/api/boq-versions/:id/make-final", authMiddleware, async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
+      const { budget, revenue } = req.body; // Expecting calculated totals from frontend
+
       const vResp = await query("SELECT project_id, type FROM boq_versions WHERE id = $1", [id]);
 
       if (vResp.rows.length === 0) {
@@ -5295,14 +5336,22 @@ export async function registerRoutes(
       const { project_id, type } = vResp.rows[0];
 
       // 1. Clear existing final flag for this project/type
-      // 1. Clear ALL is_last_final flags for this project and type first (BOMs don't affect BOQs etc)
       await query("UPDATE boq_versions SET is_last_final = FALSE WHERE project_id = $1 AND type = $2", [project_id, type]);
-      // Double check - ensures no "floating" flags on other projects by mistake
-      await query("UPDATE boq_versions SET is_last_final = FALSE WHERE id = $1", ["some-bogus-id-that-wont-exist"]); // Just a dummy sync
 
-      // 2. Set this one as final
-      const updateRes = await query("UPDATE boq_versions SET is_last_final = TRUE WHERE id = $1", [id]);
-      console.log(`[make-final] Set version ${id} to is_last_final=TRUE. Result: ${updateRes.rowCount} rows.`);
+      // 2. Set this one as final and save snapshots if provided
+      let updateSql = "UPDATE boq_versions SET is_last_final = TRUE";
+      const params: any[] = [id];
+
+      if (budget !== undefined && revenue !== undefined) {
+        const profit = revenue - budget;
+        const margin = revenue !== 0 ? (profit / revenue) * 100 : 0;
+        updateSql += ", final_budget = $2, final_revenue = $3, final_profit = $4, final_margin = $5";
+        params.push(budget, revenue, profit, margin);
+      }
+
+      updateSql += " WHERE id = $1";
+      const updateRes = await query(updateSql, params);
+      console.log(`[make-final] Set version ${id} to is_last_final=TRUE. Snapshot: budget=${budget}, revenue=${revenue}`);
 
       // 3. Sync the project price to this new final version
       await recalculateProjectValue(project_id, id);
@@ -5311,6 +5360,133 @@ export async function registerRoutes(
     } catch (err) {
       console.error("[make-final] Error:", err);
       res.status(500).json({ message: "Failed to mark as final" });
+    }
+  });
+
+  app.get("/api/projects/:id/final-profitability", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const result = await query(
+        `SELECT id, version_number, type, final_budget as "budgetValue", 
+                final_revenue as "revenueValue", final_profit as "profitValue", 
+                final_margin as "margin"
+         FROM boq_versions 
+         WHERE project_id = $1 AND is_last_final = TRUE
+         ORDER BY CASE WHEN type = 'boq' THEN 1 ELSE 2 END ASC
+         LIMIT 1`,
+        [id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.json(null);
+      }
+
+      res.json(result.rows[0]);
+    } catch (err) {
+      console.error("GET /api/projects/:id/final-profitability error", err);
+      res.status(500).json({ message: "Failed to fetch profitability data" });
+    }
+  });
+
+  app.get("/api/projects/:id/management-report", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      // 1. Get Project
+      const projectRes = await query("SELECT * FROM boq_projects WHERE id = $1", [id]);
+      if (projectRes.rows.length === 0) return res.status(404).json({ message: "Project not found" });
+      const project = projectRes.rows[0];
+
+      // 2. Get Final Version
+      const finalVerRes = await query(
+        `SELECT * FROM boq_versions WHERE project_id = $1 AND is_last_final = TRUE 
+         ORDER BY CASE WHEN type = 'boq' THEN 1 ELSE 2 END ASC LIMIT 1`,
+        [id]
+      );
+      const finalVersion = finalVerRes.rows[0];
+
+      // 3. Get All Versions
+      const allVersionsRes = await query("SELECT * FROM boq_versions WHERE project_id = $1 ORDER BY version_number DESC", [id]);
+      const versions = allVersionsRes.rows;
+
+      // 4. Aggregates from Final Version Items
+      let categoryBreakdown: any[] = [];
+      let split = { material: 0, labour: 0, supply: 0, install: 0 };
+      let topCategories: any[] = [];
+
+      if (finalVersion) {
+        const itemsRes = await query("SELECT table_data FROM boq_items WHERE version_id = $1", [finalVersion.id]);
+        const items = itemsRes.rows;
+
+        const categories: Record<string, { budget: number, revenue: number }> = {};
+
+        items.forEach(item => {
+          const td = typeof item.table_data === 'string' ? JSON.parse(item.table_data) : item.table_data;
+          const catName = td.category || 'Uncategorized';
+          if (!categories[catName]) categories[catName] = { budget: 0, revenue: 0 };
+
+          const itemBudget = Number(td.total_budget || td.internal_cost || 0);
+          const itemRevenue = Number(td.total_revenue || td.project_value || 0);
+
+          categories[catName].budget += itemBudget;
+          categories[catName].revenue += itemRevenue;
+
+          // Calculate splits (Material vs Labour)
+          // We use the same logic as the BOQ engine to identify cost components
+          const lines = Array.isArray(td.materialLines) ? td.materialLines :
+            Array.isArray(td.step11_items) ? td.step11_items : [];
+
+          const scalingFactor = Number(td.targetRequiredQty || 1);
+
+          lines.forEach((l: any) => {
+            // Handle different property names for Qty and Rates
+            const rawQty = Number(l.roundOff || l.qty || l.requiredQty || l.quantity || 0);
+            const qty = td.materialLines ? (rawQty * scalingFactor) : rawQty;
+
+            const sRate = Number(l.supplyRate || l.supply_rate || l.rate || 0);
+            const iRate = Number(l.installRate || l.install_rate || l.labour_rate || 0);
+
+            split.material += qty * sRate;
+            split.labour += qty * iRate;
+
+            split.supply += qty * sRate;
+            split.install += qty * iRate;
+          });
+
+          // If no line-level data was found but we have a total_budget, 
+          // we'll try to use the item-level internal cost if possible
+          if (lines.length === 0 && itemBudget > 0) {
+            // Fallback: If we can't find a split, assume it's mostly material
+            split.material += itemBudget;
+          }
+        });
+
+        categoryBreakdown = Object.entries(categories).map(([name, vals]) => {
+          const profit = vals.revenue - vals.budget;
+          const margin = vals.revenue !== 0 ? (profit / vals.revenue) * 100 : 0;
+          return {
+            name,
+            budget: vals.budget,
+            revenue: vals.revenue,
+            profit,
+            margin
+          };
+        }).sort((a, b) => b.revenue - a.revenue);
+
+        topCategories = categoryBreakdown.slice(0, 5);
+      }
+
+      res.json({
+        project,
+        finalVersion,
+        versions,
+        categoryBreakdown,
+        split,
+        topCategories
+      });
+    } catch (err) {
+      console.error("[management-report] Error:", err);
+      res.status(500).json({ message: "Failed to generate management report data" });
     }
   });
 
@@ -8421,14 +8597,14 @@ export async function registerRoutes(
       const extractShopNames = (items: any[], scale: number = 1) => {
         for (const item of items) {
           const qty = (parseFloat(item.qty || item.quantity || item.requiredQty || 1) || 0) * scale;
-          
+
           if (qty > 0) {
             const name = item.shop_name || item.shopName;
             if (name && typeof name === "string" && name.trim().length > 0) {
               shopNames.add(name.trim());
             }
           }
-          
+
           // Drill into nested step11_items (consolidated products)
           if (Array.isArray(item.step11_items)) {
             extractShopNames(item.step11_items, scale);
@@ -8438,12 +8614,12 @@ export async function registerRoutes(
 
       for (const row of itemsResult.rows) {
         const td = parseSafeTableData(row.table_data);
-        
+
         if (td.materialLines && td.targetRequiredQty !== undefined) {
           // Engine-based product
           const base = Number(td.baseRequiredQty || td.configBasis?.baseRequiredQty || 1);
           const scale = Number(td.targetRequiredQty) / base;
-          
+
           if (Array.isArray(td.materialLines)) extractShopNames(td.materialLines, scale);
           if (Array.isArray(td.step11_items)) extractShopNames(td.step11_items, 1);
         } else {
@@ -8484,7 +8660,7 @@ export async function registerRoutes(
       const { versionId } = req.query;
       if (!versionId) return res.status(400).json({ message: "Version ID is required" });
       const result = await query("SELECT id FROM purchase_orders WHERE version_id = $1 LIMIT 1", [versionId]);
-      res.json({ exists: result.rowCount > 0 });
+      res.json({ exists: (result.rowCount ?? 0) > 0 });
     } catch (err) {
       console.error("GET /api/purchase-orders/check-existence error", err);
       res.status(500).json({ message: "Failed to check PO existence" });
@@ -8629,7 +8805,7 @@ export async function registerRoutes(
           "SELECT id FROM purchase_orders WHERE project_id = $1 AND version_id = $2",
           [projectId, versionId]
         );
-        
+
         for (const row of existingPOs.rows) {
           await query("DELETE FROM purchase_order_items WHERE po_id = $1", [row.id]);
           await query("DELETE FROM purchase_orders WHERE id = $1", [row.id]);
@@ -10686,7 +10862,7 @@ ${list.rows.map((row: any) => `- ${row.name}`).join('\n')}`;
                 // Override rate is a direct value
                 effectiveOverrideRate = finalizeOverrideRateInput;
               }
-              
+
               overrideRateTotal += effectiveOverrideRate;
               overrideTotal += effectiveOverrideRate * qty;
             } else {

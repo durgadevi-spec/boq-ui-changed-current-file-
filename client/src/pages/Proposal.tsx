@@ -7,9 +7,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Save, Send, Clock, CheckCircle } from "lucide-react";
+import { Loader2, Save, Send, Clock, CheckCircle, Plus, Search, Trash2 } from "lucide-react";
 import apiFetch from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import ProductPicker from "@/components/ProductPicker";
+import MaterialPicker from "@/components/MaterialPicker";
+import Step11Preview from "@/components/Step11Preview";
 
 export default function Proposal({ params }: { params?: { projectId?: string } }) {
   const { user } = useAuth();
@@ -21,6 +24,12 @@ export default function Proposal({ params }: { params?: { projectId?: string } }
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(params?.projectId || null);
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const [editedItems, setEditedItems] = useState<Record<string, any>>({});
+  
+  const [showProductPicker, setShowProductPicker] = useState(false);
+  const [showMaterialPicker, setShowMaterialPicker] = useState(false);
+  const [showStep11Preview, setShowStep11Preview] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [isAddingItems, setIsAddingItems] = useState(false);
   
   // Parse URL params
   useEffect(() => {
@@ -107,11 +116,105 @@ export default function Proposal({ params }: { params?: { projectId?: string } }
       const next = { ...existing, [field]: value };
       
       // Auto calc amount
-      if (field === "rate") {
-        next.amount = Number(next.qty || 0) * Number(value);
+      if (field === "rate" || field === "qty") {
+        next.amount = Number(next.qty || 0) * Number(next.rate || 0);
       }
       return { ...prev, [id]: next };
     });
+  };
+
+  const handleAddProduct = () => {
+    if (!selectedProjectId || !selectedProposalId) {
+      toast({ title: "Select Proposal", description: "Please select a project and proposal first.", variant: "destructive" });
+      return;
+    }
+    setShowProductPicker(true);
+  };
+
+  const handleAddManualItem = () => {
+    if (!selectedProjectId || !selectedProposalId) {
+      toast({ title: "Select Proposal", description: "Please select a project and proposal first.", variant: "destructive" });
+      return;
+    }
+    setShowMaterialPicker(true);
+  };
+
+  const handleSelectProduct = (product: any) => {
+    setSelectedProduct(product);
+    setShowStep11Preview(true);
+  };
+
+  const handleSelectMaterial = async (template: any) => {
+    const qtyStr = prompt("Enter quantity to add", "1");
+    if (qtyStr === null) return;
+    const qty = Number(qtyStr);
+    if (!qty || qty <= 0) {
+      toast({ title: "Error", description: "Invalid quantity", variant: "destructive" });
+      return;
+    }
+
+    setIsAddingItems(true);
+    try {
+      const res = await apiFetch(`/api/proposals/${selectedProposalId}/items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          material_id: template.id,
+          item_name: template.name,
+          qty,
+          unit: template.unit || template.uom || "nos",
+          rate: template.rate || 0,
+          description: template.technicalspecification || template.description || ""
+        })
+      });
+
+      if (res.ok) {
+        toast({ title: "Item Added", description: `${template.name} added to proposal.` });
+        queryClient.invalidateQueries({ queryKey: ["/api/proposals", selectedProposalId, "items"] });
+      } else {
+        throw new Error("Failed to add item");
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to add item to proposal", variant: "destructive" });
+    } finally {
+      setIsAddingItems(false);
+      setShowMaterialPicker(false);
+    }
+  };
+
+  const handleAddToProposal = async (selectedItems: any[]) => {
+    if (!selectedProposalId) return;
+    setShowStep11Preview(false);
+    setIsAddingItems(true);
+
+    try {
+      toast({ title: "Adding Items", description: `Adding ${selectedItems.length} items to proposal...` });
+      
+      // We'll call the endpoint for each item. 
+      // In a production app, a batch endpoint would be better.
+      for (const item of selectedItems) {
+        await apiFetch(`/api/proposals/${selectedProposalId}/items`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            material_id: item.id,
+            item_name: item.title,
+            qty: item.qty || 1,
+            unit: item.unit || "nos",
+            rate: item.rate || 0,
+            description: item.description || ""
+          })
+        });
+      }
+
+      toast({ title: "Success", description: "Items added to proposal successfully." });
+      queryClient.invalidateQueries({ queryKey: ["/api/proposals", selectedProposalId, "items"] });
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to add some items", variant: "destructive" });
+    } finally {
+      setIsAddingItems(false);
+      setSelectedProduct(null);
+    }
   };
 
   const getVal = (id: string, field: string, defaultVal: any) => {
@@ -167,10 +270,30 @@ export default function Proposal({ params }: { params?: { projectId?: string } }
               </div>
 
               {selectedProposal && (
-                <div className="ml-auto">
+                <div className="ml-auto flex items-center gap-3">
+                   {isSupplier && (
+                     <div className="flex gap-2">
+                      <Button 
+                        onClick={handleAddProduct} 
+                        variant="outline" 
+                        className="h-10 border-blue-200 text-blue-600 hover:bg-blue-50 font-bold"
+                        disabled={isLocked || isAddingItems}
+                      >
+                        <Plus className="h-4 w-4 mr-2" /> Add Product
+                      </Button>
+                      <Button 
+                        onClick={handleAddManualItem} 
+                        variant="outline" 
+                        className="h-10 border-slate-200 text-slate-600 hover:bg-slate-50 font-bold"
+                        disabled={isLocked || isAddingItems}
+                      >
+                        <Plus className="h-4 w-4 mr-2" /> Add Item
+                      </Button>
+                    </div>
+                   )}
                    <Badge 
                     variant={selectedProposal.status === 'approved' ? 'default' : 'secondary'}
-                    className={selectedProposal.status === 'approved' ? 'bg-green-600' : ''}
+                    className={selectedProposal.status === 'approved' ? 'bg-green-600 h-10 px-4' : 'h-10 px-4'}
                    >
                      Status: {selectedProposal.status?.toUpperCase()}
                    </Badge>
@@ -210,7 +333,15 @@ export default function Proposal({ params }: { params?: { projectId?: string } }
                             placeholder="Add description..."
                           />
                         </td>
-                        <td className="px-4 py-3 text-center font-medium bg-slate-50/50">{Number(item.qty).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-center font-medium bg-slate-50/50">
+                          <input 
+                            type="number"
+                            value={getVal(item.id, "qty", item.qty || 0)}
+                            onChange={e => handleEdit(item.id, "qty", Number(e.target.value))}
+                            disabled={isLocked}
+                            className="w-20 border rounded px-2 py-1 text-center text-sm bg-transparent font-bold"
+                          />
+                        </td>
                         <td className="px-4 py-3 text-center text-xs">{item.unit}</td>
                         <td className="px-4 py-3">
                           <div className="relative">
@@ -266,6 +397,26 @@ export default function Proposal({ params }: { params?: { projectId?: string } }
           )}
         </div>
       </div>
+
+      <ProductPicker 
+        open={showProductPicker} 
+        onOpenChange={setShowProductPicker} 
+        onSelectProduct={handleSelectProduct} 
+        selectedProjectId={selectedProjectId!} 
+      />
+      <MaterialPicker 
+        open={showMaterialPicker} 
+        onOpenChange={setShowMaterialPicker} 
+        onSelectTemplate={handleSelectMaterial} 
+      />
+      {selectedProduct && (
+        <Step11Preview 
+          product={selectedProduct} 
+          open={showStep11Preview} 
+          onClose={() => { setShowStep11Preview(false); setTimeout(() => setSelectedProduct(null), 300); }} 
+          onAddToBoq={handleAddToProposal} 
+        />
+      )}
     </LayoutComponent>
   );
 }

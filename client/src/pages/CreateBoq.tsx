@@ -348,7 +348,7 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
   const [localItems, setLocalItems] = useState<any[]>([]);
   const [reorderInit, setReorderInit] = useState(false);
 
-  const calculationTarget = localTarget || 1;
+  const calculationTarget = (!localTarget || Number(localTarget) <= 0) ? 1 : Number(localTarget);
 
 
   let displayLines: any[] = step11Items;
@@ -777,14 +777,14 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
                     onChange={(e) => {
                       const val = parseFloat(e.target.value) || 0;
                       if (isLumpSum) return;
-                      setLocalTarget(val);
+                      setLocalTarget(Math.max(0, val));
                     }}
 
                     disabled={isVersionSubmitted || tableData.is_finalized}
                     onBlur={async (e) => {
                       const newVal = parseFloat(e.target.value);
                       const currentVal = tableData.targetRequiredQty ?? 1;
-                      if (isNaN(newVal) || newVal === currentVal || newVal <= 0) { setLocalTarget(currentVal); return; }
+                      if (isNaN(newVal) || newVal === currentVal || newVal < 0) { setLocalTarget(currentVal); return; }
                       try {
                         const updatedTd = { ...tableData, targetRequiredQty: newVal };
                         const resp = await apiFetch(`/api/boq-items/${boqItem.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ table_data: updatedTd }) });
@@ -1808,10 +1808,10 @@ export default function CreateBom() {
     setProductCategoryOrder(prev => {
       // Use initialOrder if this is the first time we're setting state, else use prev
       const base = (prev.length === 0) ? initialOrder : prev;
-      
+
       const newCats = productCategories.filter(c => !base.includes(c));
       const stillPresent = base.filter(c => productCategories.includes(c));
-      
+
       const result = [...stillPresent, ...newCats];
       // Avoid state updates if nothing changed
       if (prev.length > 0 && JSON.stringify(result) === JSON.stringify(prev)) return prev;
@@ -1833,7 +1833,7 @@ export default function CreateBom() {
           console.error("Failed to auto-save category order", err);
         }
       };
-      
+
       const timer = setTimeout(saveOrder, 300);
 
       return () => clearTimeout(timer);
@@ -1916,10 +1916,10 @@ export default function CreateBom() {
         const sData = await sketchResp.json();
         const parsedTemplates = (sData.templates || []).map((t: any) => {
           // Use pre-calculated fields from optimized API
-          return { 
-            ...t, 
+          return {
+            ...t,
             itemCount: t.item_count ?? 0,
-            created_at: t.last_updated 
+            created_at: t.last_updated
           };
         });
         setSketchTemplates(parsedTemplates);
@@ -2118,7 +2118,7 @@ export default function CreateBom() {
 
     try {
       let data = template.template_data;
-      
+
       // If template_data is missing (due to optimized list API), fetch full details
       if (!data) {
         const detailResp = await apiFetch(`/api/sketch-templates/${template.id}`);
@@ -2157,7 +2157,7 @@ export default function CreateBom() {
       toast({ title: "Importing Sketch", description: `Processing ${items.length} items...` });
 
       const batchItems = [];
-      
+
       // Get existing items to prevent duplicates from sketch import
       const existingMap = new Set(boqItems.map(i => {
         const td = parseTableData(i.table_data);
@@ -2179,65 +2179,118 @@ export default function CreateBom() {
         }
 
         // Try to find a matching product
-        const matchedProd = allProds.find(p =>
-          p.id === mId ||
-          p.name.toLowerCase().trim() === itemName
-        );
+        const matchedProd = allProds.find(p => {
+          const pId = String(p.id);
+          const sMId = mId ? String(mId) : null;
+          const pName = (p.name || "").toLowerCase().replace(/\s+/g, ' ').trim();
+          const cleanItemName = itemName.replace(/\s+/g, ' ').trim();
+          
+          const idMatch = sMId && pId === sMId;
+          const nameMatch = pName === cleanItemName;
+          
+          if (idMatch && !nameMatch) {
+            console.log(`[SketchImport] Found match by ID for "${itemName}" (ID=${mId}) -> DB name is "${p.name}"`);
+          }
+          return idMatch || nameMatch;
+        });
 
         const dims = [item.length, item.width, item.height].filter(Boolean).filter(d => d !== "0" && d !== "").join(' x ');
         const desc = `${item.description || ''} ${dims ? `(Dims: ${dims} ${item.dimension_unit || ''})` : ''}`.trim();
-        const qty = Number(item.qty ?? item.quantity ?? item.qty_required ?? item.requiredQty ?? 1) || 1;
+        // Resolve qty from sketch template item - try all possible field names
+        const rawQty = item.qty ?? item.quantity ?? item.qty_required ?? item.requiredQty ?? item.targetRequiredQty;
+        const qty = (rawQty !== null && rawQty !== undefined && Number(rawQty) > 0) ? Number(rawQty) : 1;
+        console.log(`[SketchImport] item="${item.item_name}" rawQty=${rawQty} resolvedQty=${qty}`);
 
         if (matchedProd) {
-          // It's a product! Fetch its config
+          // It's a product! Fetch its config.
+          // Priority: Step 3 draft config → Step 11 approved config → manual fallback.
+          let resolvedConfigLines: any[] | null = null;
+          let resolvedConfig: any | null = null;
+
+          // --- Try Step 3 (draft) config first ---
           try {
             const configRes = await apiFetch(`/api/product-step3-config/${matchedProd.id}`);
             if (configRes.ok) {
               const { items: configLines, config } = await configRes.json();
               if (configLines && configLines.length > 0) {
-                const materialLines = configLines.map((it: any) => ({
-                  id: it.material_id,
-                  name: it.material_name,
-                  unit: it.unit,
-                  baseQty: Number(it.base_qty ?? it.qty ?? 0),
-                  wastagePct: it.wastage_pct != null ? Number(it.wastage_pct) : undefined,
-                  supplyRate: Number(it.supply_rate ?? it.rate ?? 0),
-                  installRate: Number(it.install_rate ?? 0),
-                  shop_name: it.shop_name,
-                  freezeAndEdit: it.freezeAndEdit || it.freeze_and_edit,
-                  freeze_and_edit: it.freezeAndEdit || it.freeze_and_edit,
-                  category: area // Apply area to all materials
-                }));
-
-                batchItems.push({
-                  estimator: matchedProd.name.substring(0, 50),
-                  table_data: {
-                    product_name: matchedProd.name,
-                    product_id: matchedProd.id,
-                    image: matchedProd.image,
-                    category: area,
-                    category_name: area,
-                    hsn_sac_type: matchedProd.tax_code_type || null,
-                    hsn_sac_code: matchedProd.tax_code_value || null,
-                    hsn_code: matchedProd.hsn_code || null,
-                    sac_code: matchedProd.sac_code || null,
-                    targetRequiredQty: qty,
-                    configBasis: {
-                      requiredUnitType: config.required_unit_type || config.basis_unit || "nos",
-                      baseRequiredQty: Number(config.base_required_qty || config.basis_qty || 1),
-                      wastagePctDefault: Number(config.wastage_pct_default || 0)
-                    },
-                    materialLines,
-                    step11_items: [],
-                    finalize_description: config?.description || desc || matchedProd.name,
-                    created_at: new Date().toISOString()
-                  }
-                });
-                continue;
+                resolvedConfigLines = configLines;
+                resolvedConfig = config;
+                console.log(`[SketchImport] "${matchedProd.name}" resolved via Step3 config (${configLines.length} materials)`);
               }
             }
           } catch (e) {
-            console.warn("Failed to fetch product config for", matchedProd.name, e);
+            console.warn("[SketchImport] Step3 config fetch failed for", matchedProd.name, e);
+          }
+
+          // --- Fallback: Try Step 11 (approved) config if Step 3 not available ---
+          if (!resolvedConfigLines) {
+            try {
+              const approvedRes = await apiFetch(`/api/step11-products/${matchedProd.id}`);
+              if (approvedRes.ok) {
+                const { configurations } = await approvedRes.json();
+                // Pick the first approved config, else first available
+                const approvedCfg = (configurations || []).find((c: any) => c.product?.status === 'approved') || configurations?.[0];
+                if (approvedCfg && approvedCfg.items && approvedCfg.items.length > 0) {
+                  resolvedConfigLines = approvedCfg.items;
+                  resolvedConfig = approvedCfg.product;
+                  console.log(`[SketchImport] "${matchedProd.name}" resolved via Step11 approved config (${approvedCfg.items.length} materials)`);
+                }
+              }
+            } catch (e) {
+              console.warn("[SketchImport] Step11 config fetch failed for", matchedProd.name, e);
+            }
+          }
+
+          if (resolvedConfigLines && resolvedConfigLines.length > 0 && resolvedConfig) {
+            const materialLines = resolvedConfigLines.map((it: any) => {
+              // baseQty: the qty-per-unit-area for this material.
+              // Try: base_qty first (explicit per-unit qty), then qty (legacy). Never silently allow 0.
+              const rawBaseQty = it.base_qty ?? it.qty ?? null;
+              const baseQty = (rawBaseQty !== null && rawBaseQty !== undefined) ? Number(rawBaseQty) : 0;
+              if (baseQty === 0) {
+                console.warn(`[SketchImport] material "${it.material_name}" has baseQty=0 (base_qty=${it.base_qty}, qty=${it.qty}). Qty=0 will appear in BOM.`);
+              }
+              return {
+                id: it.material_id,
+                name: it.material_name,
+                unit: it.unit,
+                baseQty,
+                wastagePct: it.wastage_pct != null ? Number(it.wastage_pct) : undefined,
+                supplyRate: Number(it.supply_rate ?? it.rate ?? 0),
+                installRate: Number(it.install_rate ?? 0),
+                shop_name: it.shop_name,
+                freezeAndEdit: it.freezeAndEdit || it.freeze_and_edit,
+                freeze_and_edit: it.freezeAndEdit || it.freeze_and_edit,
+                applyWastage: it.apply_wastage !== false,
+                category: area
+              };
+            });
+
+            batchItems.push({
+              estimator: matchedProd.name.substring(0, 50),
+              table_data: {
+                product_name: matchedProd.name,
+                product_id: matchedProd.id,
+                image: matchedProd.image,
+                category: area,
+                category_name: area,
+                hsn_sac_type: matchedProd.tax_code_type || null,
+                hsn_sac_code: matchedProd.tax_code_value || null,
+                hsn_code: matchedProd.hsn_code || null,
+                sac_code: matchedProd.sac_code || null,
+                targetRequiredQty: qty,
+                configBasis: {
+                  requiredUnitType: resolvedConfig.required_unit_type || resolvedConfig.basis_unit || "Sqft",
+                  baseRequiredQty: Number(resolvedConfig.base_required_qty || resolvedConfig.basis_qty || 1),
+                  wastagePctDefault: Number(resolvedConfig.wastage_pct_default || 0)
+                },
+                materialLines,
+                step11_items: [],
+                finalize_description: resolvedConfig?.description || desc || matchedProd.name,
+                created_at: new Date().toISOString()
+              }
+            });
+            continue;
           }
         }
 
@@ -2248,13 +2301,24 @@ export default function CreateBom() {
         let taxType = null;
         let taxValue = "";
 
-        const mat = matMap[mId] || allMats.find(m => m.name.toLowerCase().trim() === itemName);
+        const mat = matMap[mId] || allMats.find(m => {
+          const mName = (m.name || "").toLowerCase().replace(/\s+/g, ' ').trim();
+          const cleanItemName = itemName.replace(/\s+/g, ' ').trim();
+          return mName === cleanItemName;
+        });
+
         if (mat) {
           if (rate === 0) rate = Number(mat.rate || 0);
           hsn = mat.hsn_code || mat.template_hsn_code || "";
           sac = mat.sac_code || mat.template_sac_code || "";
           taxType = mat.tax_code_type || (hsn ? "hsn" : (sac ? "sac" : null));
           taxValue = mat.tax_code_value || hsn || sac || "";
+          console.log(`[SketchImport] manual fallback for "${itemName}" resolved via Material library match (rate=${rate})`);
+        } else {
+          console.warn(`[SketchImport] manual fallback for "${itemName}" (ID=${mId}) - NO matching product config or material found. Rate will be 0.`);
+          if (matchedProd) {
+            console.warn(`[SketchImport] Note: "${itemName}" matched product "${matchedProd.name}" but it has NO valid config in DB.`);
+          }
         }
 
         batchItems.push({
@@ -2271,6 +2335,7 @@ export default function CreateBom() {
             category_name: area,
             finalize_description: desc,
             finalize_qty: qty,
+            targetRequiredQty: qty,
             finalize_rate: rate,
             unit: item.dimension_unit || item.unit || "nos",
             step11_items: [
@@ -2533,6 +2598,7 @@ export default function CreateBom() {
     if (!selectedVersionId || isRefreshingCategories) return;
     setIsRefreshingCategories(true);
     try {
+      // Step 1: Fetch latest master data
       const [prodRes, catRes, matTempRes, matRes] = await Promise.all([
         apiFetch("/api/products"),
         apiFetch("/api/categories"),
@@ -2540,7 +2606,9 @@ export default function CreateBom() {
         apiFetch("/api/materials")
       ]);
 
-      if (!prodRes.ok || !catRes.ok || !matTempRes.ok || !matRes.ok) throw new Error("Failed to fetch master data");
+      if (!prodRes.ok || !catRes.ok || !matTempRes.ok || !matRes.ok) {
+        throw new Error("Failed to fetch master data");
+      }
 
       const pd = await prodRes.json();
       const mtd = await matTempRes.json();
@@ -2551,7 +2619,106 @@ export default function CreateBom() {
       const matById = Object.fromEntries((md.materials || []).map((m: any) => [m.id, m]));
 
       const changeLog: { itemName: string; from: string; to: string }[] = [];
-      const updateTasks: Promise<void>[] = [];
+      const updateResults: { itemId: string; success: boolean; error?: string }[] = [];
+
+      // Helper: Deduplicate lines by material ID (keep first occurrence, remove duplicates)
+      const deduplicateLines = (lines: any[] | undefined): { deduplicated: any[]; removedCount: number } => {
+        if (!Array.isArray(lines) || lines.length === 0) return { deduplicated: lines || [], removedCount: 0 };
+        const seenIds = new Set<string>();
+        const deduplicated: any[] = [];
+        let removedCount = 0;
+
+        for (const line of lines) {
+          const id = line.id || line.material_id;
+          if (!id) {
+            deduplicated.push(line);
+            continue;
+          }
+          if (seenIds.has(id)) {
+            console.warn(`Removing duplicate material ID: ${id} (Name: ${line.name || line.title || "Unknown"})`);
+            removedCount++;
+            continue; // Skip duplicate
+          }
+          seenIds.add(id);
+          deduplicated.push(line);
+        }
+        return { deduplicated, removedCount };
+      };
+
+      // Helper: Validate no duplicate materials in lines
+      const validateNoMaterialDuplicates = (lines: any[] | undefined): boolean => {
+        const result = deduplicateLines(lines);
+        return result.removedCount === 0;
+      };
+
+      // Helper: Refresh lines with deduplication validation and category update
+      const refreshLines = (lines: any[] | undefined) => {
+        if (!Array.isArray(lines)) return lines;
+        let linesChanged = false;
+
+        // Step 1: Update categories from master data
+        const updatedLines = lines.map(line => {
+          const matId = line.id || line.material_id;
+          if (!matId) return line;
+          const masterMat = matById[matId] || matTempById[matId];
+          if (masterMat && masterMat.category) {
+            const currentLineCat = (line.category || "").trim();
+            const latestMatCat = (masterMat.category || "").trim();
+            if (latestMatCat && currentLineCat && currentLineCat.toLowerCase() !== latestMatCat.toLowerCase()) {
+              linesChanged = true;
+              changeLog.push({ itemName: line.name || line.title || "Material", from: currentLineCat, to: latestMatCat });
+              return { ...line, category: latestMatCat };
+            }
+          }
+          return line;
+        });
+
+        // Step 2: Deduplicate by material ID (remove duplicates)
+        const { deduplicated, removedCount } = deduplicateLines(updatedLines);
+        if (removedCount > 0) {
+          console.warn(`Deduplicated ${removedCount} duplicate items from material array`);
+          linesChanged = true;
+        }
+
+        return linesChanged ? deduplicated : lines;
+      };
+
+      // Helper: Check for cross-array duplicates (same material in both materialLines and step11_items)
+      const checkCrossArrayDuplicates = (
+        materialLines: any[] | undefined,
+        step11Items: any[] | undefined,
+        itemId: string
+      ): { hasCrossDuplicates: boolean; duplicateMaterials: string[] } => {
+        if (!Array.isArray(materialLines) || !Array.isArray(step11Items)) {
+          return { hasCrossDuplicates: false, duplicateMaterials: [] };
+        }
+
+        const matLineIds = new Set(
+          materialLines.map(m => m.id || m.material_id).filter(Boolean)
+        );
+
+        const duplicateMaterials: string[] = [];
+        for (const item of step11Items) {
+          const itemId = item.id || item.material_id;
+          if (itemId && matLineIds.has(itemId)) {
+            duplicateMaterials.push(itemId);
+          }
+        }
+
+        if (duplicateMaterials.length > 0) {
+          console.warn(
+            `Cross-array duplicates detected in item ${itemId}: `,
+            duplicateMaterials,
+            ` - Same material appears in both materialLines and step11_items`
+          );
+          return { hasCrossDuplicates: true, duplicateMaterials };
+        }
+
+        return { hasCrossDuplicates: false, duplicateMaterials: [] };
+      };
+
+      // Step 2: Build update tasks with validation
+      const updateTasks: Promise<{ itemId: string; success: boolean; error?: string }>[] = [];
 
       for (const item of boqItems) {
         const td = parseTableData(item.table_data);
@@ -2559,36 +2726,62 @@ export default function CreateBom() {
         let updatedTd = JSON.parse(JSON.stringify(td));
         const itemName = td.product_name || item.estimator || "Unknown Item";
 
+        console.log(`[Refresh] Processing item: ${itemName} (ID: ${item.id}, ProductID: ${td.product_id})`);
+
+        // Update item-level category from product/material
         if (td.product_id) {
           const masterProd = prodById[td.product_id];
+          console.log(`[Refresh] Looking for product ${td.product_id} in master data:`, masterProd ? "FOUND" : "NOT FOUND");
+          
           if (masterProd) {
             const currentCatName = (td.category_name || "").trim();
             const currentCat = (td.category || "").trim();
             const latestProdCat = (masterProd.category_name || masterProd.category || "").trim();
 
+            console.log(`[Refresh] Category comparison for "${itemName}":`, {
+              currentCatName,
+              currentCat,
+              latestProdCat,
+              masterProd_category: masterProd.category,
+              masterProd_category_name: masterProd.category_name
+            });
+
             if (latestProdCat) {
               if (currentCatName && currentCatName.toLowerCase() !== latestProdCat.toLowerCase()) {
+                console.log(`[Refresh] ✓ Updating category_name: "${currentCatName}" → "${latestProdCat}"`);
                 updatedTd.category_name = latestProdCat;
                 hasChanges = true;
                 changeLog.push({ itemName: `${itemName}`, from: currentCatName, to: latestProdCat });
+              } else if (currentCatName) {
+                console.log(`[Refresh] ✗ No change needed for category_name (already "${currentCatName}")`);
               }
+              
               if (currentCat && currentCat.toLowerCase() !== latestProdCat.toLowerCase()) {
+                console.log(`[Refresh] ✓ Updating category: "${currentCat}" → "${latestProdCat}"`);
                 updatedTd.category = latestProdCat;
                 hasChanges = true;
                 if (currentCat !== currentCatName) {
                   changeLog.push({ itemName: `${itemName}`, from: currentCat, to: latestProdCat });
                 }
+              } else if (currentCat) {
+                console.log(`[Refresh] ✗ No change needed for category (already "${currentCat}")`);
               }
+            } else {
+              console.warn(`[Refresh] ✗ Master product has NO category defined for "${itemName}"`);
             }
+          } else {
+            console.warn(`[Refresh] ✗ Product NOT found in master data (ID: ${td.product_id}). Cannot refresh category.`);
           }
         } else if (td.material_id || item.estimator?.startsWith('material_')) {
           const matId = td.material_id || item.estimator.replace('material_', '');
-          // Check materials first, then templates
           const masterMat = matById[matId] || matTempById[matId];
-          
+          console.log(`[Refresh] Material item: ${matId} in master data:`, masterMat ? "FOUND" : "NOT FOUND");
+
           if (masterMat && masterMat.category) {
             const currentCat = (td.category_name || td.category || "").trim();
             const latestCat = masterMat.category.trim();
+            console.log(`[Refresh] Material category: "${currentCat}" → "${latestCat}"`);
+            
             if (latestCat && currentCat.toLowerCase() !== latestCat.toLowerCase()) {
               updatedTd.category = latestCat;
               updatedTd.category_name = latestCat;
@@ -2598,30 +2791,36 @@ export default function CreateBom() {
           }
         }
 
-        const refreshLines = (lines: any[]) => {
-          if (!Array.isArray(lines)) return lines;
-          let linesChanged = false;
-          const newLines = lines.map(line => {
-            const matId = line.id || line.material_id;
-            if (!matId) return line;
-            const masterMat = matById[matId] || matTempById[matId];
-            if (masterMat) {
-              const currentLineCat = (line.category || "").trim();
-              const latestMatCat = (masterMat.category || "").trim();
-              if (latestMatCat && currentLineCat && currentLineCat.toLowerCase() !== latestMatCat.toLowerCase()) {
-                hasChanges = true;
-                linesChanged = true;
-                changeLog.push({ itemName: line.name || line.title || "Material", from: currentLineCat, to: latestMatCat });
-                return { ...line, category: latestMatCat };
-              }
-            }
-            return line;
-          });
-          return linesChanged ? newLines : lines;
-        };
+        // Refresh child material categories with deduplication
+        const oldMaterialLinesLength = Array.isArray(updatedTd.materialLines) ? updatedTd.materialLines.length : 0;
+        const oldStep11ItemsLength = Array.isArray(updatedTd.step11_items) ? updatedTd.step11_items.length : 0;
 
         if (updatedTd.materialLines) updatedTd.materialLines = refreshLines(updatedTd.materialLines);
         if (updatedTd.step11_items) updatedTd.step11_items = refreshLines(updatedTd.step11_items);
+
+        // Validate no duplicates within each array
+        if (!validateNoMaterialDuplicates(updatedTd.materialLines) || !validateNoMaterialDuplicates(updatedTd.step11_items)) {
+          console.error(`Duplicate material IDs found within arrays for item ${item.id}. Aborting refresh for this item.`);
+          continue; // Skip this item to prevent corrupting data
+        }
+
+        // Check for cross-array duplicates (same material in both materialLines and step11_items)
+        const { hasCrossDuplicates } = checkCrossArrayDuplicates(updatedTd.materialLines, updatedTd.step11_items, item.id);
+        if (hasCrossDuplicates) {
+          console.error(`Cross-array duplicates detected in item ${item.id}. This indicates data corruption. Aborting refresh for this item.`);
+          continue; // Skip this item to prevent corrupting data
+        }
+
+        // Verify arrays didn't get duplicated in length (due to deduplication, they might be shorter)
+        const newMaterialLinesLength = Array.isArray(updatedTd.materialLines) ? updatedTd.materialLines.length : 0;
+        const newStep11ItemsLength = Array.isArray(updatedTd.step11_items) ? updatedTd.step11_items.length : 0;
+
+        if (newMaterialLinesLength > oldMaterialLinesLength || newStep11ItemsLength > oldStep11ItemsLength) {
+          console.error(`Array length INCREASED for item ${item.id}. materialLines: ${oldMaterialLinesLength}->${newMaterialLinesLength}, step11_items: ${oldStep11ItemsLength}->${newStep11ItemsLength}. This indicates items were duplicated instead of deduplicated.`);
+          hasChanges = false; // Skip this item if arrays grew unexpectedly
+        }
+
+        console.log(`[Refresh] Item "${itemName}" - hasChanges: ${hasChanges}, will be updated: ${hasChanges ? "YES" : "NO"}`);
 
         if (hasChanges) {
           const task = apiFetch(`/api/boq-items/${item.id}`, {
@@ -2630,28 +2829,61 @@ export default function CreateBom() {
             body: JSON.stringify({ table_data: updatedTd }),
           }).then(async (res) => {
             if (res.ok) {
-              setBoqItems(prev => prev.map(bi => bi.id === item.id ? { ...bi, table_data: updatedTd } : bi));
+              console.log(`[Refresh] ✓ Successfully updated item ${item.id}`);
+              return { itemId: item.id, success: true };
+            } else {
+              const errMsg = await res.text().catch(() => `HTTP ${res.status}`);
+              console.error(`[Refresh] ✗ Failed to update item ${item.id}: ${errMsg}`);
+              return { itemId: item.id, success: false, error: errMsg };
             }
+          }).catch((err) => {
+            console.error(`[Refresh] ✗ Error updating item ${item.id}:`, err);
+            return {
+              itemId: item.id,
+              success: false,
+              error: err instanceof Error ? err.message : String(err)
+            };
           });
           updateTasks.push(task);
         }
       }
 
-      // Step 3: Run all updates in parallel (fast even for large BOMs)
-      await Promise.all(updateTasks);
+      console.log(`[Refresh] Summary: ${updateTasks.length} items will be updated out of ${boqItems.length} total items`);
 
-      // Step 4: Show result
+      // Step 3: Run all updates in parallel
+      const results = await Promise.all(updateTasks);
+      updateResults.push(...results);
+
+      // Step 4: Check for failures
+      const failedUpdates = updateResults.filter(r => !r.success);
+      if (failedUpdates.length > 0) {
+        console.error("Some updates failed:", failedUpdates);
+        failedUpdates.forEach(f => {
+          console.error(`  Item ${f.itemId}: ${f.error}`);
+        });
+      }
+
+      // Step 5: Reload fresh data from server to ensure consistency
+      console.log("[Refresh] Reloading fresh data from server...");
+      await loadBoqItemsAndEdits();
+      console.log("[Refresh] ✓ Data reloaded successfully");
+
+      // Step 6: Show result
       if (changeLog.length === 0) {
         toast({
           title: "Already Up to Date",
           description: "All item categories match the master library.",
         });
       } else {
+        const failureMsg = failedUpdates.length > 0
+          ? ` (${failedUpdates.length} items failed to update)`
+          : "";
         setRefreshLog(changeLog);
         setShowRefreshLogDialog(true);
         toast({
           title: "Refresh Complete",
-          description: `${changeLog.length} category details updated successfully.`,
+          description: `${changeLog.length} category details updated successfully${failureMsg}.`,
+          variant: failedUpdates.length > 0 ? "destructive" : "default",
         });
       }
     } catch (err) {
@@ -2664,7 +2896,7 @@ export default function CreateBom() {
     } finally {
       setIsRefreshingCategories(false);
     }
-  }, [selectedVersionId, boqItems, isRefreshingCategories]);
+  }, [selectedVersionId, isRefreshingCategories, loadBoqItemsAndEdits, toast]);
 
   const handleSendComment = async () => {
     if (!newComment.trim() || !commentTarget || !selectedVersionId) return;
@@ -3149,16 +3381,16 @@ export default function CreateBom() {
   const findDuplicatesInBOM = () => {
     const groups: Record<string, BOMItem[]> = {};
     const debugKeys: { id: string; name: string; key: string }[] = [];
-    
+
     boqItems.forEach(item => {
       const td = parseTableData(item.table_data);
-      
+
       const cleanStr = (s: string) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
-      
+
       const category = cleanStr(td.category_name || td.category || "General");
       const productName = cleanStr(td.product_name || td.item || td.name || "Unnamed Item");
       const targetQty = Number(td.targetRequiredQty || td.finalize_qty || 1);
-      
+
       // Extremely permissive key: If they have the same category, same exact name, and same target quantity, they are duplicates.
       // We ignore price calculations here because visually identical items might have different internal engine structures 
       // (e.g. manual vs engine-based) which caused them to miss the duplicate check.
@@ -3169,27 +3401,27 @@ export default function CreateBom() {
       if (!groups[key]) groups[key] = [];
       groups[key].push(item);
     });
-    
+
     // Filter debug keys to show relevant ones (like the sprinklers)
     const relevantDebugKeys = debugKeys.filter(k => k.name.includes("removing") || k.name.includes("sprinkler") || k.name.includes("remo"));
-    
+
     // Store debug info in a global variable or state for viewing
     (window as any).__duplicateDebug = debugKeys;
     console.log("Duplicate Check Keys:", debugKeys);
 
     const duplicates = Object.values(groups).filter(group => group.length > 1);
-    
+
     // If no duplicates, let's force the dialog open to show the debug keys
     if (duplicates.length === 0) {
-      const debugText = relevantDebugKeys.length > 0 
-        ? JSON.stringify(relevantDebugKeys, null, 2) 
+      const debugText = relevantDebugKeys.length > 0
+        ? JSON.stringify(relevantDebugKeys, null, 2)
         : JSON.stringify(debugKeys.slice(0, 5), null, 2);
-        
-      setDuplicateGroups(([[ { table_data: { product_name: "DEBUG INFO (Keys for matching items)", finalize_description: debugText } } ]] as any));
+
+      setDuplicateGroups(([[{ table_data: { product_name: "DEBUG INFO (Keys for matching items)", finalize_description: debugText } }]] as any));
     } else {
       setDuplicateGroups(duplicates);
     }
-    
+
     setSelectedDuplicateIndices(new Set(duplicates.map((_, i) => i)));
     setShowDuplicateDialog(true);
   };
@@ -3209,7 +3441,7 @@ export default function CreateBom() {
       try {
         const newItems = boqItems.filter(item => !idsToRemove.has(item.id));
         setBoqItems(newItems);
-        
+
         // Remove from database
         for (const id of Array.from(idsToRemove)) {
           await apiFetch(`/api/boq-items/${id}`, { method: "DELETE" });
@@ -3246,6 +3478,20 @@ export default function CreateBom() {
       if (!selectedProjectId || !selectedVersionId) { toast({ title: "Error", description: "Select a project and version first", variant: "destructive" }); return; }
       setIsSaving(true);
       try {
+        // IMPORTANT: Check for duplicate - prevent adding same material twice at top level
+        const materialId = template.id;
+        const isDuplicate = boqItems.some(item => {
+          const td = parseTableData(item.table_data);
+          const itemMatId = td.material_id || item.estimator?.replace('material_', '');
+          return itemMatId === materialId && (item.estimator?.startsWith('material_') || !td.product_id);
+        });
+
+        if (isDuplicate) {
+          toast({ title: "Duplicate Material", description: `${template.name} is already in this BOM.`, variant: "destructive" });
+          setIsSaving(false);
+          return;
+        }
+
         const { unit, rate, shopName, hsnSacType, hsnSacCode, hsnCode, sacCode, category } = await resolveMaterialFields(template);
         const materialItem = {
           id: template.id,
@@ -3300,6 +3546,20 @@ export default function CreateBom() {
         const tableData = parseTableData(existing.table_data);
         const currentStep11 = Array.isArray(tableData.step11_items) ? tableData.step11_items : [];
         const { unit, rate, shopName, hsnSacType, hsnSacCode, hsnCode, sacCode, category } = await resolveMaterialFields(template);
+        
+        // IMPORTANT: Check for duplicate - prevent adding same item twice
+        const itemId = template.id;
+        const isDuplicate = currentStep11.some((item: any) => {
+          const existingId = item.id || item.material_id;
+          return existingId === itemId && (item.title || item.name || "").toLowerCase().trim() === (template.name || "").toLowerCase().trim();
+        });
+
+        if (isDuplicate) {
+          toast({ title: "Duplicate Item", description: `${template.name} is already in this BOM. Edit the existing entry instead.`, variant: "destructive" });
+          setIsSaving(false);
+          return;
+        }
+
         const newItem: Step11Item = {
           id: template.id,
           title: template.name,
@@ -3330,10 +3590,10 @@ export default function CreateBom() {
         if (!res.ok) throw new Error("Failed to update");
         toast({ title: "Success", description: `Added ${template.name}` });
         // No need to loadBoqItemsAndEdits() here as we updated state locally
-      } catch (err) { 
-        toast({ title: "Error", description: "Failed to add item", variant: "destructive" }); 
-      } finally { 
-        setIsSaving(false); 
+      } catch (err) {
+        toast({ title: "Error", description: "Failed to add item", variant: "destructive" });
+      } finally {
+        setIsSaving(false);
       }
     })();
   };
@@ -3349,8 +3609,8 @@ export default function CreateBom() {
       setBoqItems(prev => prev.map(i => i.id === boqItemId ? { ...i, table_data: newTd } : i));
       await updateBoqItem(boqItemId, newTd);
       toast({ title: "Success", description: "Product finalized" });
-    } catch { 
-      toast({ title: "Error", description: "Failed to finalize", variant: "destructive" }); 
+    } catch {
+      toast({ title: "Error", description: "Failed to finalize", variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
@@ -3363,29 +3623,29 @@ export default function CreateBom() {
     try {
       let computedLen = 0;
       if (tableData?.materialLines && tableData.targetRequiredQty !== undefined) {
-        try { 
-          const r = computeBoq(tableData.configBasis, tableData.materialLines, tableData.targetRequiredQty); 
-          computedLen = Array.isArray(r.computed) ? r.computed.length : 0; 
-        } catch { 
-          computedLen = Array.isArray(tableData.materialLines) ? tableData.materialLines.length : 0; 
+        try {
+          const r = computeBoq(tableData.configBasis, tableData.materialLines, tableData.targetRequiredQty);
+          computedLen = Array.isArray(r.computed) ? r.computed.length : 0;
+        } catch {
+          computedLen = Array.isArray(tableData.materialLines) ? tableData.materialLines.length : 0;
         }
       }
       let newTd = { ...tableData };
       if (itemIdx < computedLen) {
-        const ml = [...(tableData.materialLines || [])]; 
-        ml.splice(itemIdx, 1); 
+        const ml = [...(tableData.materialLines || [])];
+        ml.splice(itemIdx, 1);
         newTd = { ...tableData, materialLines: ml };
       } else {
         const s11Idx = displayItem?._s11Idx ?? (itemIdx - computedLen);
-        const s11 = [...(tableData.step11_items || [])]; 
+        const s11 = [...(tableData.step11_items || [])];
         if (s11Idx >= 0 && s11Idx < s11.length) s11.splice(s11Idx, 1);
         newTd = { ...tableData, step11_items: s11 };
       }
       setBoqItems(prev => prev.map(i => i.id === boqItemId ? { ...i, table_data: newTd } : i));
       toast({ title: "Item Deleted" });
       await updateBoqItem(boqItemId, newTd);
-    } catch { 
-      toast({ title: "Error", description: "Failed to delete item", variant: "destructive" }); 
+    } catch {
+      toast({ title: "Error", description: "Failed to delete item", variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
@@ -3773,7 +4033,7 @@ export default function CreateBom() {
       const exportData: any[] = [];
 
       // Main Header
-      const mainHeaders = ["Sl", "Item", "Shop", "Description", "Unit", "Qty/Unit", "Required Qty", "Round off", "Rate/Unit", "Amount"];
+      const mainHeaders = ["Sl", "Area/Category", "Item", "Shop", "Description", "Unit", "Qty/Unit", "Required Qty", "Round off", "Rate/Unit", "Amount"];
       exportData.push(["BILL OF QUANTITIES (BOQ)"]);
       exportData.push([`Project: ${selectedProject?.name || "-"}`]);
       exportData.push([`Client: ${selectedProject?.client || "-"}`]);
@@ -3792,7 +4052,7 @@ export default function CreateBom() {
         const hsnFull = hsnCode ? ` [${hsnType.toUpperCase()}: ${hsnCode}]` : "";
 
         // Product header row
-        exportData.push([(boqIdx + 1).toString(), (productName + hsnFull).toUpperCase(), "", tableData.finalize_description || "", "", "", "", "", "", ""]);
+        exportData.push([(boqIdx + 1).toString(), tableData.category || "-", (productName + hsnFull).toUpperCase(), "", tableData.finalize_description || "", "", "", "", "", "", ""]);
 
         let displayLines: any[] = [];
         let isEngineBased = false;
@@ -3853,6 +4113,7 @@ export default function CreateBom() {
         displayLines.forEach((l: any, idx: number) => {
           const rowData = [
             `${boqIdx + 1}.${idx + 1}`,
+            tableData.category || "-",
             l.title || "-",
             l.shop_name || "-",
             l.description || "-",
@@ -3893,6 +4154,7 @@ export default function CreateBom() {
       // Add some basic styling/formatting
       worksheet['!cols'] = [
         { wch: 5 },  // Sl
+        { wch: 20 }, // Area/Category
         { wch: 30 }, // Item
         { wch: 15 }, // Shop
         { wch: 50 }, // Description
@@ -3979,7 +4241,7 @@ export default function CreateBom() {
       doc.text("BILL OF QUANTITIES (BOQ)", pageWidth / 2, 25, { align: "center" });
 
       // 3. Prepare Table columns and body
-      const tableHeaders = ["Sl", "Img", "Item / Component", "Shop", "Description", "Unit", "Qty/Unit", "Req Qty", "R.Off", "Rate", "Total (₹)"];
+      const tableHeaders = ["Sl", "Img", "Area", "Item / Component", "Shop", "Description", "Unit", "Qty/Unit", "Req Qty", "R.Off", "Rate", "Total (₹)"];
       const tableBody: any[] = [];
       const rowImages: { [rowIndex: number]: string } = {};
       let grandTotal = 0;
@@ -3996,6 +4258,7 @@ export default function CreateBom() {
         tableBody.push([
           { content: (boqIdx + 1).toString(), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
           { content: "", styles: { fillColor: [240, 240, 240] } },
+          { content: (td.category || "-").toUpperCase(), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
           { content: (productName + hsnFull).toUpperCase(), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
           { content: td.finalize_description || "", colSpan: 8, styles: { fontStyle: 'italic', fillColor: [240, 240, 240] } }
         ]);
@@ -4051,6 +4314,7 @@ export default function CreateBom() {
           tableBody.push([
             `${boqIdx + 1}.${lIdx + 1}`,
             "", // image cell
+            "", // Area (empty for lines)
             l.title || "-",
             l.shop_name || "-",
             l.description || "-",
@@ -4074,7 +4338,7 @@ export default function CreateBom() {
 
         if (Math.abs(roundOff) >= 0.01) {
           tableBody.push([
-            { content: "", colSpan: 9 },
+            { content: "", colSpan: 10 },
             { content: "Round Off", styles: { fontStyle: 'italic', textColor: [100, 100, 100], fillColor: [252, 252, 252] } },
             { content: (roundOff > 0 ? "+" : "") + roundOff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), styles: { fontStyle: 'italic', textColor: [100, 100, 100], fillColor: [252, 252, 252], halign: 'right' } }
           ]);
@@ -4082,7 +4346,7 @@ export default function CreateBom() {
 
         // Product Subtotal Row
         tableBody.push([
-          { content: "", colSpan: 9, styles: { borderTop: [1, 0, 0, 0] } },
+          { content: "", colSpan: 10, styles: { borderTop: [1, 0, 0, 0] } },
           { content: "Grand Total", styles: { fontStyle: 'bold', fillColor: [250, 250, 250] } },
           { content: productGrandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), styles: { fontStyle: 'bold', fillColor: [250, 250, 250], halign: 'right' } }
         ]);
@@ -4092,7 +4356,7 @@ export default function CreateBom() {
 
       // Grand Total Row (Dark accent)
       tableBody.push([
-        { content: "GRAND TOTAL", colSpan: 10, styles: { fontStyle: 'bold', halign: 'right', fillColor: [41, 41, 41], textColor: [255, 255, 255] } },
+        { content: "GRAND TOTAL", colSpan: 11, styles: { fontStyle: 'bold', halign: 'right', fillColor: [41, 41, 41], textColor: [255, 255, 255] } },
         { content: grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right', fillColor: [41, 41, 41], textColor: [255, 255, 255] } }
       ]);
 
@@ -4108,14 +4372,15 @@ export default function CreateBom() {
         columnStyles: {
           0: { cellWidth: 10 },    // Sl
           1: { cellWidth: 15 },    // Img
-          2: { cellWidth: 35 },    // Item
-          3: { cellWidth: 20 },    // Shop
-          5: { cellWidth: 12 },    // Unit
-          6: { cellWidth: 15 },    // Qty/Unit
-          7: { cellWidth: 15 },    // Req Qty
-          8: { cellWidth: 12 },    // R.Off
-          9: { cellWidth: 20, halign: 'right' },    // Rate
-          10: { cellWidth: 20, halign: 'right' },   // Amount
+          2: { cellWidth: 20 },    // Area
+          3: { cellWidth: 35 },    // Item
+          4: { cellWidth: 20 },    // Shop
+          6: { cellWidth: 12 },    // Unit
+          7: { cellWidth: 15 },    // Qty/Unit
+          8: { cellWidth: 15 },    // Req Qty
+          9: { cellWidth: 12 },    // R.Off
+          10: { cellWidth: 20, halign: 'right' },    // Rate
+          11: { cellWidth: 20, halign: 'right' },   // Amount
         },
         didParseCell: (data: any) => {
           if (data.section === 'body' && data.column.index === 1 && rowImages[data.row.index]) {
@@ -4846,7 +5111,7 @@ export default function CreateBom() {
                                         value={cat}
                                         className={cn(
                                           "px-4 h-9 text-[11px] font-bold uppercase tracking-wider transition-all border",
-                                        productCategoryFilter === cat
+                                          productCategoryFilter === cat
                                             ? "bg-blue-600 text-white border-blue-600 shadow-md translate-y-[-2px]"
                                             : "bg-white text-slate-500 border-slate-200 hover:border-blue-300 hover:text-blue-600"
                                         )}
@@ -4957,8 +5222,8 @@ export default function CreateBom() {
                                   <div className="flex items-center gap-6">
                                     <div className="flex items-center gap-1.5">
                                       {Array.from({ length: Math.min(totalPages, 15) }).map((_, i) => (
-                                        <div 
-                                          key={i} 
+                                        <div
+                                          key={i}
                                           onClick={() => setCurrentPage(i + 1)}
                                           className={cn(
                                             "w-2 h-2 rounded-full cursor-pointer transition-all duration-300",
@@ -4996,7 +5261,7 @@ export default function CreateBom() {
                                     const boqIdx = boqItems.findIndex(bi => bi.id === boqItem.id);
                                     // Use the global index in the sorted list to ensure sequential numbering across categories
                                     const displayIdx = sortedAllItems.findIndex(bi => bi.id === boqItem.id);
-                                    
+
                                     return (
                                       <div key={boqItem.id} id={`boq-item-card-${boqItem.id}`} className="transition-all duration-300">
                                         <BoqItemCard boqItem={boqItem} boqIdx={displayIdx} isVersionSubmitted={isVersionSubmitted}

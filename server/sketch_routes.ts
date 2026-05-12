@@ -11,10 +11,10 @@ const serveBase64Resource = async (res: Response, table: string, id: string, col
   try {
     const result = await query(`SELECT ${column} FROM ${table} WHERE id = $1`, [id]);
     if (result.rows.length === 0) return res.status(404).send("Not found");
-    
+
     const dataUrl = result.rows[0][column];
     if (!dataUrl || !dataUrl.startsWith("data:")) {
-       return res.send(dataUrl);
+      return res.send(dataUrl);
     }
 
     const matches = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
@@ -53,10 +53,10 @@ export async function registerSketchRoutes(app: Express) {
   });
 
   // Add versioning columns to sketch_plans (safe migration)
-    // Performance indexes
-    await query(`CREATE INDEX IF NOT EXISTS idx_sketch_templates_created_at ON sketch_templates (created_at DESC)`);
-    await query(`CREATE INDEX IF NOT EXISTS idx_sketch_plans_project_id ON sketch_plans (project_id)`);
-    await query(`CREATE INDEX IF NOT EXISTS idx_sketch_plan_items_plan_id ON sketch_plan_items (plan_id)`);
+  // Performance indexes
+  await query(`CREATE INDEX IF NOT EXISTS idx_sketch_templates_created_at ON sketch_templates (created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sketch_plans_project_id ON sketch_plans (project_id)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sketch_plan_items_plan_id ON sketch_plan_items (plan_id)`);
 
   // GET /api/sketch-plans - List all sketch plans
   app.get("/api/sketch-plans", authMiddleware, async (req: Request, res: Response) => {
@@ -480,7 +480,7 @@ export async function registerSketchRoutes(app: Express) {
 
       client = await pool.connect();
       await client.query("BEGIN");
-      
+
       const lockRes = await client.query("SELECT id FROM sketch_plans WHERE id = $1 FOR UPDATE", [id]);
       if (lockRes.rows.length === 0) {
         await client.query("ROLLBACK");
@@ -523,7 +523,7 @@ export async function registerSketchRoutes(app: Express) {
       const addProxies = (obj: any) => {
         const url = obj.url || obj.image_url || obj.file_url;
         if (url && (url.startsWith('/api/sketch-images/') || url.startsWith('/api/sketch-attachments/'))) {
-           proxyUrlsToResolve.add(url);
+          proxyUrlsToResolve.add(url);
         }
       };
       if (items && Array.isArray(items)) {
@@ -596,7 +596,7 @@ export async function registerSketchRoutes(app: Express) {
               const imgName = typeof img === "string" ? null : (img.name || img.image_name);
               const imgId = (img.id && img.id.startsWith('img-')) ? img.id : `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
               const resolvedData = getResolvedData(rawImgUrl);
-              
+
               if (resolvedData) {
                 await client.query(
                   `INSERT INTO sketch_plan_images (id, plan_id, item_id, image_url, image_name) 

@@ -11,6 +11,7 @@ import {
   Settings,
   ChevronRight,
   Truck,
+  MapPin,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
@@ -25,7 +26,6 @@ interface SupplierLayoutProps {
 const navItems = [
   { label: "Dashboard",        icon: LayoutDashboard, path: "/supplier/dashboard" },
   { label: "Manage Materials", icon: Package,          path: "/supplier/materials" },
-  { label: "Delivery Tracker", icon: Truck,            path: "/delivery-tracker" },
   { label: "Proposal",         icon: FileText,         path: "/proposal" },
   { label: "Sketch a Plan",    icon: Hammer,           path: "/sketch-plans" },
   { label: "Manage Product",   icon: Settings,         path: "/admin/manage-product" },
@@ -54,24 +54,24 @@ export function SupplierLayout({
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full bg-[#0F172A]">
-      {/* Brand */}
-      <div className="px-6 py-10">
-        <div className="flex flex-col gap-1.5">
-          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/20 w-fit">
-            <span className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-400">Vendor Portal</span>
+      {/* Brand Section */}
+      <div className="px-5 py-6 border-b border-slate-800/50 mb-4">
+        <div className="flex flex-col gap-1">
+          <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 w-fit">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-blue-400">Vendor Portal</span>
           </div>
-          <h2 className="text-xl font-black text-white leading-tight truncate tracking-tight mt-2">{shopName}</h2>
+          <h2 className="text-lg font-bold text-white leading-tight truncate tracking-tight mt-2">{shopName}</h2>
           {shopLocation && (
-            <div className="flex items-center gap-2 mt-1 opacity-60">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <p className="text-[11px] font-bold text-slate-300 truncate uppercase tracking-widest">{shopLocation}</p>
+            <div className="flex items-center gap-2 mt-1 opacity-50">
+              <div className="w-1 h-1 rounded-full bg-blue-500" />
+              <p className="text-[10px] font-medium text-slate-400 truncate uppercase tracking-wider">{shopLocation}</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
+      {/* Navigation Section */}
+      <nav className="flex-1 px-3 space-y-1 overflow-y-auto custom-scrollbar">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = location === item.path || location.startsWith(item.path + "/");
@@ -80,41 +80,36 @@ export function SupplierLayout({
               key={item.path}
               onClick={() => navigate(item.path)}
               className={`
-                w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl text-[13px] font-bold
-                transition-all duration-300 group relative
+                w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium
+                transition-all duration-200 group relative
                 ${isActive
-                  ? "bg-blue-600 text-white shadow-xl shadow-blue-900/40"
+                  ? "bg-blue-600 text-white shadow-sm"
                   : "text-slate-400 hover:bg-white/5 hover:text-slate-100"
                 }
               `}
             >
               <Icon
-                size={18}
-                strokeWidth={isActive ? 2.5 : 2}
+                size={16}
+                strokeWidth={isActive ? 2 : 1.5}
                 className={isActive ? "text-white" : "text-slate-500 group-hover:text-slate-300"}
               />
               <span className="flex-1 text-left tracking-tight">{item.label}</span>
               {isActive && (
-                <div className="flex items-center">
-                  <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
-                  <ChevronRight size={14} className="ml-1 opacity-40" />
-                </div>
+                <ChevronRight size={12} className="opacity-50" />
               )}
             </button>
           );
         })}
       </nav>
 
-      {/* Logout */}
-      <div className="px-4 py-8 border-t border-slate-800/50">
+      {/* Logout Section */}
+      <div className="px-3 py-4 border-t border-slate-800/50">
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl text-[13px] font-bold text-slate-500 hover:bg-rose-500/10 hover:text-rose-400 transition-all duration-300 group"
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium text-slate-500 hover:bg-rose-500/10 hover:text-rose-400 transition-all duration-200 group"
         >
-          <div className="p-1.5 rounded-lg bg-slate-800/50 group-hover:bg-rose-500/20 transition-colors">
-            <LogOut size={16} strokeWidth={2.5} />
-          </div>
-          <span>Account Sign Out</span>
+          <LogOut size={16} strokeWidth={2} />
+          <span>Sign Out</span>
         </button>
       </div>
     </div>
@@ -123,7 +118,7 @@ export function SupplierLayout({
   return (
     <div className="flex h-screen bg-[#F8FAFC] overflow-hidden">
       {/* ── Desktop Sidebar (always visible) ── */}
-      <aside className="hidden lg:flex flex-col w-64 bg-[#0F172A] flex-shrink-0 shadow-2xl">
+      <aside className="hidden lg:flex flex-col w-60 bg-[#0F172A] flex-shrink-0 shadow-xl border-r border-slate-800/50">
         <SidebarContent />
       </aside>
 

@@ -555,7 +555,7 @@ export default function BomApprovals() {
                                                                     });
 
                                                                     // Include manual additions
-                                                                    const manualStep11 = step11Items.map((it, lIdx) => ({ ...it, lIdx })).filter((it: any) => it && it.manual).map((it: any) => {
+                                                                    const manualStep11 = step11Items.map((it: any, lIdx: number) => ({ ...it, lIdx })).filter((it: any) => it && it.manual).map((it: any) => {
                                                                         const qty = Number(it.qty ?? it.requiredQty ?? it.qtyPerSqf ?? 0) || 0;
                                                                         const sRate = Number(it.supply_rate ?? it.supplyRate ?? 0) || 0;
                                                                         const iRate = Number(it.install_rate ?? it.installRate ?? 0) || 0;

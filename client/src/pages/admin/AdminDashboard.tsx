@@ -72,6 +72,7 @@ import { useToast } from "@/hooks/use-toast";
 import { postJSON, apiFetch } from "@/lib/api";
 import { Link, useLocation } from "wouter";
 import * as XLSX from "xlsx";
+import { AllMaterialsSplitView } from "@/components/admin/AllMaterialsSplitView";
 
 /* 🔴 REQUIRED ASTERISK */
 const Required = () => <span className="text-red-500 ml-1">*</span>;
@@ -694,7 +695,7 @@ export default function AdminDashboard() {
   const getSubCategoriesForCategory = (category: string) => {
     if (!category) return [];
     const normalizedTarget = category.toLowerCase().trim();
-    return subCategories.filter((sc: any) => 
+    return subCategories.filter((sc: any) =>
       (sc.category || "").toLowerCase().trim() === normalizedTarget
     );
   };
@@ -1225,11 +1226,11 @@ export default function AdminDashboard() {
 
   const handleEditMaterial = (mat: any) => {
     setEditingMaterialId(mat.id);
-    
+
     // Find the correct category name from our master list to ensure Select component matches exactly (case-insensitive match)
     const rawCategory = mat.category || "";
     const matchedCategory = categories.find(c => c.toLowerCase().trim() === rawCategory.toLowerCase().trim()) || rawCategory;
-    
+
     // Similarly normalize subcategory name
     const rawSubCategory = mat.subcategory || mat.sub_category || mat.subCategory || "";
     const matchedSubCategory = subCategories.find(s => s.name.toLowerCase().trim() === rawSubCategory.toLowerCase().trim())?.name || rawSubCategory;
@@ -1308,15 +1309,18 @@ export default function AdminDashboard() {
 
           // update local UI state with server response
           setLocalMaterials((prev: any[]) => prev.map((m: any) => (m.id === editingMaterialId ? { ...m, ...normalized } : m)));
+          setEditingMaterialId(null);
+          toast({ title: "Success", description: "Material updated successfully" });
         } else {
           // log server error body
-          try { const txt = await res.text(); console.warn('[handleUpdateMaterial] server responded non-ok', res.status, txt); } catch { console.warn('[handleUpdateMaterial] server responded non-ok', res.status); }
-          // fallback to applying locally
-          setLocalMaterials((prev: any[]) => prev.map((m: any) => (m.id === editingMaterialId ? { ...m, ...newMaterial } : m)));
+          let errorText = "Unknown error";
+          try { errorText = await res.text(); } catch {}
+          console.warn('[handleUpdateMaterial] server responded non-ok', res.status, errorText);
+          toast({ title: "Update Failed", description: `Server returned ${res.status}: ${errorText}`, variant: "destructive" });
         }
       } catch (e) {
-        console.warn('[handleUpdateMaterial] server update failed, applying locally', e);
-        setLocalMaterials((prev: any[]) => prev.map((m: any) => (m.id === editingMaterialId ? { ...m, ...newMaterial } : m)));
+        console.warn('[handleUpdateMaterial] network or server error', e);
+        toast({ title: "Error", description: "Network or server error while saving", variant: "destructive" });
       }
       // create alert if rate changed
       if (rateChanged) {
@@ -1391,9 +1395,10 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (editingMaterialId && categories.length > 0) {
       setNewMaterial(prev => {
-        if (!prev.category) return prev;
-        const matched = categories.find(c => c.toLowerCase().trim() === prev.category.toLowerCase().trim());
-        if (matched && matched !== prev.category) return { ...prev, category: matched };
+        const cat = prev.category;
+        if (!cat) return prev;
+        const matched = categories.find(c => c.toLowerCase().trim() === cat.toLowerCase().trim());
+        if (matched && matched !== cat) return { ...prev, category: matched };
         return prev;
       });
     }
@@ -1402,9 +1407,10 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (editingMaterialId && subCategories.length > 0) {
       setNewMaterial(prev => {
-        if (!prev.subCategory) return prev;
-        const matched = subCategories.find(s => s.name.toLowerCase().trim() === prev.subCategory.toLowerCase().trim())?.name;
-        if (matched && matched !== prev.subCategory) return { ...prev, subCategory: matched };
+        const sub = prev.subCategory;
+        if (!sub) return prev;
+        const matched = subCategories.find(s => s.name.toLowerCase().trim() === sub.toLowerCase().trim())?.name;
+        if (matched && matched !== sub) return { ...prev, subCategory: matched };
         return prev;
       });
     }
@@ -1413,9 +1419,10 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (editingMaterialId && products.length > 0) {
       setNewMaterial(prev => {
-        if (!prev.product) return prev;
-        const matched = products.find(p => p.name.toLowerCase().trim() === prev.product.toLowerCase().trim())?.name;
-        if (matched && matched !== prev.product) return { ...prev, product: matched };
+        const prod = prev.product;
+        if (!prod) return prev;
+        const matched = products.find(p => p.name.toLowerCase().trim() === prod.toLowerCase().trim())?.name;
+        if (matched && matched !== prod) return { ...prev, product: matched };
         return prev;
       });
     }
@@ -1956,9 +1963,9 @@ export default function AdminDashboard() {
                         </CardTitle>
                         <CardDescription className="text-sm flex items-center justify-between">
                           <span>List of registered shops</span>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
+                          <Button
+                            variant="outline"
+                            size="sm"
                             onClick={(e) => { e.stopPropagation(); handleExportShops(); }}
                             className="h-7 text-xs bg-green-50 hover:bg-green-100 border-green-200 text-green-700 font-bold"
                           >
@@ -2113,8 +2120,13 @@ export default function AdminDashboard() {
                                                 <div className="text-sm font-medium">{mat.name}</div>
                                                 <div className="text-sm">₹{Number(mat.rate || 0).toLocaleString()}</div>
                                               </div>
-                                              <div className="text-xs text-blue-600">
-                                                {mat.code || 'No code'} • brand: {mat.brandName || '-'} • model: {mat.modelNumber || '-'}
+                                              <div className="text-[10px] sm:text-xs flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1">
+                                                <span className="font-bold text-slate-700 bg-slate-100 px-1 rounded uppercase tracking-tighter text-[9px]">{mat.code || 'No code'}</span>
+                                                <span className="text-slate-800 font-medium">Brand:</span><span className="text-blue-600 font-semibold">{mat.brandName || mat.brand || mat.brandname || '-'}</span>
+                                                <span className="text-slate-300">•</span>
+                                                <span className="text-slate-800 font-medium">Unit:</span><span className="text-blue-600 font-semibold">{mat.unit || '-'}</span>
+                                                <span className="text-slate-300">•</span>
+                                                <span className="text-slate-800 font-medium">Model:</span><span className="text-blue-600 font-semibold">{mat.modelNumber || mat.model || '-'}</span>
                                               </div>
                                             </div>
                                           ))
@@ -2141,9 +2153,9 @@ export default function AdminDashboard() {
                         <CardDescription className="text-sm flex items-center justify-between">
                           <span>Comprehensive material registry</span>
                           <div className="flex items-center gap-2">
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
+                            <Button
+                              variant="outline"
+                              size="sm"
                               onClick={(e) => { e.stopPropagation(); handleCheckDuplicates(); }}
                               disabled={checkingDuplicates}
                               className="h-7 text-xs bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-700 font-bold"
@@ -2151,9 +2163,9 @@ export default function AdminDashboard() {
                               {checkingDuplicates ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <AlertTriangle className="h-3 w-3 mr-1" />}
                               Check for Duplicates
                             </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
+                            <Button
+                              variant="outline"
+                              size="sm"
                               onClick={(e) => { e.stopPropagation(); handleExportMaterials(); }}
                               className="h-7 text-xs bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-700 font-bold"
                             >
@@ -2165,224 +2177,30 @@ export default function AdminDashboard() {
                     </div>
                   </CardHeader>
                   {showMaterialsList && (
-                    <CardContent className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                      <div className="flex items-center gap-2">
-                        <Search className="h-4 w-4 text-muted-foreground" />
-                        <Input
-                          value={materialSearch}
-                          onChange={(e) => setMaterialSearch(e.target.value)}
-                          placeholder="Search materials..."
-                          className="h-9 w-full max-w-[360px]"
-                        />
-
-                        <div className="flex items-center gap-2 ml-auto">
-                          <div className="w-44">
-                            <Select value={materialCategoryFilter} onValueChange={(val) => { setMaterialCategoryFilter(val); setMaterialSubcategoryFilter('all'); }}>
-                              <SelectTrigger className="h-9">
-                                <SelectValue placeholder="All Categories" />
-                              </SelectTrigger>
-                              <SelectContent className="max-h-[300px] overflow-y-auto">
-                                <SelectItem value="all">All Categories</SelectItem>
-                                <SelectItem value="uncategorized" className="text-destructive font-medium italic">Uncategorized</SelectItem>
-                                {categories?.map((cat) => (
-                                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div className="w-44">
-                            <Select value={materialSubcategoryFilter} onValueChange={setMaterialSubcategoryFilter} disabled={materialCategoryFilter === 'all'}>
-                              <SelectTrigger className="h-9">
-                                <SelectValue placeholder="All Subcategories" />
-                              </SelectTrigger>
-                              <SelectContent className="max-h-[300px] overflow-y-auto">
-                                <SelectItem value="all">All Subcategories</SelectItem>
-                                <SelectItem value="uncategorized" className="text-destructive font-medium italic">Uncategorized</SelectItem>
-                                {materialCategoryFilter !== 'all' && materialCategoryFilter !== 'uncategorized' && getSubCategoriesForCategory(materialCategoryFilter).map((sub: any) => (
-                                  <SelectItem key={sub.id || sub.name} value={sub.name}>{sub.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="max-h-[800px] overflow-y-auto pr-2 border rounded-md">
-                        {filteredMaterials.length === 0 ? (
-                          <p className="text-muted-foreground">No materials available</p>
-                        ) : (
-                          filteredMaterials.map((mat: any) => (
-                            <div key={mat.id} className="p-2 border-b">
-                              {editingMaterialId === mat.id ? (
-                                <div className="space-y-4 p-4 bg-muted/20 rounded-lg">
-                                  <div className="font-bold text-base text-foreground pb-2 border-b">Editing: {mat.name}</div>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                      <Label>Name</Label>
-                                      <Input value={newMaterial.name || ''} onChange={(e) => setNewMaterial({ ...newMaterial, name: e.target.value })} />
-                                    </div>
-                                    <div>
-                                      <Label>Code</Label>
-                                      <Input value={newMaterial.code || ''} onChange={(e) => setNewMaterial({ ...newMaterial, code: e.target.value })} />
-                                    </div>
-                                    <div>
-                                      <Label>Rate</Label>
-                                      <Input type="number" value={newMaterial.rate || ''} onChange={(e) => setNewMaterial({ ...newMaterial, rate: parseFloat(e.target.value) || 0 })} />
-                                    </div>
-                                    <div>
-                                      <Label>Unit</Label>
-                                      <Select value={newMaterial.unit || ''} onValueChange={(v) => setNewMaterial({ ...newMaterial, unit: v })}>
-                                        <SelectTrigger>
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="max-h-60 overflow-y-auto">
-                                          {UNIT_OPTIONS.map((c) => (
-                                            <SelectItem key={c} value={c}>{c}</SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                    <div>
-                                      <Label>Category</Label>
-                                      <Select value={newMaterial.category || ''} onValueChange={(v) => setNewMaterial({ ...newMaterial, category: v, subCategory: '' })}>
-                                        <SelectTrigger>
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="max-h-60 overflow-y-auto">
-                                          {categories.map((c: string) => (
-                                            <SelectItem key={c} value={c}>{c}</SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                    <div>
-                                      <Label>Sub Category</Label>
-                                      <Select value={newMaterial.subCategory || ''} onValueChange={(v) => setNewMaterial({ ...newMaterial, subCategory: v })}>
-                                        <SelectTrigger>
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="max-h-60 overflow-y-auto">
-                                          {getSubCategoriesForCategory(newMaterial.category || '').map((sc: any) => (
-                                            <SelectItem key={sc.id} value={sc.name}>{sc.name}</SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                    <div>
-                                      <Label>Product</Label>
-                                      <Select value={newMaterial.product || ''} onValueChange={(v) => setNewMaterial({ ...newMaterial, product: v })}>
-                                        <SelectTrigger>
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="max-h-60 overflow-y-auto">
-                                          {products.filter((p: any) => (p.subcategory || p.subcategory_name || "").toLowerCase().trim() === (newMaterial.subCategory || "").toLowerCase().trim()).map((p: any) => (
-                                            <SelectItem key={p.id} value={p.name}>{p.name} {"(Subcategory: "}{p.subcategory_name || p.subcategory}{")"}</SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                    <div>
-                                      <Label>Brand Name</Label>
-                                      <Input value={newMaterial.brandName || ''} onChange={(e) => setNewMaterial({ ...newMaterial, brandName: e.target.value })} />
-                                    </div>
-                                    <div>
-                                      <Label>Model Number</Label>
-                                      <Input value={newMaterial.modelNumber || ''} onChange={(e) => setNewMaterial({ ...newMaterial, modelNumber: e.target.value })} />
-                                    </div>
-                                    <div>
-                                      <Label>Dimensions</Label>
-                                      <Input value={newMaterial.dimensions || ''} onChange={(e) => setNewMaterial({ ...newMaterial, dimensions: e.target.value })} placeholder="L x W x H" />
-                                    </div>
-                                    <div>
-                                      <Label>Finish</Label>
-                                      <Input value={newMaterial.finish || ''} onChange={(e) => setNewMaterial({ ...newMaterial, finish: e.target.value })} placeholder="Matte/Glossy" />
-                                    </div>
-                                    <div>
-                                      <Label>Material Type</Label>
-                                      <Input value={newMaterial.metalType || ''} onChange={(e) => setNewMaterial({ ...newMaterial, metalType: e.target.value })} placeholder="e.g. Steel, Wood" />
-                                    </div>
-                                    <div>
-                                      <Label>Assigned Shop</Label>
-                                      <Select value={newMaterial.shopId || ''} onValueChange={(v) => setNewMaterial({ ...newMaterial, shopId: v })}>
-                                        <SelectTrigger>
-                                          <SelectValue placeholder="Select Shop" />
-                                        </SelectTrigger>
-                                        <SelectContent className="max-h-60 overflow-y-auto">
-                                          {localShops.map((s: any) => (
-                                            <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <Label>Technical Specification</Label>
-                                    <Textarea value={newMaterial.technicalSpecification || ''} onChange={(e) => setNewMaterial({ ...newMaterial, technicalSpecification: e.target.value })} />
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <Button size="sm" onClick={handleUpdateMaterial}>Save Changes</Button>
-                                    <Button size="sm" variant="ghost" onClick={() => { setEditingMaterialId(null); setNewMaterial({ name: '', code: '', rate: 0, unit: 'pcs', category: '', subCategory: '', product: '', brandName: '', modelNumber: '', technicalSpecification: '', dimensions: '', finish: '', metalType: '' }); }}>Cancel</Button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="flex items-center justify-between">
-                                  <div>
-                                    <div className="font-bold text-base text-foreground">{mat.name}</div>
-                                    <div className="text-xs text-blue-600">
-                                      {mat.code || 'No code'} • brand: {mat.brandName || '-'} • model: {mat.modelNumber || '-'} • ₹{mat.rate}/{mat.unit}
-                                    </div>
-                                    <div className="text-[10px] text-muted-foreground italic">
-                                      Shop: {localShops.find(s => s.id === (mat.shopId || mat.shop_id))?.name || 'Unassigned'}
-                                    </div>
-                                    <div className={`text-[10px] flex items-center gap-1 mt-1 font-medium ${!mat.created_at ? 'text-muted-foreground' :
-                                      differenceInDays(new Date(), new Date(mat.created_at)) > 90 ? 'text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-sm inline-flex w-fit border border-amber-200' : 'text-green-600'
-                                      }`}>
-                                      {mat.created_at ? (
-                                        <>
-                                          {differenceInDays(new Date(), new Date(mat.created_at)) > 90 ? '⚠️' : '🗓️'}
-                                          Price Added On {format(new Date(mat.created_at), 'dd/MM/yyyy')}
-                                          ({differenceInDays(new Date(), new Date(mat.created_at))} days ago)
-                                        </>
-                                      ) : (
-                                        'No date recorded'
-                                      )}
-                                    </div>
-                                    {(mat.technicalSpecification || mat.technicalspecification) && (
-                                      <div className="text-[10px] text-blue-600 mt-1 line-clamp-2 max-w-md">
-                                        Spec: {mat.technicalSpecification || mat.technicalspecification}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    {(canEditDelete || user?.role === "pre_sales") && (
-                                      <>
-                                        {canEditDelete && (
-                                          <Button size="sm" variant="ghost" onClick={() => setLocalMaterials((prev: any[]) => prev.map((m: any) => m.id === mat.id ? { ...m, disabled: !m.disabled } : m))}>
-                                            {mat.disabled ? 'Enable' : 'Disable'}
-                                          </Button>
-                                        )}
-                                        <Button size="sm" variant="outline" onClick={() => handleEditMaterial(mat)}>Edit</Button>
-                                        {canEditDelete && (
-                                          <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="text-destructive"
-                                            onClick={() => {
-                                              setGenericDelete({ isOpen: true, id: mat.id, name: mat.name, type: 'material' });
-                                            }}
-                                          >
-                                            <Trash2 className="h-4 w-4" />
-                                          </Button>
-                                        )}
-                                      </>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          ))
-                        )}
-                      </div>
+                    <CardContent className="p-0 animate-in fade-in slide-in-from-top-2 duration-300">
+                      <AllMaterialsSplitView
+                        materials={filteredMaterials}
+                        localShops={localShops}
+                        categories={categories}
+                        getSubCategoriesForCategory={getSubCategoriesForCategory}
+                        products={products}
+                        UNIT_OPTIONS={UNIT_OPTIONS}
+                        materialSearch={materialSearch}
+                        setMaterialSearch={setMaterialSearch}
+                        materialCategoryFilter={materialCategoryFilter}
+                        setMaterialCategoryFilter={setMaterialCategoryFilter}
+                        materialSubcategoryFilter={materialSubcategoryFilter}
+                        setMaterialSubcategoryFilter={setMaterialSubcategoryFilter}
+                        editingMaterialId={editingMaterialId}
+                        setEditingMaterialId={setEditingMaterialId}
+                        newMaterial={newMaterial}
+                        setNewMaterial={setNewMaterial}
+                        handleUpdateMaterial={handleUpdateMaterial}
+                        onToggleDisable={(mat) => setLocalMaterials((prev: any[]) => prev.map((m: any) => m.id === mat.id ? { ...m, disabled: !m.disabled } : m))}
+                        onDelete={(mat) => setGenericDelete({ isOpen: true, id: mat.id, name: mat.name, type: 'material' })}
+                        canEditDelete={canEditDelete}
+                        userRole={user?.role || ""}
+                      />
                     </CardContent>
                   )}
                 </Card>
@@ -3788,8 +3606,20 @@ export default function AdminDashboard() {
                                         </Badge>
                                       )}
                                     </div>
-                                    <div className="text-xs text-muted-foreground">
-                                      {template.code}
+                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                                      <span className="font-medium">{template.code}</span>
+                                      {(template.hsn_code || template.hsnCode) && (
+                                        <>
+                                          <span className="text-slate-300">•</span>
+                                          <span className="text-slate-800 font-medium">HSN:</span> <span className="text-blue-600 font-semibold">{template.hsn_code || template.hsnCode}</span>
+                                        </>
+                                      )}
+                                      {(template.sac_code || template.sacCode) && (
+                                        <>
+                                          <span className="text-slate-300">•</span>
+                                          <span className="text-slate-800 font-medium">SAC:</span> <span className="text-blue-600 font-semibold">{template.sac_code || template.sacCode}</span>
+                                        </>
+                                      )}
                                     </div>
                                   </div>
                                 </div>
@@ -5067,7 +4897,7 @@ export default function AdminDashboard() {
               <span>The following groups have exactly the same fields. The oldest entry will be kept.</span>
               {duplicateGroups.length > 0 && (
                 <div className="flex items-center gap-2 text-xs">
-                  <Checkbox 
+                  <Checkbox
                     id="select-all-duplicates"
                     checked={selectedDuplicateGroups.size === duplicateGroups.length}
                     onCheckedChange={(checked) => {
@@ -5096,7 +4926,7 @@ export default function AdminDashboard() {
                     !selectedDuplicateGroups.has(idx) && "opacity-60"
                   )}>
                     <div className="pt-1">
-                      <Checkbox 
+                      <Checkbox
                         checked={selectedDuplicateGroups.has(idx)}
                         onCheckedChange={(checked) => {
                           const next = new Set(selectedDuplicateGroups);

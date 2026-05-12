@@ -104,10 +104,10 @@ export default function SupplierDashboard() {
   // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50/50">
         <div className="text-center">
-          <Loader2 className="w-12 h-12 text-blue-600 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">Loading your dashboard...</p>
+          <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
+          <p className="text-sm font-medium text-slate-600">Loading your dashboard...</p>
         </div>
       </div>
     );
@@ -116,58 +116,52 @@ export default function SupplierDashboard() {
   // STATUS: Supplier account not approved
   if (status === "not-approved") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-red-50 to-orange-50 p-4">
-          <Card className="w-full max-w-md border-red-200 bg-white">
-            <CardHeader className="text-center">
+      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC] p-4">
+          <Card className="w-full max-w-md border-slate-200 bg-white shadow-sm rounded-xl overflow-hidden">
+            <CardHeader className="text-center pb-2 pt-8">
               <div className="flex justify-center mb-4">
-                <div className="p-3 bg-red-100 rounded-full">
-                  <AlertCircle className="w-8 h-8 text-red-600" />
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <AlertCircle className="w-6 h-6 text-blue-600" />
                 </div>
               </div>
-              <CardTitle className="text-red-600">Account Pending Review</CardTitle>
-              <CardDescription>
+              <CardTitle className="text-xl font-bold text-slate-900">Account Pending Review</CardTitle>
+              <CardDescription className="text-xs font-medium text-slate-500">
                 Your supplier account is awaiting approval
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="p-4 bg-red-50 rounded-lg border border-red-200">
-                <p className="text-sm text-gray-700">
-                  Thank you for registering as a supplier! Your account is
-                  currently under review by our admin team. You'll receive an
-                  email notification once your account is approved.
+            <CardContent className="space-y-5 p-6">
+              <div className="p-4 bg-slate-50 rounded-lg border border-slate-100">
+                <p className="text-sm text-slate-600 font-medium leading-relaxed">
+                  Thank you for registering! Your account is currently under review. 
+                  You'll receive a notification once your account is active.
                 </p>
               </div>
 
               {user?.approvalReason && (
-                <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                  <p className="text-xs font-semibold text-yellow-800 mb-1">
-                    Reason for Rejection
+                <div className="p-4 bg-rose-50 rounded-lg border border-rose-100">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-rose-800/60 mb-1">
+                    Reviewer Feedback
                   </p>
-                  <p className="text-sm text-yellow-700">{user.approvalReason}</p>
+                  <p className="text-sm text-rose-700 font-medium">{user.approvalReason}</p>
                 </div>
               )}
 
-              <div className="text-sm text-gray-600 space-y-2">
-                <p>
-                  <strong>What we're checking:</strong>
-                </p>
-                <ul className="list-disc list-inside space-y-1 text-xs">
-                  <li>Business credentials and validity</li>
-                  <li>GST registration details</li>
-                  <li>Business address verification</li>
-                  <li>Contact information</li>
+              <div className="text-sm text-slate-600 space-y-2">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Verification Protocol:</p>
+                <ul className="space-y-1.5 text-xs font-medium text-slate-500">
+                  <li className="flex items-center gap-2"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> Business Credentials</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> GST Registration</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> Physical Address</li>
                 </ul>
               </div>
 
-              <div className="p-4 bg-blue-50 rounded-lg border border-blue-200 text-sm">
-                <p className="text-blue-900">
-                  <strong>Typical approval time:</strong> 24-48 hours
-                </p>
+              <div className="p-3 bg-blue-50 rounded-lg border border-blue-100 text-[11px] font-bold text-blue-700 text-center uppercase tracking-wider">
+                Typical window: 24-48 hours
               </div>
 
               <Button
                 onClick={() => setLocation("/")}
-                className="w-full bg-blue-600 hover:bg-blue-700"
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold h-11 rounded-lg"
               >
                 Go to Home
               </Button>
@@ -187,33 +181,32 @@ export default function SupplierDashboard() {
     const pendingShop = shops.find((s) => !s.approved);
 
     return (
-      
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-yellow-50 to-orange-50 p-4">
-          <Card className="w-full max-w-md border-yellow-200 bg-white">
-            <CardHeader className="text-center">
+        <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC] p-4">
+          <Card className="w-full max-w-md border-slate-200 bg-white shadow-sm rounded-xl overflow-hidden">
+            <CardHeader className="text-center pb-2 pt-8">
               <div className="flex justify-center mb-4">
-                <div className="p-3 bg-yellow-100 rounded-full">
-                  <Clock className="w-8 h-8 text-yellow-600" />
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <Clock className="w-6 h-6 text-blue-600" />
                 </div>
               </div>
-              <CardTitle className="text-yellow-600">
+              <CardTitle className="text-xl font-bold text-slate-900">
                 Shop Under Review
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-xs font-medium text-slate-500">
                 Your shop is awaiting approval
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-5 p-6">
               {pendingShop && (
-                <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                  <div className="flex items-start gap-2 mb-3">
-                    <Building2 className="w-5 h-5 text-gray-600 flex-shrink-0 mt-0.5" />
+                <div className="p-4 bg-slate-50 rounded-lg border border-slate-100">
+                  <div className="flex items-start gap-3">
+                    <Building2 className="w-4 h-4 text-slate-400 mt-1" />
                     <div>
-                      <p className="font-semibold text-gray-900">
+                      <p className="font-bold text-slate-900 text-sm">
                         {pendingShop.name}
                       </p>
                       {pendingShop.city && (
-                        <p className="text-xs text-gray-600">
+                        <p className="text-[11px] text-slate-500 font-medium">
                           {pendingShop.city}
                           {pendingShop.location && ` • ${pendingShop.location}`}
                         </p>
@@ -223,29 +216,16 @@ export default function SupplierDashboard() {
                 </div>
               )}
 
-              <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                <p className="text-sm text-gray-700">
+              <div className="p-4 bg-blue-50 rounded-lg border border-blue-100">
+                <p className="text-sm text-blue-900/80 font-medium leading-relaxed">
                   We're reviewing your shop details. Our team typically
-                  completes this within 24-48 hours. You'll get an email
-                  notification once your shop is approved.
+                  completes this within 24-48 hours. 
                 </p>
-              </div>
-
-              <div className="text-sm text-gray-600 space-y-2">
-                <p>
-                  <strong>We're verifying:</strong>
-                </p>
-                <ul className="list-disc list-inside space-y-1 text-xs">
-                  <li>Shop name and location</li>
-                  <li>Contact information</li>
-                  <li>GST details</li>
-                  <li>Business legitimacy</li>
-                </ul>
               </div>
 
               <Button
                 onClick={() => setLocation("/")}
-                className="w-full bg-blue-600 hover:bg-blue-700"
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold h-11 rounded-lg"
               >
                 Go to Home
               </Button>
