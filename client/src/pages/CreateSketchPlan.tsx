@@ -7,10 +7,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Save, ArrowLeft, Camera, Pencil, Layers, X, GripVertical, FileText, Search, MessageSquare, Image as ImageIcon, Move, Lock, Unlock, ShieldAlert, Cloud, Check, AlertCircle, AlertTriangle, FileUp, FileSpreadsheet, Download, Paperclip, ArrowUp, ArrowDown, ArrowUpToLine, ArrowDownToLine, GitBranch, Store, ChevronDown, ChevronLeft, ChevronRight, ArrowUpDown, ArrowDownAz, Users, Copy, Loader2 } from "lucide-react";
-import { Reorder, useDragControls } from "framer-motion";
-import { SketchPad } from "@/components/SketchPad";
 import apiFetch from "@/lib/api";
+import { motion, Reorder, useDragControls, AnimatePresence } from "framer-motion";
+import { SketchPad } from "@/components/SketchPad";
+import { BoqPreviewModal } from "@/components/sketch/BoqPreviewModal";
+import { 
+  Plus, Trash2, Save, ArrowLeft, Camera, Pencil, Layers, X, GripVertical, 
+  FileText, Search, MessageSquare, Image as ImageIcon, Move, Lock, Unlock, 
+  ShieldAlert, Cloud, Check, AlertCircle, AlertTriangle, FileUp, FileSpreadsheet, 
+  Download, Paperclip, ArrowUp, ArrowDown, ArrowUpToLine, ArrowDownToLine, 
+  GitBranch, Store, ChevronDown, ChevronLeft, ChevronRight, ArrowUpDown, 
+  ArrowDownAz, Users, Copy, Loader2, Zap, Calculator, Eye, Upload, Mic, MicOff, UserCircle 
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription, DialogClose } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -26,6 +34,8 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/comp
 import { useAuth } from "@/lib/auth-context";
 import { SupplierLayout } from "@/components/layout/SupplierLayout";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useVoiceRecognition } from "@/hooks/useVoiceRecognition";
+// Mic icons merged into main lucide import above
 import {
   Pagination,
   PaginationContent,
@@ -61,6 +71,7 @@ interface PlanItem {
   unit: string;
   dimension_unit: "feet" | "mm" | "inch" | "cm" | "meter" | "sqft" | "sqmt" | "rft" | "rmt" | "nos" | "pcs" | "kg" | "litre" | "set" | "ls";
   remarks: string;
+  rate?: number; // Material rate
   dimensions?: { id: string; length: string; width: string; height: string; note?: string }[];
   preImages: PlanImage[]; // PRE-work images
   postImages: PlanImage[]; // POST-work images
@@ -246,6 +257,14 @@ const SketchPlanRow = React.memo(({
 
   const dims = item.dimensions?.length ? item.dimensions : [{ id: "def", length: item.length, width: item.width, height: item.height, note: item.description }];
 
+  // Voice for Inline Notes
+  const { isListening: isListeningNotes, startListening: startNotes, stopListening: stopNotes } = useVoiceRecognition({
+    onResult: (text) => {
+      updateItem(idx, "description", text);
+      setMaterialSearch(text);
+    }
+  });
+
   return (
     <Reorder.Item
       as="tr"
@@ -346,20 +365,30 @@ const SketchPlanRow = React.memo(({
                     </div>
                   </div>
                 </div>
-                <Textarea
-                  value={item.description}
-                  onChange={(e) => {
-                    updateItem(idx, "description", e.target.value);
-                    setMaterialSearch(e.target.value);
-                  }}
-                  onFocus={() => {
-                    setOpenNotesIdx(idx);
-                    setMaterialSearch(item.description || "");
-                  }}
-                  placeholder="Enter detailed site notes or specifications... (Typing here searches items from database)"
-                  className="min-h-[100px] resize-none focus:ring-2 focus:ring-indigo-500/20"
-                  disabled={isLocked}
-                />
+                  <div className="flex items-center gap-2 relative">
+                    <Textarea
+                      value={item.description}
+                      onChange={(e) => {
+                        updateItem(idx, "description", e.target.value);
+                        setMaterialSearch(e.target.value);
+                      }}
+                      onFocus={() => {
+                        setOpenNotesIdx(idx);
+                        setMaterialSearch(item.description || "");
+                      }}
+                      placeholder="Enter detailed site notes... (Speak or type)"
+                      className="min-h-[100px] resize-none focus:ring-2 focus:ring-indigo-500/20 pr-10"
+                      disabled={isLocked}
+                    />
+                    <Button 
+                      size="icon" 
+                      variant="ghost" 
+                      className={cn("absolute right-2 bottom-2 rounded-full", isListeningNotes ? "text-red-500 animate-pulse bg-red-50" : "text-slate-400")}
+                      onClick={() => isListeningNotes ? stopNotes() : startNotes()}
+                    >
+                      {isListeningNotes ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+                    </Button>
+                  </div>
                 
                 {/* Embedded Search Results inside Notes Dialog */}
                 {materialSearch.trim().length >= 2 && (
@@ -411,9 +440,6 @@ const SketchPlanRow = React.memo(({
                         })
                         .slice(0, 15) // Show a few more for better choice
                         .map((m: any) => {
-                          const nLower = (m.name || "").toLowerCase();
-                          const labourKeywords = ["labour", "service", "installation", "install", "refixing", "removing", "fixing", "fitting", "work", "charges", "repair", "maintenance"];
-                          const isLabour = labourKeywords.some(key => nLower.includes(key));
                           const isProduct = m.type === 'Product';
                           return (
                             <div 
@@ -432,14 +458,12 @@ const SketchPlanRow = React.memo(({
                                 <div className="flex items-center gap-2">
                                   <span className={cn("font-semibold text-xs text-slate-700", isProduct && "text-blue-700")}>{m.name}</span>
                                   <Badge variant={isProduct ? "default" : "outline"} className={cn("text-[8px] h-3.5 px-1 uppercase tracking-tighter scale-90", isProduct && "bg-blue-600")}>{m.type}</Badge>
-                                  {isLabour ? (
-                                    <Badge className="bg-orange-100 text-orange-700 border-none text-[8px] h-3.5 px-1 font-bold">LABOUR</Badge>
-                                  ) : (
-                                    <Badge className="bg-blue-100 text-blue-700 border-none text-[8px] h-3.5 px-1 font-bold">SUPPLY</Badge>
+                                  {m.rate && (
+                                    <span className="ml-2 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 rounded">₹{m.rate}</span>
                                   )}
                                 </div>
                                 <span className="text-[9px] text-slate-400 font-medium italic truncate max-w-[400px]">
-                                  {m.category || "Uncategorized"} {m.code ? `• ${m.code}` : ''}
+                                  {m.category || "Uncategorized"} {m.code ? `• ${m.code}` : ''} {m.unit ? `• Per ${m.unit}` : ''}
                                 </span>
                               </div>
                               <Button size="sm" variant="ghost" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-indigo-600">
@@ -668,7 +692,6 @@ const SketchPlanRow = React.memo(({
                           .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""))
                           .map((m: any) => {
                             const nameLower = (m.name || "").toLowerCase();
-                            const isLabourItem = nameLower.includes("labour") || nameLower.includes("service") || nameLower.includes("installation") || nameLower.includes("install");
                             
                             return (
                               <CommandItem
@@ -676,20 +699,24 @@ const SketchPlanRow = React.memo(({
                                 onSelect={() => { selectMaterial(idx, m); setOpenPopoverIdx(null); }}
                                 className="cursor-pointer"
                               >
-                                <div className="flex flex-col">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-semibold text-sm">{m.name}</span>
-                                    <Badge variant="outline" className="text-[10px] scale-90">{m.type}</Badge>
-                                    {isLabourItem ? (
-                                      <Badge className="bg-orange-100 text-orange-700 border-none text-[9px] h-4 font-bold">LABOUR</Badge>
-                                    ) : (
-                                      <Badge className="bg-blue-100 text-blue-700 border-none text-[9px] h-4 font-bold">SUPPLY</Badge>
-                                    )}
+                                <div className="flex items-center justify-between w-full">
+                                  <div className="flex flex-col">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-semibold text-sm">{m.name}</span>
+                                      <Badge variant="outline" className="text-[10px] scale-90">{m.type}</Badge>
+                                    </div>
+                                    <div className="flex gap-2 text-[10px] text-slate-500">
+                                      {m.code && <span>Code: {m.code}</span>}
+                                      {m.category && <span>Category: {m.category}</span>}
+                                      {m.unit && <span>Unit: {m.unit}</span>}
+                                    </div>
                                   </div>
-                                  <div className="flex gap-2 text-[10px] text-slate-500">
-                                    {m.code && <span>Code: {m.code}</span>}
-                                    {m.category && <span>Category: {m.category}</span>}
-                                  </div>
+                                  {m.rate && (
+                                    <div className="text-right shrink-0 ml-4">
+                                      <span className="text-sm font-bold text-indigo-600">₹{m.rate}</span>
+                                      <span className="text-[8px] text-slate-400 block uppercase font-bold tracking-tighter">Rate / {m.unit || 'Unit'}</span>
+                                    </div>
+                                  )}
                                 </div>
                               </CommandItem>
                             );
@@ -939,6 +966,342 @@ export default function CreateSketchPlan() {
   const [openPopoverIdx, setOpenPopoverIdx] = useState<number | null>(null);
   const [openNotesIdx, setOpenNotesIdx] = useState<number | null>(null);
 
+  // Excel & PDF Import States
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importFileType, setImportFileType] = useState<"excel" | "pdf" | null>(null);
+  const [importHeaders, setImportHeaders] = useState<string[]>([]);
+  const [importRows, setImportRows] = useState<any[][]>([]);
+  const [importMappings, setImportMappings] = useState<Record<string, number>>({
+    item_name: -1,
+    description: -1,
+    category: -1,
+    length: -1,
+    width: -1,
+    height: -1,
+    qty: -1,
+    unit: -1
+  });
+  const [isParsing, setIsParsing] = useState(false);
+
+  const loadPdfJs = useCallback((): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      if ((window as any).pdfjsLib) {
+        resolve((window as any).pdfjsLib);
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js";
+      script.onload = () => {
+        const pdfjsLib = (window as any)["pdfjs-dist/build/pdf"];
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js";
+        resolve(pdfjsLib);
+      };
+      script.onerror = (err) => reject(err);
+      document.head.appendChild(script);
+    });
+  }, []);
+
+  const performSmartMapping = useCallback((headers: string[]): Record<string, number> => {
+    const mappings: Record<string, number> = {
+      item_name: -1,
+      description: -1,
+      category: -1,
+      length: -1,
+      width: -1,
+      height: -1,
+      qty: -1,
+      unit: -1
+    };
+
+    headers.forEach((header, idx) => {
+      const h = header.toLowerCase().trim();
+      if (h.includes("notes") || h.includes("desc") || h.includes("spec") || h.includes("remark") || h.includes("note")) {
+        if (mappings.description === -1) mappings.description = idx;
+      } else if (h.includes("category") || h.includes("group") || h.includes("type")) {
+        if (mappings.category === -1) mappings.category = idx;
+      } else if (h.includes("item") || h.includes("name") || h.includes("material") || h.includes("product") || h.includes("particular")) {
+        if (mappings.item_name === -1) mappings.item_name = idx;
+      } else if (h === "length" || h === "l" || h.startsWith("len") || h === "length (l)") {
+        if (mappings.length === -1) mappings.length = idx;
+      } else if (h === "width" || h === "w" || h.startsWith("wid") || h === "width (w)") {
+        if (mappings.width === -1) mappings.width = idx;
+      } else if (h === "height" || h === "h" || h === "depth" || h === "d" || h.startsWith("hei") || h.startsWith("dep") || h === "height (h)") {
+        if (mappings.height === -1) mappings.height = idx;
+      } else if (h.includes("qty") || h.includes("quant") || h === "q" || h.includes("number")) {
+        if (mappings.qty === -1) mappings.qty = idx;
+      } else if (h === "unit" || h === "uom" || h === "u" || h.includes("unit")) {
+        if (mappings.unit === -1) mappings.unit = idx;
+      }
+    });
+
+    return mappings;
+  }, []);
+
+  const handleFileSelect = useCallback(async (file: File) => {
+    setImportFile(file);
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    
+    if (extension === "pdf") {
+      setIsParsing(true);
+      try {
+        const pdfjsLib = await loadPdfJs();
+        const reader = new FileReader();
+        reader.onload = async function() {
+          try {
+            const typedarray = new Uint8Array(this.result as ArrayBuffer);
+            const pdf = await pdfjsLib.getDocument(typedarray).promise;
+            const allParsedRows: any[][] = [];
+            
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+              const page = await pdf.getPage(pageNum);
+              const textContent = await page.getTextContent();
+              
+              const items = textContent.items.map((item: any) => ({
+                text: item.str,
+                x: item.transform[4],
+                y: item.transform[5],
+                width: item.width,
+                height: item.height
+              }));
+              
+              // Sort items top-to-bottom, left-to-right
+              items.sort((a: any, b: any) => {
+                if (Math.abs(a.y - b.y) < 5) {
+                  return a.x - b.x;
+                }
+                return b.y - a.y;
+              });
+              
+              // Group by y coordinate
+              const rows: any[][] = [];
+              let currentRow: any[] = [];
+              let currentY = -1;
+              
+              for (const item of items) {
+                if (currentRow.length === 0) {
+                  currentRow.push(item);
+                  currentY = item.y;
+                } else if (Math.abs(item.y - currentY) < 5) {
+                  currentRow.push(item);
+                } else {
+                  rows.push(currentRow);
+                  currentRow = [item];
+                  currentY = item.y;
+                }
+              }
+              if (currentRow.length > 0) {
+                rows.push(currentRow);
+              }
+              
+              const parsedRows = rows.map(row => {
+                const cells: string[] = [];
+                let currentCellText = "";
+                let lastX = -1;
+                
+                for (const item of row) {
+                  if (lastX === -1) {
+                    currentCellText = item.text;
+                    lastX = item.x + (item.width || 0);
+                  } else if (item.x - lastX > 15) { // column gap threshold
+                    cells.push(currentCellText.trim());
+                    currentCellText = item.text;
+                    lastX = item.x + (item.width || 0);
+                  } else {
+                    currentCellText += " " + item.text;
+                    lastX = Math.max(lastX, item.x + (item.width || 0));
+                  }
+                }
+                if (currentCellText) {
+                  cells.push(currentCellText.trim());
+                }
+                return cells;
+              }).filter(r => r.length > 0);
+              
+              allParsedRows.push(...parsedRows);
+            }
+            
+            if (allParsedRows.length === 0) {
+              toast({ title: "Import Error", description: "No text data could be extracted from this PDF.", variant: "destructive" });
+              setIsParsing(false);
+              setImportFile(null);
+              return;
+            }
+            
+            // Find headers (the row with most columns, or first row)
+            let bestHeaderRowIdx = 0;
+            let maxCols = 0;
+            for (let i = 0; i < Math.min(5, allParsedRows.length); i++) {
+              if (allParsedRows[i].length > maxCols) {
+                maxCols = allParsedRows[i].length;
+                bestHeaderRowIdx = i;
+              }
+            }
+            
+            const headers = allParsedRows[bestHeaderRowIdx].map((h, cIdx) => h || `Column ${cIdx + 1}`);
+            const rawRows = allParsedRows.slice(bestHeaderRowIdx + 1);
+            
+            setImportHeaders(headers);
+            setImportRows(rawRows);
+            setImportFileType("pdf");
+            
+            const initialMappings = performSmartMapping(headers);
+            setImportMappings(initialMappings);
+          } catch (err) {
+            console.error("PDF internal parsing error", err);
+            toast({ title: "Error Parsing PDF", description: "Failed to read text structure from PDF.", variant: "destructive" });
+            setImportFile(null);
+          } finally {
+            setIsParsing(false);
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      } catch (err) {
+        console.error("Failed to load PDFJS script", err);
+        toast({ title: "Import Error", description: "Could not load PDF parsing engine.", variant: "destructive" });
+        setIsParsing(false);
+        setImportFile(null);
+      }
+    } else {
+      // Excel/CSV
+      setIsParsing(true);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = e.target?.result;
+          const workbook = XLSX.read(data, { type: "array" });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const jsonData = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
+          
+          if (jsonData.length === 0) {
+            toast({ title: "Import Error", description: "The Excel file appears to be empty.", variant: "destructive" });
+            setIsParsing(false);
+            setImportFile(null);
+            return;
+          }
+          
+          // Find headers (first non-empty row)
+          let headerRowIdx = 0;
+          while (headerRowIdx < jsonData.length && (!jsonData[headerRowIdx] || jsonData[headerRowIdx].length === 0)) {
+            headerRowIdx++;
+          }
+          
+          if (headerRowIdx >= jsonData.length) {
+            toast({ title: "Import Error", description: "No data rows found in the Excel file.", variant: "destructive" });
+            setIsParsing(false);
+            setImportFile(null);
+            return;
+          }
+          
+          const headers = jsonData[headerRowIdx].map((h: any) => String(h ?? "").trim());
+          const rawRows = jsonData.slice(headerRowIdx + 1).filter((r: any) => r && r.length > 0 && r.some((cell: any) => cell !== null && cell !== undefined && cell !== ""));
+          
+          setImportHeaders(headers);
+          setImportRows(rawRows);
+          setImportFileType("excel");
+          
+          const initialMappings = performSmartMapping(headers);
+          setImportMappings(initialMappings);
+        } catch (err) {
+          toast({ title: "Error Parsing Excel", description: "Failed to parse Excel file.", variant: "destructive" });
+          setImportFile(null);
+        } finally {
+          setIsParsing(false);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  }, [loadPdfJs, performSmartMapping, toast]);
+
+  const normalizeDimensionUnit = useCallback((uStr: string): string => {
+    const u = uStr.toLowerCase().trim();
+    if (u.includes("feet") || u === "ft" || u === "'") return "feet";
+    if (u === "mm") return "mm";
+    if (u.includes("inch") || u === "in" || u === '"') return "inch";
+    if (u === "cm") return "cm";
+    if (u.includes("meter") || u === "m") return "meter";
+    if (u === "sqft" || u === "sft") return "sqft";
+    if (u === "sqmt" || u === "sqm") return "sqmt";
+    if (u === "rft") return "rft";
+    if (u === "rmt") return "rmt";
+    if (u === "nos" || u === "no") return "nos";
+    if (u === "pcs" || u === "pc" || u === "piece") return "pcs";
+    if (u === "kg" || u === "kilo") return "kg";
+    if (u.includes("litre") || u === "ltr" || u === "l") return "litre";
+    if (u === "set") return "set";
+    if (u === "ls") return "ls";
+    return "feet"; // Default
+  }, []);
+
+  const handleImportMappedData = useCallback(() => {
+    if (importRows.length === 0) return;
+
+    const newPlanItems: PlanItem[] = importRows.map((row, rIdx) => {
+      const getMappedValue = (targetField: string) => {
+        const colIdx = importMappings[targetField];
+        if (colIdx === undefined || colIdx === -1) return "";
+        return String(row[colIdx] ?? "").trim();
+      };
+
+      const length = getMappedValue("length");
+      const width = getMappedValue("width");
+      const height = getMappedValue("height");
+      let qty = getMappedValue("qty");
+      const unitValue = getMappedValue("unit") || "Nos";
+      const dimension_unit = normalizeDimensionUnit(unitValue) as any;
+
+      // Handle default Qty calculation if empty
+      if (!qty) {
+        const l = parseFloat(length) || 0;
+        const w = parseFloat(width) || 0;
+        const h = parseFloat(height) || 0;
+        if (l > 0 || w > 0 || h > 0) {
+          const dimsArr = [l, w, h].filter(v => v > 0);
+          const autoQty = dimsArr.reduce((acc, v) => acc * v, 1);
+          qty = dimension_unit === "mm" ? Math.round(autoQty).toString() : autoQty.toFixed(2);
+        } else {
+          qty = "1";
+        }
+      }
+
+      return {
+        id: `ski-${Date.now()}-${rIdx}-${Math.random().toString(36).substr(2, 5)}`,
+        item_name: getMappedValue("item_name") || `Imported Item ${rIdx + 1}`,
+        description: getMappedValue("description"), // Notes
+        length,
+        width,
+        height,
+        qty,
+        unit: unitValue,
+        dimension_unit,
+        category: getMappedValue("category") || "",
+        remarks: "",
+        preImages: [],
+        postImages: [],
+        images: []
+      };
+    });
+
+    setItems(prev => {
+      // If the first/only item is a fresh empty row, discard it and use imported items
+      if (prev.length === 1 && !prev[0].item_name && !prev[0].description && !prev[0].length && !prev[0].width && !prev[0].height) {
+        return newPlanItems;
+      }
+      return [...prev, ...newPlanItems];
+    });
+
+    toast({ title: "Import Successful", description: `Successfully imported ${newPlanItems.length} items from ${importFile?.name}.` });
+    
+    // Reset and Close
+    setImportFile(null);
+    setImportFileType(null);
+    setImportHeaders([]);
+    setImportRows([]);
+    setImportDialogOpen(false);
+  }, [importRows, importMappings, importFile, normalizeDimensionUnit, setItems, toast]);
+
   // PDF / Export State
   const [isPdfDialogOpen, setIsPdfDialogOpen] = useState(false);
   const [includePlanPhotosInExport, setIncludePlanPhotosInExport] = useState(true);
@@ -985,6 +1348,16 @@ export default function CreateSketchPlan() {
   const [categorySearchTerm, setCategorySearchTerm] = useState("");
   const [rowToConfirm, setRowToConfirm] = useState<{ idx: number, material: any } | null>(null);
   const [showCategoryConfirm, setShowCategoryConfirm] = useState(false);
+
+  // Direct to BOQ states
+  const [isDirectToBoqDialogOpen, setIsDirectToBoqDialogOpen] = useState(false);
+  const [isBoqPreviewOpen, setIsBoqPreviewOpen] = useState(false);
+
+  const [selectedTargetProjectId, setSelectedTargetProjectId] = useState<string>("none");
+  const [selectedTargetVersionId, setSelectedTargetVersionId] = useState<string>("none");
+  const [targetVersions, setTargetVersions] = useState<any[]>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const [processingDirectToBoq, setProcessingDirectToBoq] = useState(false);
 
   // New state
   const [projectOpen, setProjectOpen] = useState(false);
@@ -1345,6 +1718,9 @@ export default function CreateSketchPlan() {
           setRequestStatus(p.request_status || "none");
           setRequestReason(p.request_reason || "");
 
+          // Load version info
+          loadSiblingVersions(p);
+
           const imagesByItemId = new Map<string, any[]>();
           if (data.images && Array.isArray(data.images)) {
             data.images.forEach((img: any) => {
@@ -1435,6 +1811,77 @@ export default function CreateSketchPlan() {
       // loadInitialData handles this.
     }
   }, [currentId, siblingVersions]);
+
+  const loadTargetVersions = async (projId: string) => {
+    if (!projId || projId === "none") {
+      setTargetVersions([]);
+      return;
+    }
+    setLoadingVersions(true);
+    try {
+      const res = await apiFetch(`/api/boq-versions/${projId}?type=bom&excludeApproved=true`);
+      if (res.ok) {
+        const data = await res.json();
+        const versions = data.versions || [];
+        setTargetVersions(versions);
+        if (versions.length > 0) {
+          setSelectedTargetVersionId(versions[0].id);
+        } else {
+          setSelectedTargetVersionId("new");
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load versions", err);
+    } finally {
+      setLoadingVersions(false);
+    }
+  };
+
+  const handleDirectToBoq = async () => {
+    if (!currentId) {
+      toast({ title: "Error", description: "Please save the plan first", variant: "destructive" });
+      return;
+    }
+
+    if (selectedTargetProjectId === "none") {
+      toast({ title: "Error", description: "Please select a target project", variant: "destructive" });
+      return;
+    }
+
+    setProcessingDirectToBoq(true);
+    try {
+      // 1. First perform a save to ensure we have the latest data
+      await performSave();
+
+      // 2. Call the conversion endpoint
+      const res = await apiFetch(`/api/sketch-plans/${currentId}/load-to-boq`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: selectedTargetProjectId,
+          versionId: selectedTargetVersionId === "new" ? null : selectedTargetVersionId
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        toast({ title: "Success", description: data.message });
+        setIsDirectToBoqDialogOpen(false);
+        
+        // 3. Redirect to CreateBoq page with pre-selected project and version
+        const targetVerId = data.versionId || selectedTargetVersionId;
+        setLocation(`/create-bom?projectId=${selectedTargetProjectId}${targetVerId && targetVerId !== 'new' ? `&versionId=${targetVerId}` : ''}`);
+      } else {
+        const errorData = await res.json();
+        toast({ title: "Error", description: errorData.message || "Failed to load to BOQ", variant: "destructive" });
+      }
+    } catch (err) {
+      console.error("Direct to BOQ error", err);
+      toast({ title: "Error", description: "An unexpected error occurred", variant: "destructive" });
+    } finally {
+      setProcessingDirectToBoq(false);
+    }
+  };
 
   const handleCreateNewVersion = async (copyItems: boolean) => {
     if (!currentId) return;
@@ -1831,7 +2278,7 @@ export default function CreateSketchPlan() {
         
         if (baseName.length > 2) {
           const oppositeType = isSupply ? "labour" : "supply";
-          const baseWords = baseName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+          const baseWords = baseName.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
           
           // Look for the pair in current search results
           const pair = searchResults.find(m => {
@@ -1845,7 +2292,7 @@ export default function CreateSketchPlan() {
 
             // Name must contain the primary keywords of the base name
             // For example, if searching 'Grid Ceiling', the pair must also have 'Grid' and 'Ceiling'
-            return baseWords.every(word => mName.includes(word));
+            return baseWords.every((word: string) => mName.includes(word));
           });
 
           if (pair) {
@@ -2668,9 +3115,54 @@ export default function CreateSketchPlan() {
 
   const LayoutComponent = isSupplier ? SupplierLayout : Layout;
 
+    // Real-time Presence
+    const [activeUsers, setActiveUsers] = useState<string[]>([]);
+    const avatarKey = `user_avatar_${user?.id || user?.username || 'Guest'}`;
+    const [myAvatar, setMyAvatar] = useState<string | null>(localStorage.getItem(avatarKey) || null);
+
+    const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        if (file.size > 1024 * 1024) { // 1MB limit for WS performance
+          toast({ title: "Image too large", description: "Please select an image smaller than 1MB", variant: "destructive" });
+          return;
+        }
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64 = reader.result as string;
+          setMyAvatar(base64);
+          localStorage.setItem(avatarKey, base64);
+          toast({ title: "Avatar Updated", description: "Refresh to broadcast your new look!" });
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+
+    useEffect(() => {
+      if (!currentId) return;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws-presence`);
+      const displayName = user?.fullName || user?.username || 'Guest';
+      const userPayload = myAvatar ? `${displayName}:::${myAvatar}` : displayName;
+
+      ws.onopen = () => ws.send(JSON.stringify({ type: 'join', planId: currentId, user: userPayload }));
+      ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.type === 'presence' && data.planId === currentId) {
+          const others = data.users.filter((u: string) => {
+            const [name] = u.split(':::');
+            return name !== displayName;
+          });
+          setActiveUsers(others);
+        }
+      };
+      return () => ws.close();
+    }, [currentId, user, myAvatar]);
+
   return (
     <LayoutComponent {...(isSupplier ? { shopName: "", shopLocation: "", shopApproved: true } : {})}>
-      <div className="max-w-7xl mx-auto space-y-2 pb-20">
+      <div className="max-w-7xl mx-auto space-y-2 pb-20 relative">
+        
         {initialLoading ? (
           <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
             <div className="relative">
@@ -2691,7 +3183,68 @@ export default function CreateSketchPlan() {
                 <Button variant="ghost" size="icon" onClick={() => setLocation("/sketch-plans")} className="hover:bg-slate-100 h-7 w-7">
                   <ArrowLeft className="w-4 h-4" />
                 </Button>
-                <h1 className="text-lg font-bold tracking-tight text-slate-800">{isSupplier ? "View Sketch Plan" : (isEditing ? "Edit Sketch Plan" : "Create New Sketch Plan")}</h1>
+                <h1 className="text-lg font-bold tracking-tight text-slate-800">
+                  {isSupplier ? "View Sketch Plan" : (isEditing ? "Edit Sketch Plan" : "Create New Sketch Plan")}
+                  {isEditing && currentVersionNumber && (
+                    <span className="ml-2 text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full text-sm border border-indigo-100">
+                      V{currentVersionNumber}
+                    </span>
+                  )}
+                </h1>
+
+                {/* Presence Avatars */}
+                <div className="flex items-center gap-2 ml-4">
+                  <div className="flex items-center -space-x-2">
+                    {activeUsers.map((u, i) => {
+                      const [userName, userImg] = u.split(':::');
+                      const colors = ['bg-blue-100 text-blue-700 border-blue-200', 'bg-purple-100 text-purple-700 border-purple-200', 'bg-emerald-100 text-emerald-700 border-emerald-200', 'bg-amber-100 text-amber-700 border-amber-200', 'bg-rose-100 text-rose-700 border-rose-200'];
+                      let hash = 0;
+                      for (let k = 0; k < userName.length; k++) hash = userName.charCodeAt(k) + ((hash << 5) - hash);
+                      const colorClass = colors[Math.abs(hash) % colors.length];
+                      
+                      return (
+                        <TooltipProvider key={i}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className={cn("h-8 w-8 rounded-full border-2 border-white overflow-hidden flex items-center justify-center text-[10px] font-bold cursor-help hover:z-10 transition-all hover:scale-110 shadow-sm", colorClass)}>
+                                {userImg ? (
+                                  <img src={userImg} alt={userName} className="h-full w-full object-cover" />
+                                ) : (
+                                  userName.split(' ').map(n => n[0]).join('').toUpperCase()
+                                )}
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent><p className="text-[10px] font-bold">{userName} is viewing</p></TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      );
+                    })}
+                    
+                    {/* Self Avatar / Upload */}
+                    <div className="relative group ml-4">
+                      <label className="cursor-pointer block">
+                        <input type="file" className="hidden" accept="image/*" onChange={handleAvatarChange} />
+                        <div className="h-8 w-8 rounded-full border-2 border-indigo-500 border-dashed flex items-center justify-center bg-indigo-50 group-hover:bg-indigo-100 transition-colors overflow-hidden">
+                          {myAvatar ? (
+                            <img src={myAvatar} alt="Me" className="h-full w-full object-cover" />
+                          ) : (
+                            <Camera className="w-3.5 h-3.5 text-indigo-500" />
+                          )}
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <Upload className="w-3 h-3 text-white" />
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 bg-green-50 rounded-full border border-green-100">
+                    <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                    <span className="text-[10px] text-green-700 font-bold uppercase tracking-tight">
+                      {activeUsers.length + 1} Online
+                    </span>
+                  </div>
+                </div>
 
                 {/* Version dropdown - only shown when editing */}
                 {isEditing && siblingVersions.length > 0 && (
@@ -3066,9 +3619,46 @@ export default function CreateSketchPlan() {
                       </>
                     )}
                     {userRole !== "supplier" && (
-                      <Button onClick={addItem} size="sm" variant="outline" className="h-8 gap-1 border-indigo-200 text-indigo-600 hover:bg-indigo-50" disabled={isLocked}>
-                        <Plus className="w-3.5 h-3.5" /> Add New Row
-                      </Button>
+                      <>
+                        <Button
+                          onClick={async () => {
+                            if (!isLocked) {
+                              await performSave();
+                            }
+                            setIsBoqPreviewOpen(true);
+                          }}
+                          size="sm"
+                          variant="outline"
+                          className="h-8 gap-1.5 border-blue-600 text-blue-600 hover:bg-blue-50 font-bold shadow-sm transition-all active:scale-95"
+                          disabled={items.length === 0}
+                        >
+                          <Eye className="w-3.5 h-3.5" /> Preview BOM
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            setSelectedTargetProjectId(projectId || "none");
+                            loadTargetVersions(projectId || "none");
+                            setIsDirectToBoqDialogOpen(true);
+                          }}
+                          size="sm"
+                          className="h-8 gap-1 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white shadow-md transition-all active:scale-95"
+                          disabled={isLocked || items.length === 0}
+                        >
+                          <Zap className="w-3.5 h-3.5 fill-amber-300 text-amber-300" /> Generate BOM Now
+                        </Button>
+                        <Button onClick={addItem} size="sm" variant="outline" className="h-8 gap-1 border-indigo-200 text-indigo-600 hover:bg-indigo-50" disabled={isLocked}>
+                          <Plus className="w-3.5 h-3.5" /> Add New Row
+                        </Button>
+                        <Button
+                          onClick={() => setImportDialogOpen(true)}
+                          size="sm"
+                          variant="outline"
+                          className="h-8 gap-1.5 border-emerald-200 text-emerald-600 hover:bg-emerald-50 hover:border-emerald-300 font-bold transition-all shadow-sm"
+                          disabled={isLocked}
+                        >
+                          <Upload className="w-3.5 h-3.5" /> Import Excel/PDF
+                        </Button>
+                      </>
                     )}
                     <Button onClick={() => setLocation("/sketch-plans")} size="sm" variant="ghost" className="h-8 text-slate-500">
                       Cancel
@@ -3881,7 +4471,7 @@ export default function CreateSketchPlan() {
         )}
       </div>
 
-      {/* Floating Action Button */}
+      {/* Floating Action Button - RESTORED */}
       <div className="fixed right-6 bottom-24 z-[100] flex flex-col items-end gap-2 md:gap-3">
         <Button
           onClick={() => setIsCompact(!isCompact)}
@@ -3979,6 +4569,340 @@ export default function CreateSketchPlan() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Direct to BOQ Dialog */}
+      <Dialog open={isDirectToBoqDialogOpen} onOpenChange={setIsDirectToBoqDialogOpen}>
+        <DialogContent className="sm:max-w-[500px] z-[150]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-indigo-600 fill-amber-300" /> Generate BOM from Sketch
+            </DialogTitle>
+            <DialogDescription>
+              Convert all items from this sketch plan directly into a Project BOM.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-6 space-y-6">
+            <div className="space-y-3">
+              <Label className="text-xs font-bold uppercase text-slate-500">Target Project</Label>
+              <Select 
+                value={selectedTargetProjectId} 
+                onValueChange={(val) => {
+                  setSelectedTargetProjectId(val);
+                  loadTargetVersions(val);
+                }}
+              >
+                <SelectTrigger className="w-full h-11">
+                  <SelectValue placeholder="Select a project" />
+                </SelectTrigger>
+                <SelectContent className="z-[160]">
+                  <SelectItem value="none">Select a project...</SelectItem>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-xs font-bold uppercase text-slate-500">Target BOM Version</Label>
+              <Select 
+                value={selectedTargetVersionId} 
+                onValueChange={setSelectedTargetVersionId}
+                disabled={selectedTargetProjectId === "none" || loadingVersions}
+              >
+                <SelectTrigger className="w-full h-11">
+                  {loadingVersions ? "Loading versions..." : <SelectValue placeholder="Select version" />}
+                </SelectTrigger>
+                <SelectContent className="z-[160]">
+                  <SelectItem value="new">+ Create New BOM Version</SelectItem>
+                  {targetVersions.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      Version {v.version_number} ({v.status}) - {v.is_last_final ? "FINAL" : "Draft"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedTargetVersionId !== "new" && selectedTargetVersionId !== "none" && (
+                <p className="text-[10px] text-amber-600 font-medium bg-amber-50 p-2 rounded border border-amber-100">
+                  Note: Items will be added to the existing version.
+                </p>
+              )}
+            </div>
+
+            <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+              <h4 className="text-xs font-bold text-indigo-900 mb-2 flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5" /> What will happen?
+              </h4>
+              <ul className="text-[11px] text-indigo-700 space-y-1.5 list-disc pl-4">
+                <li>All <strong>{items.length} items</strong> will be synced to the target BOM.</li>
+                <li>Items matching library products will automatically pull material configurations.</li>
+                <li>Manual items will be added as line items with zero rates (ready for pricing).</li>
+                <li>You will be redirected straight to the BOM editor.</li>
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter className="bg-slate-50 p-4 -mx-6 -mb-6 border-t">
+            <Button variant="outline" onClick={() => setIsDirectToBoqDialogOpen(false)} disabled={processingDirectToBoq}>
+              Cancel
+            </Button>
+            <Button 
+              className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2 px-6" 
+              onClick={handleDirectToBoq}
+              disabled={processingDirectToBoq || selectedTargetProjectId === "none"}
+            >
+              {processingDirectToBoq ? (
+                <>
+                  <span className="animate-spin mr-2">◌</span> Processing...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4 fill-amber-300" /> Start Generation
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Excel / PDF Import & Column Mapping Dialog */}
+      <Dialog open={importDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setImportFile(null);
+          setImportFileType(null);
+          setImportHeaders([]);
+          setImportRows([]);
+        }
+        setImportDialogOpen(open);
+      }}>
+        <DialogContent className="sm:max-w-[900px] max-h-[85vh] flex flex-col p-0 overflow-hidden z-[150] rounded-xl border border-slate-100 bg-white/95 backdrop-blur-md shadow-2xl">
+          <DialogHeader className="px-6 py-4 bg-slate-50 border-b border-slate-100">
+            <DialogTitle className="flex items-center gap-2 text-slate-800 font-black tracking-tight text-lg">
+              <Upload className="w-5 h-5 text-emerald-500" />
+              Import and Map Excel/PDF Data
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500 font-medium">
+              Upload your file, map the columns, and we'll automatically extract and populate your Sketch a Plan.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-6">
+            {!importFile ? (
+              <div className="space-y-4">
+                <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 hover:border-emerald-400 rounded-xl p-10 bg-slate-50/50 hover:bg-emerald-50/10 transition-all cursor-pointer relative group">
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv,.pdf"
+                    className="absolute inset-0 opacity-0 cursor-pointer"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFileSelect(file);
+                    }}
+                  />
+                  <div className="h-14 w-14 rounded-full bg-emerald-50 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform shadow-inner">
+                    <Upload className="w-7 h-7 text-emerald-600 animate-pulse" />
+                  </div>
+                  <p className="text-sm font-bold text-slate-700">Drag & Drop or Click to Select File</p>
+                  <p className="text-xs text-slate-400 mt-1.5 font-medium">Supports Microsoft Excel (.xlsx, .xls), CSV, and PDF documents</p>
+                </div>
+
+                <div className="p-4 bg-indigo-50/60 rounded-xl border border-indigo-100/50 text-[11px] text-indigo-700/90 leading-relaxed flex gap-2">
+                  <FileText className="w-4 h-4 shrink-0 text-indigo-500" />
+                  <div>
+                    <span className="font-bold">Flexible Mapping:</span> No fixed templates or mandatory columns required! You can upload any file structure and map your columns to the corresponding Sketch a Plan fields. Unmapped columns will be ignored.
+                  </div>
+                </div>
+              </div>
+            ) : isParsing ? (
+              <div className="flex flex-col items-center justify-center py-20 space-y-4">
+                <div className="relative flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-full border-4 border-slate-100 border-t-emerald-500 animate-spin" />
+                  <FileText className="w-5 h-5 text-emerald-600 absolute" />
+                </div>
+                <div className="text-center">
+                  <h4 className="text-sm font-bold text-slate-700">Reading file data...</h4>
+                  <p className="text-xs text-slate-400 mt-1 font-medium">This might take a moment depending on the file size.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* Column Mapping Selectors */}
+                <div className="lg:col-span-6 space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Field Mapping</h3>
+                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-100 text-[10px]">
+                      {importFileType === "pdf" ? "PDF Parsed Successfully" : "Excel Parsed Successfully"}
+                    </Badge>
+                  </div>
+
+                  <div className="space-y-3.5 max-h-[450px] overflow-y-auto pr-1 custom-scrollbar">
+                    {[
+                      { key: "item_name", label: "Item / Material Name", desc: "Select column with item names or descriptions" },
+                      { key: "description", label: "Notes / Specifications", desc: "Select column with detailed remarks or notes" },
+                      { key: "category", label: "Category", desc: "Select column specifying the group/category" },
+                      { key: "length", label: "Length", desc: "Select column containing length measurement" },
+                      { key: "width", label: "Width", desc: "Select column containing width measurement" },
+                      { key: "height", label: "Height", desc: "Select column containing height/depth measurement" },
+                      { key: "qty", label: "Quantity", desc: "Select column containing quantity (default calculation applies if skipped)" },
+                      { key: "unit", label: "Unit", desc: "Select column containing unit of measurement (ft, mm, Nos, etc.)" }
+                    ].map((tf) => (
+                      <div key={tf.key} className="p-3 border rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div className="space-y-0.5 max-w-[200px]">
+                          <Label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                            {tf.label}
+                            {tf.key === "item_name" && <span className="text-red-500 font-bold">*</span>}
+                          </Label>
+                          <p className="text-[10px] text-slate-400 leading-snug">{tf.desc}</p>
+                        </div>
+
+                        <Select
+                          value={String(importMappings[tf.key] ?? -1)}
+                          onValueChange={(val) => {
+                            setImportMappings(prev => ({
+                              ...prev,
+                              [tf.key]: Number(val)
+                            }));
+                          }}
+                        >
+                          <SelectTrigger className="w-full md:w-[200px] h-9 text-xs border-slate-200 bg-white">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="z-[160] max-h-[200px]">
+                            <SelectItem value="-1" className="text-slate-400 italic">Ignore Column</SelectItem>
+                            {importHeaders.map((header, hIdx) => (
+                              <SelectItem key={hIdx} value={String(hIdx)} className="text-xs font-medium">
+                                {header}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Import Preview Section */}
+                <div className="lg:col-span-6 space-y-4 h-full">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Live Import Preview</h3>
+                    <span className="text-[10px] font-bold text-slate-400">Total Rows Detected: {importRows.length}</span>
+                  </div>
+
+                  <div className="border border-slate-100 rounded-xl overflow-hidden bg-slate-50/30 flex flex-col h-[400px]">
+                    <div className="overflow-auto flex-1 custom-scrollbar">
+                      <table className="w-full text-left text-[11px] border-collapse">
+                        <thead className="bg-slate-100/80 sticky top-0 backdrop-blur-sm z-10">
+                          <tr className="border-b border-slate-200">
+                            {[
+                              { key: "item_name", label: "Item Name" },
+                              { key: "description", label: "Notes" },
+                              { key: "category", label: "Category" },
+                              { key: "length", label: "L" },
+                              { key: "width", label: "W" },
+                              { key: "height", label: "H" },
+                              { key: "qty", label: "QTY" },
+                              { key: "unit", label: "Unit" }
+                            ].map(tf => {
+                              if (importMappings[tf.key] === -1 || importMappings[tf.key] === undefined) return null;
+                              return <th key={tf.key} className="p-2.5 font-bold text-indigo-900 border-r border-slate-100">{tf.label}</th>;
+                            })}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importRows.length === 0 ? (
+                            <tr>
+                              <td colSpan={8} className="p-8 text-center text-slate-400 italic">No mapped columns selected yet.</td>
+                            </tr>
+                          ) : (
+                            importRows.slice(0, 5).map((row, rIdx) => (
+                              <tr key={rIdx} className="border-b border-slate-100 bg-white hover:bg-slate-50 transition-colors">
+                                {[
+                                  { key: "item_name" },
+                                  { key: "description" },
+                                  { key: "category" },
+                                  { key: "length" },
+                                  { key: "width" },
+                                  { key: "height" },
+                                  { key: "qty" },
+                                  { key: "unit" }
+                                ].map(tf => {
+                                  const colIdx = importMappings[tf.key];
+                                  if (colIdx === -1 || colIdx === undefined) return null;
+                                  return (
+                                    <td key={tf.key} className="p-2.5 max-w-[120px] truncate text-slate-600 border-r border-slate-100">
+                                      {String(row[colIdx] ?? "") || <span className="text-slate-300 italic">empty</span>}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))
+                          )}
+                          {importRows.length > 5 && (
+                            <tr className="bg-slate-50/50">
+                              <td colSpan={8} className="p-2 text-center text-[10px] text-slate-400 italic font-medium">
+                                ... and {importRows.length - 5} more rows
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-amber-50 rounded-xl border border-amber-100 text-[10px] text-amber-700 leading-normal">
+                    <span className="font-bold">Pro-tip:</span> If you don't map the unit column, we'll automatically assign "Nos". If you don't map dimensions, you can type them manually afterwards.
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="bg-slate-50 p-4 border-t border-slate-100 flex justify-between gap-3">
+            {importFile ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setImportFile(null);
+                  setImportFileType(null);
+                  setImportHeaders([]);
+                  setImportRows([]);
+                }}
+                disabled={isParsing}
+                className="mr-auto text-xs"
+              >
+                Clear File
+              </Button>
+            ) : null}
+            <Button
+              variant="outline"
+              onClick={() => {
+                setImportFile(null);
+                setImportFileType(null);
+                setImportHeaders([]);
+                setImportRows([]);
+                setImportDialogOpen(false);
+              }}
+              disabled={isParsing}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleImportMappedData}
+              disabled={isParsing || !importFile || importRows.length === 0}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 text-xs gap-1.5 shadow-sm"
+            >
+              <Upload className="w-3.5 h-3.5" /> Import {importRows.length} Items
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <BoqPreviewModal 
+        open={isBoqPreviewOpen} 
+        onClose={() => setIsBoqPreviewOpen(false)} 
+        planId={currentId || ""} 
+        planName={name} 
+      />
     </LayoutComponent>
   );
 }

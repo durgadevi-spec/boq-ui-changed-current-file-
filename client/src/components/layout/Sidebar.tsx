@@ -362,10 +362,10 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         }
         const data = await res.json();
         if (cancelled) return;
-        
+
         const allApprovals = data?.approvals || [];
         const isPending = (a: any) => a.status === "pending_approval" || a.status === "submitted" || a.status === "edit_requested";
-        
+
         setPendingBomCount(allApprovals.filter((a: any) => isPending(a) && (a.type === 'bom' || !a.type)).length);
         setPendingBoqCount(allApprovals.filter((a: any) => isPending(a) && a.type === 'boq').length);
       } catch (e) {

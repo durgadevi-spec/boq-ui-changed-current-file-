@@ -424,7 +424,7 @@ export default function BoqApprovals() {
                                                         const overrideType = td.finalize_override_type || 'value';
                                                         let effectiveOverrideRate = 0;
                                                         if (overrideType === 'percentage') {
-                                                          effectiveOverrideRate = sysTotal * overrideInputVal / 100 / qty;
+                                                          effectiveOverrideRate = baseRate * overrideInputVal / 100;
                                                         } else {
                                                           effectiveOverrideRate = overrideInputVal;
                                                         }
@@ -439,7 +439,7 @@ export default function BoqApprovals() {
                                                                 <TableCell className="text-center font-mono border-r text-[10px] font-bold">{qty}</TableCell>
                                                                 <TableCell className="text-right font-mono border-r text-[10px] text-slate-500">₹{baseRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
                                                                 <TableCell className="text-right font-bold text-slate-700 bg-slate-50/10 border-r text-[10px]">₹{sysTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
-                                                                <TableCell className={`text-right font-mono border-r text-[10px] ${overrideRate > 0 ? "text-blue-600 font-bold bg-blue-50/30" : "text-slate-400"}`}>₹{overrideRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
+                                                                <TableCell className={`text-right font-mono border-r text-[10px] ${effectiveOverrideRate > 0 ? "text-blue-600 font-bold bg-blue-50/30" : "text-slate-400"}`}>₹{effectiveOverrideRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
                                                                 <TableCell className={`text-right font-bold border-r text-[10px] ${overrideTotal > 0 ? "text-blue-700 bg-blue-50/30" : "text-slate-400"}`}>₹{overrideTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
                                                                 {(() => {
                                                                     let cols = previewVersion?.column_config;

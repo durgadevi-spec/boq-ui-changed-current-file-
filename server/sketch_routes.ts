@@ -3,6 +3,8 @@ import { pool, query } from "./db/client";
 import { authMiddleware, requireRole } from "./middleware";
 
 import { sendSketchPlanEmail } from "./email";
+import { convertSketchToBoqItems } from "./lib/sketch_converter";
+
 
 /**
  * Optimized image serving to allow browser caching and reduce JSON payload size
@@ -821,6 +823,17 @@ export async function registerSketchRoutes(app: Express) {
     } catch (err) {
       console.error("DELETE /api/sketch-templates/:id error", err);
       res.status(500).json({ message: "Failed to delete template" });
+    }
+  });
+  // GET /api/sketch-plans/:id/preview-boq - Preview BOQ without saving
+  app.get("/api/sketch-plans/:id/preview-boq", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const boqItems = await convertSketchToBoqItems(id);
+      res.json({ items: boqItems });
+    } catch (err: any) {
+      console.error("GET /api/sketch-plans/:id/preview-boq error", err);
+      res.status(500).json({ message: err.message || "Failed to generate BOQ preview" });
     }
   });
 }

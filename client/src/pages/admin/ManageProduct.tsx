@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Search, Loader2, Plus, ArrowRight, ArrowLeft, Trash2, Edit, Check, XCircle, Layers, Copy, GripVertical, TrendingUp, TrendingDown, AlertTriangle, Package } from "lucide-react";
+import { Search, Loader2, Plus, ArrowRight, ArrowLeft, Trash2, Edit, Check, XCircle, Layers, Copy, GripVertical, TrendingUp, TrendingDown, AlertTriangle, Package, Lock, Clock } from "lucide-react";
 import { Reorder } from "framer-motion";
 import { Textarea } from "@/components/ui/textarea";
 import * as XLSX from "xlsx";
@@ -20,6 +20,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useLocation } from "wouter";
 import { computeBoq, UnitType } from "@/lib/boqCalc";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { AllProductsSplitView } from "@/components/admin/AllProductsSplitView";
 import { fuzzySearch } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -69,8 +70,10 @@ export default function ManageProduct() {
     const [configMaterials, setConfigMaterials] = useState<SelectedMaterial[]>([]);
     const [isSaving, setIsSaving] = useState(false);
     const [previousConfigs, setPreviousConfigs] = useState<any[]>([]);
+    const [productApprovals, setProductApprovals] = useState<any[]>([]);
     const [rejectedConfigs, setRejectedConfigs] = useState<any[]>([]);
     const [pendingConfigs, setPendingConfigs] = useState<any[]>([]);
+    const [draftConfigs, setDraftConfigs] = useState<any[]>([]);
     const [isLoadingConfigs, setIsLoadingConfigs] = useState(false);
     const [productSearch, setProductSearch] = useState("");
     const [materialSearch, setMaterialSearch] = useState("");
@@ -94,7 +97,10 @@ export default function ManageProduct() {
     const [templates, setTemplates] = useState<any[]>([]);
     const [supplierShops, setSupplierShops] = useState<any[]>([]);
     const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+    const [showAllProducts, setShowAllProducts] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
+    const [loadedConfig, setLoadedConfig] = useState<any | null>(null);
+    const isReadOnly = loadedConfig?.status === "approved";
     const { toast } = useToast();
 
     const searchParams = useMemo(() => new URLSearchParams(location.split('?')[1] || ""), [location]);
@@ -106,6 +112,7 @@ export default function ManageProduct() {
         setSelectedMaterials([]); setConfigMaterials([]);
         setRequiredUnitType("Sqft"); setBaseRequiredQty(100); setWastagePctDefault(5);
         setDimA(undefined); setDimB(undefined); setDimC(undefined); setProductDescription("");
+        setLoadedConfig(null);
     };
 
     const fetchPreviousConfigs = async (productId: string) => {
@@ -116,8 +123,10 @@ export default function ManageProduct() {
             if (aRes.ok) {
                 const d = await aRes.json();
                 const pa = (d.approvals || []).filter((a: any) => a.product_id === productId);
+                setProductApprovals(pa);
                 setRejectedConfigs(pa.filter((a: any) => a.status === "rejected"));
                 setPendingConfigs(pa.filter((a: any) => a.status === "pending"));
+                setDraftConfigs(pa.filter((a: any) => a.status === "draft"));
             }
         } catch (e) { console.error(e); } finally { setIsLoadingConfigs(false); }
     };
@@ -410,6 +419,7 @@ export default function ManageProduct() {
         const mapped = mapItems(items);
         setSelectedMaterials(mapped); setConfigMaterials(mapped);
         setIgnoredMismatches(new Set());
+        setLoadedConfig(config);
         toast({ title: "Configuration Loaded", description: src });
     };
 
@@ -508,18 +518,23 @@ export default function ManageProduct() {
         setGenericDelete({ isOpen: true, id: configId, name: 'Configuration' });
     };
 
-    const toggleMaterial = (m: Material) =>
+    const toggleMaterial = (m: Material) => {
+        if (isReadOnly) return;
         setSelectedMaterials(prev => prev.find(x => x.id === m.id) ? prev.filter(x => x.id !== m.id) : [...prev, m]);
+    };
 
-    const updateConfig = (id: string | number, field: keyof SelectedMaterial, value: any) =>
+    const updateConfig = (id: string | number, field: keyof SelectedMaterial, value: any) => {
+        if (isReadOnly) return;
         setConfigMaterials(prev => prev.map(m => {
             if (String(m.id) !== String(id)) return m;
             const u = { ...m, [field]: value };
             if (field === "supplyRate" || field === "installRate") u.rate = (Number(u.supplyRate) || 0) + (Number(u.installRate) || 0);
             return u;
         }));
+    };
 
     const removeConfigMaterial = (id: string | number) => {
+        if (isReadOnly) return;
         const sid = String(id);
         setSelectedMaterials(prev => prev.filter(m => String(m.id) !== sid));
         setConfigMaterials(prev => prev.filter(m => String(m.id) !== sid));
@@ -533,22 +548,22 @@ export default function ManageProduct() {
                 if (ex) return ex;
                 const rate = Number(m.rate) || 0;
                 const sm = m as any;
-                return { 
-                    ...m, 
-                    qty: sm.qty ?? 1, 
-                    baseQty: sm.baseQty ?? 1, 
-                    wastagePct: sm.wastagePct, 
-                    amount: sm.amount ?? rate, 
-                    rate, 
-                    supplyRate: sm.supplyRate ?? rate, 
-                    installRate: sm.installRate ?? 0, 
-                    location: sm.location || sm.technicalspecification || m.name || "", 
-                    description: sm.description || sm.technicalspecification || m.name || "", 
-                    applyWastage: (sm.applyWastage === true || sm.apply_wastage === true || sm.applyWastage === undefined), 
-                    applyRounding: (sm.applyRounding === true || sm.apply_rounding === true || sm.applyRounding === undefined), 
-                    freezeAndEdit: (sm.freezeAndEdit === true || sm.freeze_and_edit === true), 
-                    shop_id: m.shop_id || m.shopId, 
-                    shopId: m.shop_id || m.shopId 
+                return {
+                    ...m,
+                    qty: sm.qty ?? 1,
+                    baseQty: sm.baseQty ?? 1,
+                    wastagePct: sm.wastagePct,
+                    amount: sm.amount ?? rate,
+                    rate,
+                    supplyRate: sm.supplyRate ?? rate,
+                    installRate: sm.installRate ?? 0,
+                    location: sm.location || sm.technicalspecification || m.name || "",
+                    description: sm.description || sm.technicalspecification || m.name || "",
+                    applyWastage: (sm.applyWastage === true || sm.apply_wastage === true || sm.applyWastage === undefined),
+                    applyRounding: (sm.applyRounding === true || sm.apply_rounding === true || sm.applyRounding === undefined),
+                    freezeAndEdit: (sm.freezeAndEdit === true || sm.freeze_and_edit === true),
+                    shop_id: m.shop_id || m.shopId,
+                    shopId: m.shop_id || m.shopId
                 } as SelectedMaterial;
             }));
         }
@@ -753,7 +768,7 @@ export default function ManageProduct() {
     const toggleSelectAll = (products: Product[]) => {
         const productIds = products.map(p => p.id);
         const allSelected = productIds.every(id => selectedProductIds.has(id));
-        
+
         setSelectedProductIds(prev => {
             const next = new Set(prev);
             if (allSelected) {
@@ -778,6 +793,15 @@ export default function ManageProduct() {
                             <CardTitle className="flex items-center gap-4">
                                 <span className="text-3xl font-extrabold tracking-tight">Manage Product</span>
                                 {selectedProduct && <Badge variant="outline" className="text-sm font-semibold py-1.5 px-4 bg-primary/10 border-primary/20">{selectedProduct.name}</Badge>}
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setShowAllProducts(true)}
+                                    className="h-9 font-bold border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-400 gap-2"
+                                >
+                                    <Layers className="h-4 w-4" />
+                                    View All Products
+                                </Button>
                                 {productsData && productsData.length > 0 && (
                                     <div className="flex items-center gap-2 ml-4">
                                         <Button
@@ -824,6 +848,21 @@ export default function ManageProduct() {
                     </CardHeader>
                     <CardContent className="p-8">
 
+                        {/* All Products Split View Dialog */}
+                        <Dialog open={showAllProducts} onOpenChange={setShowAllProducts}>
+                            <DialogContent className="max-w-[98vw] w-[1400px] p-0 overflow-hidden border-none shadow-2xl rounded-xl" style={{ maxHeight: '95vh' }}>
+                                <DialogHeader className="sr-only">
+                                    <DialogTitle>View All Products</DialogTitle>
+                                    <DialogDescription>Browse all products with detailed configuration view</DialogDescription>
+                                </DialogHeader>
+                                <AllProductsSplitView
+                                    products={productsData || []}
+                                    approvals={allApprovals || []}
+                                    onClose={() => setShowAllProducts(false)}
+                                />
+                            </DialogContent>
+                        </Dialog>
+
                         {genericDelete && (
                             <DeleteConfirmationDialog
                                 isOpen={genericDelete.isOpen}
@@ -833,8 +872,10 @@ export default function ManageProduct() {
                             />
                         )}
 
+
                         {/* Step 1 */}
                         {step === 1 && (
+
                             <div className="space-y-8">
                                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                                     <h2 className="text-2xl font-bold">1. Select Base Product</h2>
@@ -1148,6 +1189,7 @@ export default function ManageProduct() {
                                                             const currentPrice = getConfigCurrentTotal(cd);
                                                             const priceMismatches = getConfigPriceMismatches(cd);
                                                             const hasChanged = priceMismatches.length > 0 || (currentPrice !== null && Math.abs(savedPrice - currentPrice) > 0.01);
+                                                            const approvalRecord = productApprovals.find(a => a.config_name === cd.product.config_name);
                                                             return (
                                                                 <div key={cd.product.id} className="flex flex-col p-4 bg-white rounded-xl border-2 border-green-50 shadow-sm hover:border-green-200 hover:shadow-md transition-all group">
                                                                     <div className="flex items-center justify-between">
@@ -1168,6 +1210,46 @@ export default function ManageProduct() {
                                                                             )}
                                                                         </div>
                                                                         <div className="flex items-center gap-2 shrink-0">
+                                                                            {(!approvalRecord || approvalRecord.status === "approved") ? (
+                                                                                <Button
+                                                                                    variant="outline"
+                                                                                    size="sm"
+                                                                                    onClick={async () => {
+                                                                                        if (!confirm(`Are you sure you want to request edit for approved configuration "${cd.product.config_name}"?`)) return;
+                                                                                        try {
+                                                                                            let res;
+                                                                                            if (approvalRecord) {
+                                                                                                res = await apiFetch(`/api/product-approvals/${approvalRecord.id}/request-edit`, { method: "POST" });
+                                                                                            } else {
+                                                                                                res = await apiFetch(`/api/product-approvals/request-edit`, {
+                                                                                                    method: "POST",
+                                                                                                    headers: { "Content-Type": "application/json" },
+                                                                                                    body: JSON.stringify({
+                                                                                                        product_id: cd.product.product_id,
+                                                                                                        config_name: cd.product.config_name
+                                                                                                    })
+                                                                                                });
+                                                                                            }
+                                                                                            if (res.ok) {
+                                                                                                toast({ title: "Edit Requested", description: `Your request to edit "${cd.product.config_name}" has been submitted.` });
+                                                                                                if (selectedProduct) fetchPreviousConfigs(selectedProduct.id);
+                                                                                            } else {
+                                                                                                toast({ title: "Error", description: "Failed to submit edit request.", variant: "destructive" });
+                                                                                            }
+                                                                                        } catch (err) {
+                                                                                            console.error(err);
+                                                                                            toast({ title: "Error", description: "Failed to submit edit request.", variant: "destructive" });
+                                                                                        }
+                                                                                    }}
+                                                                                    className="h-8 text-indigo-700 border-indigo-200 hover:bg-indigo-50 font-bold px-3 shadow-sm shrink-0"
+                                                                                >
+                                                                                    <Lock className="h-3.5 w-3.5 mr-1" /> Request Edit
+                                                                                </Button>
+                                                                            ) : approvalRecord.status === "edit_requested" ? (
+                                                                                <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 font-bold text-[10px] px-2.5 py-1.5 flex items-center gap-1 shadow-sm shrink-0">
+                                                                                    <Clock className="h-3 w-3 animate-pulse text-indigo-600" /> Edit Requested
+                                                                                </Badge>
+                                                                            ) : null}
                                                                             <Button variant="ghost" size="sm" onClick={() => loadSpecificConfig(cd)} className="h-8 text-green-700 hover:text-green-800 hover:bg-green-100 font-bold px-3"><Edit className="h-3.5 w-3.5 mr-1" /> Load</Button>
                                                                             <Button variant="ghost" size="sm" onClick={() => requestDeleteConfig(cd.product.id)} className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                                                                         </div>
@@ -1200,8 +1282,47 @@ export default function ManageProduct() {
                                                 </div>
                                             </div>
 
-                                            {/* Right Column: Pending / Rejected / Drafts */}
+                                            {/* Right Column: Draft / Pending / Rejected */}
                                             <div className="space-y-6">
+
+                                                {/* Draft Configs (approved-edit unlocked) */}
+                                                {draftConfigs.length > 0 && (
+                                                    <div className="space-y-3 p-5 bg-indigo-50/30 rounded-2xl border border-indigo-200 shadow-sm animate-in fade-in slide-in-from-right-4 duration-500">
+                                                        <div className="flex items-center gap-2 px-1">
+                                                            <h3 className="text-sm font-black uppercase tracking-widest text-indigo-700 flex items-center gap-2">
+                                                                <Edit className="h-4 w-4" /> Draft — Edit Approved
+                                                            </h3>
+                                                            <span className="ml-auto text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200">
+                                                                {draftConfigs.length} pending edit{draftConfigs.length !== 1 ? 's' : ''}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-[10px] text-indigo-600/70 px-1">Admin approved your edit request. Load this config, make changes, then resubmit for approval.</p>
+                                                        <div className="space-y-3 max-h-[280px] overflow-y-auto pr-2">
+                                                            {draftConfigs.map(config => (
+                                                                <div key={config.id} className="flex items-center justify-between p-4 bg-white rounded-xl border-2 border-indigo-100 shadow-sm hover:border-indigo-300 hover:shadow-md transition-all group">
+                                                                    <div className="space-y-1">
+                                                                        <div className="font-bold text-sm text-slate-800">{config.config_name || "Unnamed Config"}</div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-[10px] text-muted-foreground font-medium uppercase">{new Date(config.updated_at).toLocaleDateString()}</span>
+                                                                            <Badge variant="outline" className="h-4 text-[8px] uppercase px-1.5 font-black bg-indigo-100 text-indigo-700 border-indigo-200 flex items-center gap-1">
+                                                                                <Edit className="h-2.5 w-2.5" /> Draft
+                                                                            </Badge>
+                                                                        </div>
+                                                                    </div>
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        onClick={() => loadApprovalConfig(config, "Draft")}
+                                                                        className="h-8 text-[10px] font-black uppercase tracking-tight border-indigo-300 hover:bg-indigo-50 text-indigo-700 px-3 shrink-0"
+                                                                    >
+                                                                        <Edit className="h-3 w-3 mr-1" /> Load & Edit
+                                                                    </Button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
                                                 {/* Pending */}
                                                 <div className="space-y-3 p-5 bg-amber-50/20 rounded-2xl border border-amber-100 shadow-sm animate-in fade-in slide-in-from-right-4 duration-500">
                                                     <h3 className="text-sm font-black uppercase tracking-widest text-amber-600 flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin-slow" /> Pending Review</h3>
@@ -1442,7 +1563,7 @@ export default function ManageProduct() {
                                     <div className="space-y-4">
                                         <div className="flex items-center justify-between px-2">
                                             <h3 className="text-sm font-black uppercase tracking-widest text-blue-600 flex items-center gap-2"><Check className="h-4 w-4" /> Selected Materials ({selectedMaterials.length})</h3>
-                                            {selectedMaterials.length > 0 && <Button variant="ghost" size="sm" onClick={() => setSelectedMaterials([])} className="text-[10px] font-bold text-red-500 hover:text-red-600 hover:bg-red-50 h-7">Clear All</Button>}
+                                            {selectedMaterials.length > 0 && !isReadOnly && <Button variant="ghost" size="sm" onClick={() => setSelectedMaterials([])} className="text-[10px] font-bold text-red-500 hover:text-red-600 hover:bg-red-50 h-7">Clear All</Button>}
                                         </div>
                                         <div className="rounded-2xl border-2 border-dashed border-blue-100 bg-blue-50/20 min-h-[450px] max-h-[600px] overflow-y-auto p-4">
                                             {selectedMaterials.length === 0 ? (
@@ -1486,7 +1607,7 @@ export default function ManageProduct() {
                                                             </div>
                                                             <div className="flex items-center gap-2 shrink-0">
                                                                 <span className="text-xs font-black text-slate-700">₹{material.rate?.toLocaleString()}</span>
-                                                                <Button variant="ghost" size="sm" onClick={() => toggleMaterial(material)} className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 group-hover:scale-110 transition-transform"><Trash2 className="h-4 w-4" /></Button>
+                                                                <Button variant="ghost" size="sm" onClick={() => toggleMaterial(material)} disabled={isReadOnly} className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 group-hover:scale-110 transition-transform"><Trash2 className="h-4 w-4" /></Button>
                                                             </div>
                                                         </div>
                                                     ))}
@@ -1551,7 +1672,7 @@ export default function ManageProduct() {
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-6 gap-4 p-6 bg-white rounded-xl border shadow-sm items-end">
                                         <LabeledField label="Unit Type">
-                                            <Select value={requiredUnitType} onValueChange={(val: string) => setRequiredUnitType(val)}>
+                                            <Select value={requiredUnitType} onValueChange={(val: string) => setRequiredUnitType(val)} disabled={isReadOnly}>
                                                 <SelectTrigger className="font-bold"><SelectValue placeholder="Select unit" /></SelectTrigger>
                                                 <SelectContent className="max-h-[300px] overflow-y-auto">
                                                     {availableUnitTypes.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
@@ -1560,24 +1681,24 @@ export default function ManageProduct() {
                                         </LabeledField>
                                         <div className="md:col-span-5 space-y-2">
                                             <label className="text-xs font-bold uppercase text-muted-foreground">Product Description</label>
-                                            <Textarea placeholder="Enter a description..." value={productDescription} onChange={e => setProductDescription(e.target.value)} className="min-h-[80px] font-medium" />
+                                            <Textarea placeholder="Enter a description..." value={productDescription} onChange={e => setProductDescription(e.target.value)} disabled={isReadOnly} className="min-h-[80px] font-medium" />
                                         </div>
                                         {([["Dim A", dimA, setDimA], ["Dim B", dimB, setDimB], ["Dim C", dimC, setDimC]] as const).map(([label, val, setter]: any) => (
                                             <LabeledField key={label} label={label}>
-                                                <Input type="number" value={val ?? ""} onChange={e => setter(e.target.value ? Number(e.target.value) : undefined)} placeholder={label.split(" ")[1]} className="font-bold" />
+                                                <Input type="number" value={val ?? ""} onChange={e => setter(e.target.value ? Number(e.target.value) : undefined)} placeholder={label.split(" ")[1]} disabled={isReadOnly} className="font-bold" />
                                             </LabeledField>
                                         ))}
                                         <LabeledField label="Basis Qty">
-                                            <Input type="number" value={baseRequiredQty} onChange={e => setBaseRequiredQty(Number(e.target.value) || 0)} className="font-bold bg-muted/30" />
+                                            <Input type="number" value={baseRequiredQty} onChange={e => setBaseRequiredQty(Number(e.target.value) || 0)} disabled={isReadOnly} className="font-bold bg-muted/30" />
                                         </LabeledField>
                                         <LabeledField label="Wastage %">
-                                            <Input type="number" value={wastagePctDefault} onChange={e => { const v = Number(e.target.value) || 0; setWastagePctDefault(v); setConfigMaterials(prev => prev.map(m => m.applyWastage ? { ...m, wastagePct: v } : m)); }} className="font-bold border-orange-200" />
+                                            <Input type="number" value={wastagePctDefault} onChange={e => { const v = Number(e.target.value) || 0; setWastagePctDefault(v); setConfigMaterials(prev => prev.map(m => m.applyWastage ? { ...m, wastagePct: v } : m)); }} disabled={isReadOnly} className="font-bold border-orange-200" />
                                         </LabeledField>
                                         <div className="space-y-2">
                                             <label className="text-xs font-bold uppercase text-muted-foreground invisible">Actions</label>
                                             <Dialog>
                                                 <DialogTrigger asChild>
-                                                    <Button variant="outline" size="sm" className="w-full h-10 px-4 text-xs font-bold text-primary border-primary hover:bg-primary/10 transition-all flex items-center justify-center gap-2"><Plus className="h-4 w-4" /> Add Item</Button>
+                                                    <Button variant="outline" size="sm" disabled={isReadOnly} className="w-full h-10 px-4 text-xs font-bold text-primary border-primary hover:bg-primary/10 transition-all flex items-center justify-center gap-2"><Plus className="h-4 w-4" /> Add Item</Button>
                                                 </DialogTrigger>
                                                 <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
                                                     <DialogHeader><DialogTitle className="text-xl font-bold">Add Additional Materials</DialogTitle></DialogHeader>
@@ -1642,13 +1763,13 @@ export default function ManageProduct() {
                                                             <TableHead className="w-[70px] font-bold">
                                                                 <div className="flex flex-col items-center gap-1">
                                                                     <span className="text-[10px]">Wastage</span>
-                                                                    <Checkbox checked={configMaterials.length > 0 && configMaterials.every(m => m.applyWastage)} onCheckedChange={checked => setConfigMaterials(prev => prev.map(m => ({ ...m, applyWastage: !!checked })))} />
+                                                                    <Checkbox checked={configMaterials.length > 0 && configMaterials.every(m => m.applyWastage)} onCheckedChange={checked => setConfigMaterials(prev => prev.map(m => ({ ...m, applyWastage: !!checked })))} disabled={isReadOnly} />
                                                                 </div>
                                                             </TableHead>
                                                             <TableHead className="w-[70px] font-bold">
                                                                 <div className="flex flex-col items-center gap-1">
                                                                     <span className="text-[10px]">Round Off</span>
-                                                                    <Checkbox checked={configMaterials.length > 0 && configMaterials.every(m => m.applyRounding)} onCheckedChange={checked => setConfigMaterials(prev => prev.map(m => ({ ...m, applyRounding: !!checked })))} />
+                                                                    <Checkbox checked={configMaterials.length > 0 && configMaterials.every(m => m.applyRounding)} onCheckedChange={checked => setConfigMaterials(prev => prev.map(m => ({ ...m, applyRounding: !!checked })))} disabled={isReadOnly} />
                                                                 </div>
                                                             </TableHead>
                                                             <TableHead className="w-[80px] font-bold">Wastage %</TableHead>
@@ -1658,25 +1779,25 @@ export default function ManageProduct() {
                                                     )}
                                                     <TableHead className="w-[80px] font-bold">
                                                         <div className="flex flex-col items-center gap-1">
-                                                            <span className="text-[10px] text-center leading-tight">Freeze &<br/>Edit</span>
+                                                            <span className="text-[10px] text-center leading-tight">Freeze &<br />Edit</span>
                                                         </div>
                                                     </TableHead>
                                                     <TableHead className="w-[90px] font-bold">Final Amount</TableHead>
                                                     {!compactMode && <TableHead className="w-[90px] font-bold">Per {requiredUnitType} Qty</TableHead>}
                                                 </TableRow>
                                             </TableHeader>
-                                            <Reorder.Group as="tbody" axis="y" values={configMaterials} onReorder={setConfigMaterials}>
+                                            <Reorder.Group as="tbody" axis="y" values={configMaterials} onReorder={isReadOnly ? () => { } : setConfigMaterials}>
                                                 {boqResults.computed.map((m, idx) => {
                                                     const baseAmt = m.baseQty * (m.supplyRate + m.installRate);
                                                     const isFreezed = !!m.freezeAndEdit;
                                                     return (
-                                                        <Reorder.Item key={m.id} value={configMaterials.find(cm => cm.id === m.id) || m} as="tr" className={`hover:bg-muted/5 transition-colors cursor-default border-b ${isFreezed ? 'bg-cyan-100 border-cyan-200' : 'bg-white'}`}>
+                                                        <Reorder.Item key={m.id} value={configMaterials.find(cm => cm.id === m.id) || m} drag={!isReadOnly ? "y" : false} as="tr" className={`hover:bg-muted/5 transition-colors cursor-default border-b ${isFreezed ? 'bg-cyan-100 border-cyan-200' : 'bg-white'}`}>
                                                             <TableCell className="text-center cursor-grab active:cursor-grabbing">
-                                                                <GripVertical className="h-4 w-4 text-muted-foreground/40" />
+                                                                {!isReadOnly && <GripVertical className="h-4 w-4 text-muted-foreground/40" />}
                                                             </TableCell>
                                                             <TableCell className="text-center font-medium text-[10px]">{idx + 1}</TableCell>
                                                             <TableCell className="text-center">
-                                                                <Button variant="ghost" size="sm" onClick={() => removeConfigMaterial(m.id!)} className="h-6 w-6 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"><span className="text-xs font-bold">×</span></Button>
+                                                                <Button variant="ghost" size="sm" onClick={() => removeConfigMaterial(m.id!)} disabled={isReadOnly} className="h-6 w-6 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"><span className="text-xs font-bold">×</span></Button>
                                                             </TableCell>
                                                             <TableCell className="font-semibold text-[10px] whitespace-nowrap overflow-hidden text-ellipsis max-w-[150px]">
                                                                 <TooltipProvider>
@@ -1691,22 +1812,22 @@ export default function ManageProduct() {
                                                                 </TooltipProvider>
                                                             </TableCell>
                                                             <TableCell className="text-[10px] whitespace-nowrap overflow-hidden text-ellipsis max-w-[100px]">{m.shop_name || "N/A"}</TableCell>
-                                                            <TableCell><Input value={m.location} onChange={e => updateConfig(m.id!, "location", e.target.value)} className="h-8 border-muted text-[10px] px-2" /></TableCell>
+                                                            <TableCell><Input value={m.location} onChange={e => updateConfig(m.id!, "location", e.target.value)} disabled={isReadOnly} className="h-8 border-muted text-[10px] px-2" /></TableCell>
                                                             <TableCell className="text-[10px] font-medium">{m.unit}</TableCell>
-                                                            <TableCell><div className="flex justify-center"><Input type="number" value={m.baseQty} onChange={e => updateConfig(m.id!, "baseQty", Number(e.target.value))} className="h-8 border-muted text-[11px] px-2 font-bold w-20 text-center" /></div></TableCell>
+                                                            <TableCell><div className="flex justify-center"><Input type="number" value={m.baseQty} onChange={e => updateConfig(m.id!, "baseQty", Number(e.target.value))} disabled={isReadOnly} className="h-8 border-muted text-[11px] px-2 font-bold w-20 text-center" /></div></TableCell>
                                                             <TableCell className="text-[10px] font-bold">₹{(m.supplyRate + m.installRate).toLocaleString()}</TableCell>
                                                             {!compactMode && (
                                                                 <>
                                                                     <TableCell className="text-[10px] font-bold">₹{baseAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-                                                                    <TableCell className="text-center"><Checkbox checked={!!m.applyWastage} onCheckedChange={checked => updateConfig(m.id!, "applyWastage", !!checked)} /></TableCell>
-                                                                    <TableCell className="text-center"><Checkbox checked={!!m.applyRounding} onCheckedChange={checked => updateConfig(m.id!, "applyRounding", !!checked)} /></TableCell>
-                                                                    <TableCell><Input type="number" value={m.wastagePct ?? ""} onChange={e => updateConfig(m.id!, "wastagePct", e.target.value ? Number(e.target.value) : undefined)} placeholder="Global" className="h-8 border-orange-200 text-[10px] px-2 font-bold w-full" /></TableCell>
+                                                                    <TableCell className="text-center"><Checkbox checked={!!m.applyWastage} onCheckedChange={checked => updateConfig(m.id!, "applyWastage", !!checked)} disabled={isReadOnly} /></TableCell>
+                                                                    <TableCell className="text-center"><Checkbox checked={!!m.applyRounding} onCheckedChange={checked => updateConfig(m.id!, "applyRounding", !!checked)} disabled={isReadOnly} /></TableCell>
+                                                                    <TableCell><Input type="number" value={m.wastagePct ?? ""} onChange={e => updateConfig(m.id!, "wastagePct", e.target.value ? Number(e.target.value) : undefined)} placeholder="Global" disabled={isReadOnly} className="h-8 border-orange-200 text-[10px] px-2 font-bold w-full" /></TableCell>
                                                                     <TableCell className="text-[10px] font-bold text-orange-600">{m.wastageQty.toFixed(2)}</TableCell>
                                                                     <TableCell className="text-[10px] font-bold">{m.roundOffQty.toFixed(2)}</TableCell>
                                                                 </>
                                                             )}
                                                             <TableCell className="text-center">
-                                                                <Checkbox checked={!!m.freezeAndEdit} onCheckedChange={checked => updateConfig(m.id!, "freezeAndEdit", !!checked)} />
+                                                                <Checkbox checked={!!m.freezeAndEdit} onCheckedChange={checked => updateConfig(m.id!, "freezeAndEdit", !!checked)} disabled={isReadOnly} />
                                                             </TableCell>
                                                             <TableCell className="text-[10px] font-bold text-blue-600">₹{m.lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                                                             {!compactMode && <TableCell className="text-[10px] font-bold text-primary">{m.perUnitQty.toFixed(4)}</TableCell>}
@@ -1763,10 +1884,10 @@ export default function ManageProduct() {
                                             <Button variant="outline" size="sm" onClick={() => { resetSelection(); setStep(1); setSelectedProduct(null); }} className="w-full sm:w-auto px-6 h-10 border-blue-400 text-blue-700 hover:bg-blue-50">+ Add Another Product</Button>
                                         </div>
                                         <div className="flex items-center gap-3 w-full sm:w-auto">
-                                            <Button variant="outline" size="sm" onClick={handleSaveDraft} disabled={isSaving || configMaterials.length === 0} className="w-full sm:w-auto h-10 border-orange-400 text-orange-700 hover:bg-orange-50 px-6">
+                                            <Button variant="outline" size="sm" onClick={handleSaveDraft} disabled={isSaving || configMaterials.length === 0 || isReadOnly} className="w-full sm:w-auto h-10 border-orange-400 text-orange-700 hover:bg-orange-50 px-6">
                                                 {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Save Draft"}
                                             </Button>
-                                            <Button size="sm" onClick={handleSaveInPlace} disabled={isSaving || configMaterials.length === 0} className="w-full sm:w-auto h-10 bg-green-600 hover:bg-green-700 text-white font-bold px-6 transition-all shadow-md">
+                                            <Button size="sm" onClick={handleSaveInPlace} disabled={isSaving || configMaterials.length === 0 || isReadOnly} className="w-full sm:w-auto h-10 bg-green-600 hover:bg-green-700 text-white font-bold px-6 transition-all shadow-md">
                                                 {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting...</> : "Submit for Approval"}
                                             </Button>
                                             <Button size="sm" onClick={nextStep} className="w-full sm:w-auto h-10 bg-primary hover:bg-primary/90 text-white font-bold px-6 transition-all">Continue to Review <ArrowRight className="ml-2 h-4 w-4" /></Button>
@@ -1829,7 +1950,7 @@ export default function ManageProduct() {
                                 </div>
                                 <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-8 mt-8 border-t border-black/10">
                                     <Button variant="outline" size="sm" onClick={() => setStep(step - 1)} className="w-full sm:w-auto px-6 h-10 font-bold uppercase tracking-wide" disabled={isSaving}><ArrowLeft className="mr-2 h-4 w-4" /> Back</Button>
-                                    <Button size="sm" onClick={handleSave} disabled={isSaving} className="w-full sm:w-auto h-10 bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 uppercase tracking-wide transition-all shadow-md">
+                                    <Button size="sm" onClick={handleSave} disabled={isSaving || isReadOnly} className="w-full sm:w-auto h-10 bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 uppercase tracking-wide transition-all shadow-md">
                                         {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Finalizing...</> : "Add to Create BOQ"}
                                     </Button>
                                 </div>

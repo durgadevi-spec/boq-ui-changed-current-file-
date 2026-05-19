@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from "express";
 import fs from "fs";
+import path from "path";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { comparePasswords, generateToken } from "./auth";
@@ -9,6 +10,9 @@ import { query } from "./db/client";
 import { sendSketchPlanEmail, sendSiteReportEmail, sendProposalStatusEmail, sendMaterialRateChangeEmail, sendCommentMentionEmail } from "./email";
 import { logActivity } from "./audit";
 import { registerSketchRoutes } from "./sketch_routes";
+import { convertSketchToBoqItems } from "./lib/sketch_converter";
+import { WebSocketServer } from 'ws';
+
 
 export async function registerRoutes(
   httpServer: Server,
@@ -18,6 +22,62 @@ export async function registerRoutes(
 
   // Sketch Plan Routes
   await registerSketchRoutes(app);
+
+  // ==================== REAL-TIME PRESENCE ====================
+  const wss = new WebSocketServer({ noServer: true });
+  const planPresences = new Map<string, Set<string>>();
+
+  // Attach to existing httpServer
+  httpServer.on('upgrade', (request, socket, head) => {
+    const pathname = new URL(request.url!, `http://${request.headers.host}`).pathname;
+    if (pathname === '/ws-presence') {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    }
+  });
+
+  wss.on('connection', (ws) => {
+    let currentPlanId: string | null = null;
+    let currentUser: string | null = null;
+
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        if (data.type === 'join') {
+          currentPlanId = data.planId;
+          currentUser = data.user;
+          if (currentPlanId && currentUser) {
+            if (!planPresences.has(currentPlanId)) {
+              planPresences.set(currentPlanId, new Set());
+            }
+            planPresences.get(currentPlanId)!.add(currentUser);
+            broadcastPresence(currentPlanId);
+          }
+        }
+      } catch (e) {
+        console.error('WS Presence error:', e);
+      }
+    });
+
+    ws.on('close', () => {
+      if (currentPlanId && currentUser) {
+        planPresences.get(currentPlanId)?.delete(currentUser);
+        broadcastPresence(currentPlanId);
+      }
+    });
+
+    function broadcastPresence(planId: string) {
+      const users = Array.from(planPresences.get(planId) || []);
+      const msg = JSON.stringify({ type: 'presence', planId, users });
+      wss.clients.forEach((client) => {
+        if (client.readyState === 1) {
+          client.send(msg);
+        }
+      });
+    }
+  });
+  // ==================== END PRESENCE ====================
 
   // Ensure Column Exists with DEFAULT false, and sync current state to prevent sorting bugs (NULLS vs FALSE)
   await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS is_last_final BOOLEAN DEFAULT FALSE");
@@ -2155,18 +2215,31 @@ export async function registerRoutes(
         templatesRows = templatesRes.rows || [];
 
         // Query products table - only approved products with at least one approved config
+        // JOIN with material_subcategories and material_categories to get the parent category
         const productsRes = hasQuery
           ? await query(`
-              SELECT DISTINCT ON (p.name) p.id::text, p.name, null as code, null as rate, null as unit, COALESCE(p.subcategory, '') as category, null as image, 'Product' as type 
+              SELECT DISTINCT ON (p.name) p.id::text, p.name, null as code, null as rate, null as unit, COALESCE(c.name, p.subcategory, '') as category, null as image, 'Product' as type 
               FROM products p 
+              LEFT JOIN (
+                SELECT DISTINCT ON (LOWER(TRIM(name))) name, category
+                FROM material_subcategories
+                ORDER BY LOWER(TRIM(name)), (CASE WHEN category = 'Demolishing' THEN 1 ELSE 0 END) ASC, created_at DESC
+              ) s ON LOWER(TRIM(p.subcategory)) = LOWER(TRIM(s.name))
+              LEFT JOIN material_categories c ON LOWER(TRIM(s.category)) = LOWER(TRIM(c.name))
               WHERE (p.name ILIKE $1 OR REPLACE(p.name, ' ', '') ILIKE $2)
                 AND EXISTS (
                   SELECT 1 FROM product_approvals pa WHERE pa.product_id = p.id AND pa.status = 'approved'
                 )
               ORDER BY p.name ASC LIMIT 100`, [searchPattern, compactPattern])
           : await query(`
-              SELECT DISTINCT ON (p.name) p.id::text, p.name, null as code, null as rate, null as unit, COALESCE(p.subcategory, '') as category, null as image, 'Product' as type 
+              SELECT DISTINCT ON (p.name) p.id::text, p.name, null as code, null as rate, null as unit, COALESCE(c.name, p.subcategory, '') as category, null as image, 'Product' as type 
               FROM products p 
+              LEFT JOIN (
+                SELECT DISTINCT ON (LOWER(TRIM(name))) name, category
+                FROM material_subcategories
+                ORDER BY LOWER(TRIM(name)), (CASE WHEN category = 'Demolishing' THEN 1 ELSE 0 END) ASC, created_at DESC
+              ) s ON LOWER(TRIM(p.subcategory)) = LOWER(TRIM(s.name))
+              LEFT JOIN material_categories c ON LOWER(TRIM(s.category)) = LOWER(TRIM(c.name))
               WHERE EXISTS (
                 SELECT 1 FROM product_approvals pa WHERE pa.product_id = p.id AND pa.status = 'approved'
               )
@@ -4105,10 +4178,23 @@ export async function registerRoutes(
 
         const result = await query(
           `
-        INSERT INTO products (name, subcategory, tax_code_type, tax_code_value, hsn_code, sac_code, created_by, image)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING *
-      `,
+          WITH inserted AS (
+            INSERT INTO products (name, subcategory, tax_code_type, tax_code_value, hsn_code, sac_code, created_by, image)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING *
+          )
+          SELECT
+            p.*,
+            s.name as subcategory_name,
+            c.name as category_name
+          FROM inserted p
+          LEFT JOIN (
+            SELECT DISTINCT ON (LOWER(TRIM(name))) name, category
+            FROM material_subcategories
+            ORDER BY LOWER(TRIM(name)), (CASE WHEN category = 'Demolishing' THEN 1 ELSE 0 END) ASC, created_at DESC
+          ) s ON LOWER(TRIM(p.subcategory)) = LOWER(TRIM(s.name))
+          LEFT JOIN material_categories c ON LOWER(TRIM(s.category)) = LOWER(TRIM(c.name))
+          `,
           [name, subcategory || null, taxCodeType || null, taxCodeValue || null, hsn_code || null, sac_code || null, req.user?.username || "unknown", image || null],
         );
         console.log('/api/products POST inserted ->', result.rows[0]);
@@ -4138,7 +4224,7 @@ export async function registerRoutes(
           EXISTS (
             SELECT 1 FROM step11_products WHERE product_id = p.id
             UNION ALL
-            SELECT 1 FROM product_approvals WHERE product_id = p.id AND status = 'approved'
+            SELECT 1 FROM product_approvals WHERE product_id = p.id AND status IN ('approved', 'edit_requested', 'draft')
           ) AS is_approved,
           EXISTS (
             SELECT 1 FROM (
@@ -4164,7 +4250,11 @@ export async function registerRoutes(
             WHERE (cfg.status IS NULL OR cfg.status = 'pending') AND ABS(cfg.config_rate - m.rate) > 0.01 AND m.approved IS TRUE
           ) AS has_price_updates
         FROM products p
-        LEFT JOIN material_subcategories s ON LOWER(TRIM(p.subcategory)) = LOWER(TRIM(s.name))
+        LEFT JOIN (
+          SELECT DISTINCT ON (LOWER(TRIM(name))) name, category
+          FROM material_subcategories
+          ORDER BY LOWER(TRIM(name)), (CASE WHEN category = 'Demolishing' THEN 1 ELSE 0 END) ASC, created_at DESC
+        ) s ON LOWER(TRIM(p.subcategory)) = LOWER(TRIM(s.name))
         LEFT JOIN material_categories c ON LOWER(TRIM(s.category)) = LOWER(TRIM(c.name))
       `;
 
@@ -4214,11 +4304,24 @@ export async function registerRoutes(
 
         const result = await query(
           `
-        UPDATE products 
-        SET name = $1, subcategory = $2, tax_code_type = $3, tax_code_value = $4, hsn_code = $5, sac_code = $6, image = $8
-        WHERE id = $7
-        RETURNING *
-      `,
+          WITH updated AS (
+            UPDATE products 
+            SET name = $1, subcategory = $2, tax_code_type = $3, tax_code_value = $4, hsn_code = $5, sac_code = $6, image = $8
+            WHERE id = $7
+            RETURNING *
+          )
+          SELECT
+            p.*,
+            s.name as subcategory_name,
+            c.name as category_name
+          FROM updated p
+          LEFT JOIN (
+            SELECT DISTINCT ON (LOWER(TRIM(name))) name, category
+            FROM material_subcategories
+            ORDER BY LOWER(TRIM(name)), (CASE WHEN category = 'Demolishing' THEN 1 ELSE 0 END) ASC, created_at DESC
+          ) s ON LOWER(TRIM(p.subcategory)) = LOWER(TRIM(s.name))
+          LEFT JOIN material_categories c ON LOWER(TRIM(s.category)) = LOWER(TRIM(c.name))
+          `,
           [name, subcategory, taxCodeType || null, taxCodeValue || null, finalHsnCode || null, finalSacCode || null, id, image || null],
         );
         console.log(`/api/products/${id} PUT updated ->`, result.rows[0]);
@@ -4283,8 +4386,12 @@ export async function registerRoutes(
           s.name as subcategory_name,
           c.name as category_name
         FROM products p
-        LEFT JOIN material_subcategories s ON p.subcategory = s.name
-        LEFT JOIN material_categories c ON s.category = c.name
+        LEFT JOIN (
+          SELECT DISTINCT ON (LOWER(TRIM(name))) name, category
+          FROM material_subcategories
+          ORDER BY LOWER(TRIM(name)), (CASE WHEN category = 'Demolishing' THEN 1 ELSE 0 END) ASC, created_at DESC
+        ) s ON LOWER(TRIM(p.subcategory)) = LOWER(TRIM(s.name))
+        LEFT JOIN material_categories c ON LOWER(TRIM(s.category)) = LOWER(TRIM(c.name))
         WHERE p.id = $1
       `,
         [id],
@@ -5178,15 +5285,19 @@ export async function registerRoutes(
         // Ensure is_disabled column exists
         await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS is_disabled BOOLEAN DEFAULT FALSE");
 
-        const { type } = req.query;
+        const { type, excludeApproved } = req.query;
         let q = `SELECT id, project_id, project_name, project_client, project_location, version_number, status, type, is_locked, is_last_final, is_disabled, created_at, updated_at, category_order 
                  FROM boq_versions 
                  WHERE project_id = $1`;
-        const params = [projectId];
+        const params: any[] = [projectId];
 
         if (type) {
-          q += ` AND type = $2`;
+          q += ` AND type = $${params.length + 1}`;
           params.push(type as string);
+        }
+
+        if (excludeApproved === 'true') {
+          q += ` AND status != 'approved'`;
         }
 
         q += ` ORDER BY version_number DESC`;
@@ -6229,9 +6340,13 @@ export async function registerRoutes(
 
       const entriesToProcess = [];
       for (const row of itemsResult.rows) {
-        if (archivedIds.includes(row.id) || trashedIds.includes(row.id)) continue;
+        // Skip archived/trashed if archiveService is available
+        try {
+          if (archivedIds.includes(row.id) || trashedIds.includes(row.id)) continue;
+        } catch (e) { /* ignore archive filter errors */ }
 
         let tableData = row.table_data;
+        if (!tableData) continue;
         if (typeof tableData === "string") {
           try { tableData = JSON.parse(tableData); } catch (e) { continue; }
         }
@@ -6248,10 +6363,13 @@ export async function registerRoutes(
           const requiredQty = Number(tableData.targetRequiredQty) || 0;
           let itemSubtotal = 0;
           if (Array.isArray(tableData.materialLines)) {
+            const base = Number(tableData.configBasis?.baseRequiredQty || 1);
             tableData.materialLines.forEach((line: any) => {
-              const perUnitQty = Number(line.perUnitQty) || 0;
-              const rate = (Number(line.supplyRate) || 0) + (Number(line.installRate) || 0);
-              itemSubtotal += (requiredQty * perUnitQty) * rate;
+              if (!line) return;
+              const perUnitQty = parseFloat(line.perUnitQty || line.qty || line.baseQty || 0);
+              const rate = parseFloat(line.rate || (line.supplyRate + line.installRate) || 0);
+              const scaledPerUnit = base > 0 ? perUnitQty / base : 0;
+              itemSubtotal += (requiredQty * scaledPerUnit) * rate;
             });
           }
 
@@ -6303,11 +6421,83 @@ export async function registerRoutes(
         [consolidatedValue, projectId],
       );
 
-      console.log(`[recalculateProjectValue] Updated version ${targetVersionId} price. Project ${projectId} consolidated value: ${consolidatedValue}`);
+      console.log(`[recalculateProjectValue] Done for project ${projectId}. Final value: ${consolidatedValue}`);
     } catch (err) {
-      console.error(`[recalculateProjectValue] Error for project ${projectId}:`, err);
+      console.error(`[recalculateProjectValue] ERROR for project ${projectId}:`, err);
+      throw err; // Re-throw to catch in parent route
     }
   }
+
+  // POST /api/sketch-plans/:id/load-to-boq - Convert Sketch Plan items directly to BOQ
+  app.post(
+    "/api/sketch-plans/:id/load-to-boq",
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const { id: sketchId } = req.params;
+        const { projectId, versionId } = req.body;
+
+        if (!projectId) {
+          return res.status(400).json({ message: "Project ID is required" });
+        }
+
+        // 1. Convert Sketch Items to BOQ format using shared utility
+        const boqItems = await convertSketchToBoqItems(sketchId);
+
+        // 2. Ensure we have a target version
+        let targetVersionId = versionId;
+        if (!targetVersionId || targetVersionId === "new") {
+          const maxVerRes = await query(
+            `SELECT COALESCE(MAX(version_number), 0) as max_ver FROM boq_versions WHERE project_id = $1`,
+            [projectId]
+          );
+          const nextVersion = (maxVerRes.rows[0]?.max_ver || 0) + 1;
+          targetVersionId = `ver-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+          await query(
+            `INSERT INTO boq_versions (id, project_id, version_number, status, type, created_at, updated_at)
+             VALUES ($1, $2, $3, 'draft', 'bom', NOW(), NOW())`,
+            [targetVersionId, projectId, nextVersion]
+          );
+        }
+
+        // 5. Batch Insert BOQ items
+        const maxSortOrderResult = await query(`SELECT MAX(sort_order) as max_sort_order FROM boq_items WHERE version_id = $1`, [targetVersionId]);
+        let currentSortOrder = (maxSortOrderResult.rows[0]?.max_sort_order || 0) + 1;
+
+        for (const tData of boqItems) {
+          const itemId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          await query(
+            `INSERT INTO boq_items (id, project_id, estimator, table_data, version_id, user_added, sort_order, created_at)
+             VALUES ($1, $2, $3, $4, $5, true, $6, NOW())`,
+            [itemId, projectId, (tData.product_name || "Custom Item").substring(0, 50), JSON.stringify(tData), targetVersionId, currentSortOrder++]
+          );
+        }
+
+        console.log(`[load-to-boq] Starting recalculateProjectValue for project ${projectId}, version ${targetVersionId}`);
+        await recalculateProjectValue(projectId, targetVersionId);
+
+        console.log(`[load-to-boq] Successfully loaded ${boqItems.length} items to BOQ`);
+        res.json({ message: `Successfully loaded ${boqItems.length} items to BOQ`, count: boqItems.length, versionId: targetVersionId });
+      } catch (err: any) {
+        console.error("POST /api/sketch-plans/:id/load-to-boq ERROR:", err);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const errorStack = err instanceof Error ? err.stack : "No stack trace";
+
+        try {
+          fs.appendFileSync(path.join(process.cwd(), "conversion_errors.log"),
+            `[${new Date().toISOString()}] ERROR: ${errorMsg}\nStack: ${errorStack}\n\n`
+          );
+        } catch (e) { console.error("Failed to write to conversion_errors.log", e); }
+
+        res.status(500).json({
+          message: "Failed to load sketch plan to BOQ",
+          error: errorMsg,
+          details: errorStack
+        });
+      }
+    }
+  );
 
   // ====== BOQ ITEMS ROUTES ======
 
@@ -6701,6 +6891,121 @@ export async function registerRoutes(
         res.status(500).json({ message: "Failed to fetch BOQ items" });
       }
     },
+  );
+
+  // POST /api/boq-items/refresh - Sync all items in a version with master library (atomic)
+  app.post(
+    "/api/boq-items/refresh",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team", "pre_sales"),
+    async (req: Request, res: Response) => {
+      try {
+        const { version_id } = req.body;
+        if (!version_id) return res.status(400).json({ message: "version_id is required" });
+
+        console.log(`[RefreshBOM] Starting atomic refresh for version: ${version_id}`);
+
+        // 1. Fetch current items
+        const currentItemsRes = await query(
+          "SELECT id, estimator, table_data FROM boq_items WHERE version_id = $1",
+          [version_id]
+        );
+        const currentItems = currentItemsRes.rows;
+
+        // 2. Fetch Master Data
+        const [prodRes, matRes] = await Promise.all([
+          query("SELECT id, name, category, category_name, hsn_code, sac_code FROM products"),
+          query("SELECT id, name, category, rate, supply_rate, install_rate FROM materials")
+        ]);
+
+        const prodMap = new Map(prodRes.rows.map(p => [String(p.id), p]));
+        const matMap = new Map(matRes.rows.map(m => [String(m.id), m]));
+        const matByNameMap = new Map(matRes.rows.map(m => [String(m.name).toLowerCase().trim(), m]));
+
+        const changeLog: any[] = [];
+        const updates: { id: any, table_data: any }[] = [];
+
+        // 3. Process Reconcilliation
+        for (const item of currentItems) {
+          let td = typeof item.table_data === 'string' ? JSON.parse(item.table_data) : item.table_data;
+          let hasChanges = false;
+          const itemName = td.product_name || item.estimator || "Unknown Item";
+
+          // A. Resolve Product Category
+          if (td.product_id) {
+            const masterProd = prodMap.get(String(td.product_id));
+            if (masterProd) {
+              const latestCat = (masterProd.category_name || masterProd.category || "").trim();
+              const currentCat = (td.category_name || td.category || "").trim();
+
+              if (latestCat && (!currentCat || currentCat.toLowerCase() !== latestCat.toLowerCase())) {
+                td.category = latestCat;
+                td.category_name = latestCat;
+                hasChanges = true;
+                changeLog.push({ itemName, field: "Category", from: currentCat || "None", to: latestCat });
+              }
+            }
+          }
+
+          // B. Resolve Material Lines Categories/Rates
+          if (Array.isArray(td.materialLines)) {
+            td.materialLines = td.materialLines.map((line: any) => {
+              const mId = line.id || line.material_id;
+              const masterMat = matMap.get(String(mId)) || matByNameMap.get(String(line.name || line.title || "Material").toLowerCase().trim());
+              if (masterMat) {
+                const latestCat = (masterMat.category || "").trim();
+                const currentCat = (line.category || "").trim();
+                if (latestCat && (!currentCat || currentCat.toLowerCase() !== latestCat.toLowerCase())) {
+                  hasChanges = true;
+                  changeLog.push({ itemName: `${itemName} > ${line.name || line.title || "Material"}`, field: "Material Category", from: currentCat || "None", to: latestCat });
+                  return { ...line, category: latestCat };
+                }
+              }
+              return line;
+            });
+          }
+
+          // C. Resolve Step11 items (Manual/Finalized)
+          if (Array.isArray(td.step11_items)) {
+            td.step11_items = td.step11_items.map((line: any) => {
+              const mId = line.id || line.material_id;
+              const masterMat = matMap.get(String(mId)) || matByNameMap.get(String(line.title || line.name || "Item").toLowerCase().trim());
+              if (masterMat) {
+                const latestCat = (masterMat.category || "").trim();
+                const currentCat = (line.category || "").trim();
+                if (latestCat && (!currentCat || currentCat.toLowerCase() !== latestCat.toLowerCase())) {
+                  hasChanges = true;
+                  changeLog.push({ itemName: `${itemName} > ${line.title || line.name || "Item"}`, field: "Item Category", from: currentCat || "None", to: latestCat });
+                  return { ...line, category: latestCat };
+                }
+              }
+              return line;
+            });
+          }
+
+          if (hasChanges) {
+            updates.push({ id: item.id, table_data: td });
+          }
+        }
+
+        // 4. Atomic Database Updates
+        if (updates.length > 0) {
+          await query("BEGIN");
+          for (const u of updates) {
+            await query("UPDATE boq_items SET table_data = $1 WHERE id = $2", [JSON.stringify(u.table_data), u.id]);
+          }
+          await query("COMMIT");
+          console.log(`[RefreshBOM] Applied ${updates.length} updates.`);
+        }
+
+        res.json({ success: true, updatedCount: updates.length, changeLog });
+
+      } catch (err) {
+        await query("ROLLBACK");
+        console.error("POST /api/boq-items/refresh error", err);
+        res.status(500).json({ message: "Refresh failed", error: (err as any).message });
+      }
+    }
   );
 
   // GET /api/boq-items/history/:productName - Fetch product usage history across projects
@@ -8258,11 +8563,17 @@ export async function registerRoutes(
            )
            SELECT p.*, pr.name as live_product_name,
              COALESCE(pr.name, p.product_name) as product_name,
+             COALESCE(vc.name, f_vc.name, p.category_id) as category_name,
+             COALESCE(vsc.name, pr.subcategory, p.subcategory_id) as subcategory_name,
              (SELECT COUNT(*) FROM product_approvals p2 
               WHERE p2.product_id = p.product_id 
               AND p2.config_name = p.config_name) as submission_count
            FROM latest_submissions p
            LEFT JOIN products pr ON p.product_id = pr.id
+           LEFT JOIN vendor_categories vc ON p.category_id = vc.name
+           LEFT JOIN material_subcategories vsc ON p.subcategory_id = vsc.name AND (p.category_id = vsc.category OR p.category_id IS NULL)
+           LEFT JOIN material_subcategories f_vsc ON pr.subcategory = f_vsc.name
+           LEFT JOIN material_categories f_vc ON f_vsc.category = f_vc.name
            ORDER BY p.created_at DESC`
         );
         res.json({ approvals: result.rows });
@@ -8282,9 +8593,15 @@ export async function registerRoutes(
       try {
         const approvalResult = await query(
           `SELECT pa.*, pr.name as live_product_name, 
-           COALESCE(pr.name, pa.product_name) as product_name
+           COALESCE(pr.name, pa.product_name) as product_name,
+           COALESCE(vc.name, f_vc.name, pa.category_id) as category_name,
+           COALESCE(vsc.name, pr.subcategory, pa.subcategory_id) as subcategory_name
            FROM product_approvals pa
            LEFT JOIN products pr ON pa.product_id = pr.id
+           LEFT JOIN vendor_categories vc ON pa.category_id = vc.name
+           LEFT JOIN material_subcategories vsc ON pa.subcategory_id = vsc.name AND (pa.category_id = vsc.category OR pa.category_id IS NULL)
+           LEFT JOIN material_subcategories f_vsc ON pr.subcategory = f_vsc.name
+           LEFT JOIN material_categories f_vc ON f_vsc.category = f_vc.name
            WHERE pa.id = $1`, [req.params.id]
         );
         if (approvalResult.rows.length === 0) {
@@ -8519,6 +8836,183 @@ export async function registerRoutes(
     }
   );
 
+  // POST /api/product-approvals/:id/request-edit - Request edit for approved configuration
+  app.post(
+    "/api/product-approvals/:id/request-edit",
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const { id } = req.params;
+        const result = await query(
+          "UPDATE product_approvals SET status = 'edit_requested', updated_at = NOW() WHERE id = $1 AND status = 'approved' RETURNING id",
+          [id]
+        );
+
+        if (result.rows.length === 0) {
+          res.status(404).json({ message: "Approved product configuration not found" });
+          return;
+        }
+
+        res.json({ message: "Edit request submitted successfully" });
+      } catch (err) {
+        console.error("POST /api/product-approvals/:id/request-edit error:", err);
+        res.status(500).json({ message: "Failed to submit edit request" });
+      }
+    }
+  );
+
+  // POST /api/product-approvals/request-edit - Request edit by product_id and config_name (self-healing for legacy configurations)
+  app.post(
+    "/api/product-approvals/request-edit",
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const { product_id, config_name } = req.body;
+        if (!product_id || !config_name) {
+          res.status(400).json({ message: "product_id and config_name are required" });
+          return;
+        }
+
+        // Try to update existing approved record
+        const result = await query(
+          "UPDATE product_approvals SET status = 'edit_requested', updated_at = NOW() WHERE product_id = $1 AND config_name = $2 AND status = 'approved' RETURNING id",
+          [product_id, config_name]
+        );
+
+        if (result.rows.length > 0) {
+          res.json({ message: "Edit request submitted successfully" });
+          return;
+        }
+
+        // If it doesn't exist in product_approvals, check if it exists in step11_products
+        const checkStep11 = await query(
+          `SELECT id, product_name, category_id, subcategory_id, total_cost, 
+                  required_unit_type, base_required_qty, wastage_pct_default, 
+                  dim_a, dim_b, dim_c, description 
+           FROM step11_products 
+           WHERE product_id = $1 AND config_name = $2`,
+          [product_id, config_name]
+        );
+
+        if (checkStep11.rows.length === 0) {
+          res.status(404).json({ message: "Approved product configuration not found" });
+          return;
+        }
+
+        // Legacy configuration exists. Auto-insert an approval request in edit_requested state!
+        const productVal = checkStep11.rows[0];
+        const insertId = randomUUID();
+        await query(
+          `INSERT INTO product_approvals (
+            id, product_id, product_name, config_name, status,
+            category_id, subcategory_id, total_cost, required_unit_type,
+            base_required_qty, wastage_pct_default, dim_a, dim_b, dim_c, description,
+            created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, 'edit_requested', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())`,
+          [
+            insertId,
+            product_id,
+            productVal.product_name,
+            config_name,
+            productVal.category_id || null,
+            productVal.subcategory_id || null,
+            productVal.total_cost || 0,
+            productVal.required_unit_type || null,
+            productVal.base_required_qty || null,
+            productVal.wastage_pct_default || null,
+            productVal.dim_a || null,
+            productVal.dim_b || null,
+            productVal.dim_c || null,
+            productVal.description || null
+          ]
+        );
+
+        res.json({ message: "Edit request submitted successfully for legacy configuration" });
+      } catch (err) {
+        console.error("POST /api/product-approvals/request-edit error:", err);
+        res.status(500).json({ message: "Failed to submit edit request" });
+      }
+    }
+  );
+
+  // POST /api/product-approvals/:id/approve-edit - Admin approves edit request
+  app.post(
+    "/api/product-approvals/:id/approve-edit",
+    authMiddleware,
+    requireRole("admin", "software_team"),
+    async (req: Request, res: Response) => {
+      const { id } = req.params;
+      try {
+        await query("BEGIN");
+        try {
+          const approvalResult = await query(
+            "SELECT * FROM product_approvals WHERE id = $1 AND status = 'edit_requested'", [id]
+          );
+          if (approvalResult.rows.length === 0) {
+            await query("ROLLBACK");
+            res.status(404).json({ message: "Edit request not found" });
+            return;
+          }
+          const appVal = approvalResult.rows[0];
+
+          // Delete from step11_products so it is no longer approved
+          await query(
+            `DELETE FROM step11_product_items 
+             WHERE step11_product_id IN (
+               SELECT id FROM step11_products 
+               WHERE product_id = $1 AND config_name = $2
+             )`,
+            [appVal.product_id, appVal.config_name]
+          );
+          await query(
+            "DELETE FROM step11_products WHERE product_id = $1 AND config_name = $2",
+            [appVal.product_id, appVal.config_name]
+          );
+
+          // Change status of the approval request to 'draft' in product_approvals
+          await query(
+            "UPDATE product_approvals SET status = 'draft', updated_at = NOW() WHERE id = $1",
+            [id]
+          );
+
+          await query("COMMIT");
+          res.json({ message: "Edit request approved. Configuration is now a draft." });
+        } catch (err) {
+          await query("ROLLBACK");
+          throw err;
+        }
+      } catch (err) {
+        console.error("POST /api/product-approvals/:id/approve-edit error:", err);
+        res.status(500).json({ message: "Failed to approve edit request" });
+      }
+    }
+  );
+
+  // POST /api/product-approvals/:id/reject-edit - Admin rejects edit request
+  app.post(
+    "/api/product-approvals/:id/reject-edit",
+    authMiddleware,
+    requireRole("admin", "software_team"),
+    async (req: Request, res: Response) => {
+      try {
+        const { id } = req.params;
+        const result = await query(
+          "UPDATE product_approvals SET status = 'approved', updated_at = NOW() WHERE id = $1 AND status = 'edit_requested' RETURNING id",
+          [id]
+        );
+        if (result.rows.length === 0) {
+          res.status(404).json({ message: "Edit request not found" });
+          return;
+        }
+        res.json({ message: "Edit request rejected. Configuration remains approved." });
+      } catch (err) {
+        console.error("POST /api/product-approvals/:id/reject-edit error:", err);
+        res.status(500).json({ message: "Failed to reject edit request" });
+      }
+    }
+  );
+
+
   // DELETE /api/product-approvals/:id - Delete an approval request and its items
   app.delete(
     "/api/product-approvals/:id",
@@ -8593,41 +9087,38 @@ export async function registerRoutes(
 
       const shopNames = new Set();
 
-      // Helper: recursively extract shop_name from items and their nested step11_items, but ONLY if qty > 0
-      const extractShopNames = (items: any[], scale: number = 1) => {
+      // Helper: extract shop_name from a flat list of items ONLY if qty > 0
+      // NOTE: Do NOT recursively drill step11_items for engine products - prevents stale shop leakage
+      const extractShopNames = (items: any[]) => {
         for (const item of items) {
-          const qty = (parseFloat(item.qty || item.quantity || item.requiredQty || 1) || 0) * scale;
-
+          const qty = parseFloat(item.qty || item.quantity || item.requiredQty || item.baseQty || 0) || 0;
           if (qty > 0) {
             const name = item.shop_name || item.shopName;
             if (name && typeof name === "string" && name.trim().length > 0) {
               shopNames.add(name.trim());
             }
           }
-
-          // Drill into nested step11_items (consolidated products)
-          if (Array.isArray(item.step11_items)) {
-            extractShopNames(item.step11_items, scale);
-          }
         }
-      }
+      };
 
       for (const row of itemsResult.rows) {
         const td = parseSafeTableData(row.table_data);
 
         if (td.materialLines && td.targetRequiredQty !== undefined) {
-          // Engine-based product
-          const base = Number(td.baseRequiredQty || td.configBasis?.baseRequiredQty || 1);
-          const scale = Number(td.targetRequiredQty) / base;
-
-          if (Array.isArray(td.materialLines)) extractShopNames(td.materialLines, scale);
-          if (Array.isArray(td.step11_items)) extractShopNames(td.step11_items, 1);
+          // Engine-based product:
+          // Shop names come ONLY from materialLines (live config for this version).
+          // Only include step11_items that are explicitly marked manual=true.
+          // This prevents stale shop names from old approved versions bleeding in.
+          if (Array.isArray(td.materialLines)) extractShopNames(td.materialLines);
+          if (Array.isArray(td.step11_items)) {
+            extractShopNames(td.step11_items.filter((it: any) => it.manual === true));
+          }
         } else {
-          // Non-engine product
-          if (Array.isArray(td.step11_items)) extractShopNames(td.step11_items, 1);
-          else if (Array.isArray(td.materialLines)) extractShopNames(td.materialLines, 1);
-          else if (Array.isArray(td.rows)) extractShopNames(td.rows, 1);
-          else if (Array.isArray(td.items)) extractShopNames(td.items, 1);
+          // Non-engine product: shop names come from step11_items directly
+          if (Array.isArray(td.step11_items)) extractShopNames(td.step11_items);
+          else if (Array.isArray(td.materialLines)) extractShopNames(td.materialLines);
+          else if (Array.isArray(td.rows)) extractShopNames(td.rows);
+          else if (Array.isArray(td.items)) extractShopNames(td.items);
         }
       }
 
@@ -8674,12 +9165,16 @@ export async function registerRoutes(
     authMiddleware,
     async (req: Request, res: Response) => {
       try {
-        const { projectId, versionId, versionNumber } = req.body;
+        const { projectId, versionId, versionNumber, shopFilter } = req.body;
         if (!projectId || !versionId) {
           return res
             .status(400)
             .json({ message: "Project ID and Version ID are required" });
         }
+        // shopFilter: optional array of shop names passed from frontend (the correct set for this version)
+        const allowedShops: Set<string> | null = Array.isArray(shopFilter) && shopFilter.length > 0
+          ? new Set(shopFilter.map((s: string) => s.toLowerCase().trim()))
+          : null;
 
         // 1. Get BOM items for this version
         const itemsResult = await query(
@@ -8751,8 +9246,9 @@ export async function registerRoutes(
             }
 
             // 2. Process manual items in engine-based product (if any)
+            // Only include items explicitly marked as manual=true (prevents stale copied data)
             if (Array.isArray(tableData.step11_items)) {
-              const manualLines = tableData.step11_items.filter((it: any) => it.manual).map((it: any) => {
+              const manualLines = tableData.step11_items.filter((it: any) => it.manual === true).map((it: any) => {
                 const qty = Number(it.qty || 0);
                 const sRate = Number(it.supply_rate || it.supplyRate || 0);
                 const iRate = Number(it.install_rate || it.installRate || 0);
@@ -8816,6 +9312,8 @@ export async function registerRoutes(
         // 4. For each vendor group, create a PO
         for (const [vendorName, items] of Object.entries(vendorGroups)) {
           if (vendorName === "unassigned") continue;
+          // If shopFilter was provided by frontend, skip shops not in the allowed list
+          if (allowedShops && !allowedShops.has(vendorName.toLowerCase().trim())) continue;
 
           const poNumber = `Anx-${Math.floor(1000 + Math.random() * 9000)}-${Date.now().toString().slice(-4)}`;
           let totalAmount = 0;

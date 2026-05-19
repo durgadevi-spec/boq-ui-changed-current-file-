@@ -652,10 +652,31 @@ export default function GeneratePo() {
       const res = await apiFetch(`/api/purchase-orders/preview-vendors?versionId=${selectedVersionId}`);
       if (res.ok) {
         const data = await res.json();
-        setPreviewVendors(data.vendors || []);
+        // Use uniqueShops (frontend-computed from current version's data) as the source of truth.
+        // Filter API response to only include shops that match the frontend count.
+        // This prevents stale shop names from old versions leaking into the dialog.
+        const validShopNames = new Set(uniqueShops.map((s: string) => s.toLowerCase().trim()));
+        const filtered = (data.vendors || []).filter((v: any) =>
+          v.name && validShopNames.has(v.name.toLowerCase().trim())
+        );
+        // If filtered result matches, use it (has location data). Otherwise fall back to placeholders.
+        if (filtered.length === uniqueShops.length) {
+          setPreviewVendors(filtered);
+        } else {
+          // Enrich: start from uniqueShops, add location from API where available
+          const byName: Record<string, any> = {};
+          (data.vendors || []).forEach((v: any) => {
+            if (v.name) byName[v.name.toLowerCase().trim()] = v;
+          });
+          setPreviewVendors(uniqueShops.map((s: string) => {
+            const found = byName[s.toLowerCase().trim()];
+            return found || { id: null, name: s, location: null };
+          }));
+        }
       }
     } catch (err) {
       console.error("Failed to fetch preview vendors", err);
+      setPreviewVendors(uniqueShops.map((s: string) => ({ id: null, name: s, location: null })));
     } finally {
       setIsLoadingVendors(false);
     }
@@ -679,14 +700,15 @@ export default function GeneratePo() {
         }
       }
 
-      // 2. Generate
+      // 2. Generate — pass shopFilter so backend only creates POs for shops in this version
       const res = await apiFetch("/api/purchase-orders/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId: selectedProjectId,
           versionId: selectedVersionId,
-          versionNumber: selectedVersion?.version_number
+          versionNumber: selectedVersion?.version_number,
+          shopFilter: uniqueShops  // Only generate POs for these shops
         }),
       });
       if (res.ok) {
@@ -891,6 +913,36 @@ export default function GeneratePo() {
 
   const selectedProject = projects.find(p => p.id === selectedProjectId);
   const selectedVersion = versions.find(v => v.id === selectedVersionId);
+
+  // Compute unique shops from current boqItems (same logic as fixed backend)
+  const computeUniqueShops = (): string[] => {
+    const shopNames = new Set<string>();
+    const extractShops = (items: any[]) => {
+      for (const item of items) {
+        const qty = parseFloat(item.qty || item.quantity || item.requiredQty || item.baseQty || 0) || 0;
+        if (qty > 0) {
+          const name = item.shop_name || item.shopName;
+          if (name && typeof name === "string" && name.trim().length > 0) {
+            shopNames.add(name.trim());
+          }
+        }
+      }
+    };
+    for (const boqItem of boqItems) {
+      const td = parseTableData(boqItem.table_data);
+      if (td.materialLines && td.targetRequiredQty !== undefined) {
+        // Engine-based: only materialLines + explicit manual step11_items
+        if (Array.isArray(td.materialLines)) extractShops(td.materialLines);
+        if (Array.isArray(td.step11_items)) extractShops(td.step11_items.filter((it: any) => it.manual === true));
+      } else {
+        // Non-engine: step11_items
+        if (Array.isArray(td.step11_items)) extractShops(td.step11_items);
+        else if (Array.isArray(td.materialLines)) extractShops(td.materialLines);
+      }
+    }
+    return Array.from(shopNames);
+  };
+  const uniqueShops = computeUniqueShops();
 
   const projectBudget = parseFloat(selectedProject?.budget || "0");
   const currentProjectValue = calculateCurrentProjectValue();
@@ -1771,8 +1823,38 @@ export default function GeneratePo() {
           {/* Action Buttons */}
           {selectedProjectId && selectedVersionId && (
             <Card>
-              <CardContent className="space-y-3 pt-6">
+              <CardContent className="space-y-4 pt-6">
                 {selectedVersion && <VersionStatusBanner version={selectedVersion} />}
+
+                {/* Shop count summary badge */}
+                {boqItems.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-blue-600 rounded text-white">
+                        <FileText className="h-3.5 w-3.5" />
+                      </div>
+                      <span className="text-sm font-bold text-blue-800">Annexure Preview:</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white border border-blue-200 rounded-full text-xs font-bold text-blue-700 shadow-sm">
+                        <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                        {uniqueShops.length} {uniqueShops.length === 1 ? "Shop" : "Shops"}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white border border-green-200 rounded-full text-xs font-bold text-green-700 shadow-sm">
+                        <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+                        {uniqueShops.length} {uniqueShops.length === 1 ? "PO" : "POs"} will be generated
+                      </span>
+                      {uniqueShops.length > 0 && (
+                        <div className="flex flex-wrap gap-1 ml-1">
+                          {uniqueShops.map((s: string) => (
+                            <span key={s} className="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded text-[10px] text-slate-600 font-medium">{s}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
                   <Button onClick={withBudgetCheck(() => currentProjectValue, handleSaveProject)} variant="outline" disabled={isVersionSubmitted || Object.keys(editedFields).length === 0}>Save Draft</Button>
                   <Button onClick={() => handleSubmitVersion("submitted")} variant="outline" className="border-primary text-primary hover:bg-primary/5 font-bold" disabled={isVersionSubmitted || boqItems.length === 0}>Lock Version</Button>

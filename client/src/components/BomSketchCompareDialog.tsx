@@ -63,8 +63,8 @@ export function BomSketchCompareDialog({ isOpen, onClose, projectId, currentBomV
         setSketchPlans(plans);
       }
 
-      // Load BOM versions for project
-      const bomRes = await apiFetch(`/api/boq-versions/${encodeURIComponent(projectId!)}?type=bom`);
+      // Load BOM versions for project - excluding approved ones for cleaner selection
+      const bomRes = await apiFetch(`/api/boq-versions/${encodeURIComponent(projectId!)}?type=bom&excludeApproved=true`);
       if (bomRes.ok) {
         const data = await bomRes.json();
         setBomVersions(data.versions || []);
