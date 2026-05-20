@@ -131,17 +131,9 @@ const resolveSource = (src: string, ctx: SrcCtx): number => {
 const getItemMetrics = (td: any) => {
   const step11 = Array.isArray(td.step11_items) ? td.step11_items : [];
   let itemTotal = 0, itemQty = 0;
-  
-  // Ensure configBasis has a default value
-  const configBasis = td.configBasis || {
-    requiredUnitType: "Sqft",
-    baseRequiredQty: 1,
-    wastagePctDefault: 0
-  };
-  
   if (td.targetRequiredQty !== undefined && td.targetRequiredQty !== null) {
     if (td.materialLines) {
-      const res = computeBoq(configBasis, td.materialLines, td.targetRequiredQty);
+      const res = computeBoq(td.configBasis, td.materialLines, td.targetRequiredQty);
       const manualTotal = step11.filter((it: any) => it.manual).reduce((s: number, it: any) =>
         s + (Number(it.qty) || 0) * (Number(it.supply_rate || 0) + Number(it.install_rate || 0)), 0);
       itemTotal = res.grandTotal + manualTotal;
@@ -164,8 +156,8 @@ const getItemMetrics = (td: any) => {
 
   if (td.use_standard_rate && td.materialLines) {
     try {
-      const baseQty = Number(configBasis.baseRequiredQty || 1);
-      const resBase = computeBoq({ ...configBasis, wastagePctDefault: 0 }, td.materialLines.map((l: any) => ({ ...l, applyWastage: false })), baseQty);
+      const baseQty = Number(td.configBasis?.baseRequiredQty || 1);
+      const resBase = computeBoq({ ...td.configBasis, wastagePctDefault: 0 }, td.materialLines.map((l: any) => ({ ...l, applyWastage: false })), baseQty);
       finalRate = resBase.grandTotal / baseQty;
       itemTotal = finalRate * itemQty;
     } catch { }

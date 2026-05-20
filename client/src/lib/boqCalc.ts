@@ -62,13 +62,16 @@ export function computeBoq(
     lines: MaterialLine[],
     targetRequiredQty: number,
 ): BoqResult {
-    const base = Number(basis.baseRequiredQty) || 1; // avoid div-by-zero
+    const safeBasis = basis || {} as ConfigBasis;
+    const safeLines = Array.isArray(lines) ? lines : [];
+    
+    const base = Number(safeBasis.baseRequiredQty) || 1; // avoid div-by-zero
     const target = Number(targetRequiredQty) || 0;
     // Wastage is ALWAYS stored and entered as a percentage (e.g. 5 = 5%).
     // Always divide by 100 to get the fraction for calculation.
-    let defaultW = Number(basis.wastagePctDefault ?? 0) / 100;
+    let defaultW = Number(safeBasis.wastagePctDefault ?? 0) / 100;
 
-    const computed: ComputedLine[] = lines.map((l) => {
+    const computed: ComputedLine[] = safeLines.map((l) => {
         const baseQty = Number(l.baseQty) || 0;
         const applyW = l.applyWastage !== false; // Default to true if undefined
         const applyR = l.applyRounding !== false; // Default to true if undefined
@@ -121,7 +124,7 @@ export function computeBoq(
 
     // Excel: Sqmt rate = Sqft rate * 10.76
     const ratePerSqmt =
-        basis.requiredUnitType === "Sqmt" ? ratePerUnit * 10.76 : undefined;
+        safeBasis.requiredUnitType === "Sqmt" ? ratePerUnit * 10.76 : undefined;
 
     return { computed, totalSupply, totalInstall, grandTotal, ratePerUnit, ratePerSqmt };
 }
