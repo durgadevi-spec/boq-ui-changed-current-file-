@@ -2500,8 +2500,8 @@ export default function CreateBom() {
   useEffect(() => {
     if (!selectedProjectId) { setVersions([]); setSelectedVersionId(null); setBoqItems([]); return; }
 
-    // Fetch versions - excluding approved ones to declutter the active selection list
-    apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId)}?type=bom&excludeApproved=true`, { headers: {} })
+    // Fetch all versions (including approved ones)
+    apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId)}?type=bom`, { headers: {} })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return;
