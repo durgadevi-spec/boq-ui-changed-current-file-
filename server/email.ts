@@ -717,3 +717,57 @@ export async function sendCommentMentionEmail(
     // Don't throw — email failure should not block the comment
   }
 }
+
+/**
+ * Send password updated notification email
+ */
+export async function sendPasswordUpdatedEmail(
+  to: string,
+  username?: string
+) {
+  if (!resend) {
+    console.warn("[EMAIL] Resend not configured — skipping password updated notification");
+    return;
+  }
+
+  try {
+    const emailHtml = `
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h1 style="color: #2563eb; margin: 0;">BOQ Management System</h1>
+          <p style="color: #64748b; font-size: 16px;">Security Alert: Password Changed</p>
+        </div>
+        <div style="background-color: #f8fafc; padding: 20px; border-radius: 6px;">
+          <p style="font-size: 16px; color: #1e293b;">Hello${username ? ' ' + username : ''},</p>
+          <p style="font-size: 14px; color: #475569; line-height: 1.5;">
+            This email is to confirm that the password for your BOQ Management System account has been recently updated.
+          </p>
+          <p style="font-size: 14px; color: #475569; line-height: 1.5;">
+            If you made this change, no further action is required.
+          </p>
+          <div style="background-color: #fff1f2; border: 1px solid #fecdd3; border-radius: 6px; padding: 12px; margin-top: 20px;">
+            <p style="margin: 0; font-size: 14px; color: #9f1239;">
+              <strong>Didn't make this change?</strong> Please contact the system administrator immediately to secure your account.
+            </p>
+          </div>
+        </div>
+        <div style="margin-top: 20px; text-align: center; font-size: 12px; color: #94a3b8;">
+          © ${new Date().getFullYear()} BOQ Management System. All rights reserved.
+        </div>
+      </div>
+    `;
+
+    const response = await resend.emails.send({
+      from: fromEmail,
+      to,
+      subject: "Security Alert: Your Password Was Changed",
+      html: emailHtml,
+    });
+
+    console.log("[EMAIL] Password update notification sent to:", to);
+    return response;
+  } catch (error) {
+    console.error("[EMAIL ERROR] sendPasswordUpdatedEmail:", error);
+    // Don't throw to prevent breaking the password update flow
+  }
+}

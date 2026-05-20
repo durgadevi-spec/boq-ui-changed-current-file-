@@ -7,7 +7,7 @@ import { comparePasswords, generateToken, hashPassword } from "./auth";
 import { authMiddleware, requireRole, requireRoleOrPermission } from "./middleware";
 import { randomUUID } from "crypto";
 import { query } from "./db/client";
-import { sendSketchPlanEmail, sendSiteReportEmail, sendProposalStatusEmail, sendMaterialRateChangeEmail, sendCommentMentionEmail } from "./email";
+import { sendSketchPlanEmail, sendSiteReportEmail, sendProposalStatusEmail, sendMaterialRateChangeEmail, sendCommentMentionEmail, sendPasswordUpdatedEmail } from "./email";
 import { logActivity } from "./audit";
 import { registerSketchRoutes } from "./sketch_routes";
 import { convertSketchToBoqItems } from "./lib/sketch_converter";
@@ -1787,6 +1787,9 @@ export async function registerRoutes(
       if (storage.updateUserPassword) {
         const hashedPassword = await hashPassword(newPassword);
         await storage.updateUserPassword(user.id, hashedPassword);
+        
+        // Send email notification
+        await sendPasswordUpdatedEmail(email, user.fullName || user.username);
       }
 
       console.log(`Password updated for: ${email}`);
