@@ -11,6 +11,7 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUserPassword?(id: string, newPasswordHash: string): Promise<void>;
   getAllUsers?(): Promise<User[]>;
   logActivity?(data: any): Promise<void>;
   getAuditLogs?(): Promise<any[]>;
@@ -320,6 +321,13 @@ export class PostgresStorage implements IStorage {
     return this.mapDbUser(insertResult.rows[0]);
   }
 
+  async updateUserPassword(id: string, newPasswordHash: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE users SET password = $1 WHERE id = $2`,
+      [newPasswordHash, id]
+    );
+  }
+
   async getAllUsers(): Promise<User[]> {
     const result = await this.pool.query(
       `
@@ -402,6 +410,14 @@ export class MemStorage implements IStorage {
 
   async getUserByUsername(username: string) {
     return [...this.users.values()].find((u) => u.username === username);
+  }
+
+  async updateUserPassword(id: string, newPasswordHash: string): Promise<void> {
+    const user = this.users.get(id);
+    if (user) {
+      user.password = newPasswordHash;
+      this.users.set(id, user);
+    }
   }
 
   async getAllUsers() {

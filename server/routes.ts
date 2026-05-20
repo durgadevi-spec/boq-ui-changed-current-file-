@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { comparePasswords, generateToken } from "./auth";
+import { comparePasswords, generateToken, hashPassword } from "./auth";
 import { authMiddleware, requireRole, requireRoleOrPermission } from "./middleware";
 import { randomUUID } from "crypto";
 import { query } from "./db/client";
@@ -1768,33 +1768,31 @@ export async function registerRoutes(
   // POST /api/auth/forgot-password - Request password reset
   app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
     try {
-      const { email } = req.body;
+      const { email, newPassword } = req.body;
 
-      if (!email) {
-        res.status(400).json({ message: "Email is required" });
+      if (!email || !newPassword) {
+        res.status(400).json({ message: "Email and new password are required" });
         return;
       }
 
       // Check if user exists
       const user = await storage.getUserByUsername(email);
       if (!user) {
-        // Don't reveal if email exists or not for security
         res.status(200).json({
-          message: "If the email exists, a reset link has been sent",
+          message: "Password updated successfully",
         });
         return;
       }
 
-      // TODO: Implement actual password reset logic
-      // - Generate reset token
-      // - Store token with expiry
-      // - Send email with reset link
+      if (storage.updateUserPassword) {
+        const hashedPassword = await hashPassword(newPassword);
+        await storage.updateUserPassword(user.id, hashedPassword);
+      }
 
-      // For now, just return success
-      console.log(`Password reset requested for: ${email}`);
+      console.log(`Password updated for: ${email}`);
       res
         .status(200)
-        .json({ message: "Password reset link sent to your email" });
+        .json({ message: "Password updated successfully" });
     } catch (error) {
       console.error("Forgot password error:", error);
       res.status(500).json({ message: "Internal server error" });

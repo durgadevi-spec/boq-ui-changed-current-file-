@@ -13,14 +13,15 @@ export default function ForgotPassword() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!email.trim()) {
+    if (!email.trim() || !newPassword.trim()) {
       toast({
         title: "Error",
-        description: "Email address is required",
+        description: "Email address and new password are required",
         variant: "destructive",
       });
       return;
@@ -35,22 +36,22 @@ export default function ForgotPassword() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, newPassword }),
       });
 
       if (response.ok) {
         toast({
           title: "Success",
-          description: "Password reset link sent to your email address",
+          description: "Your password has been updated successfully",
         });
         setLocation("/");
       } else {
-        throw new Error("Failed to send reset link");
+        throw new Error("Failed to update password");
       }
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to send reset link. Please try again.",
+        description: "Failed to update password. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -73,7 +74,7 @@ export default function ForgotPassword() {
             </div>
             <CardTitle className="text-center text-2xl font-bold text-gray-900">Forgot Password</CardTitle>
             <CardDescription className="text-center text-gray-600">
-              Enter your registered email address to receive a password reset link.
+              Enter your registered email address and your new password.
             </CardDescription>
           </CardHeader>
 
@@ -91,12 +92,24 @@ export default function ForgotPassword() {
                 />
               </div>
 
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-gray-700">New Password</Label>
+                <Input
+                  type="password"
+                  placeholder="Enter new password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  className="h-11"
+                />
+              </div>
+
               <Button
                 type="submit"
                 className="w-full h-11 text-base font-semibold bg-blue-600 hover:bg-blue-700"
                 disabled={isLoading}
               >
-                {isLoading ? "Sending..." : "Send Reset Link"}
+                {isLoading ? "Updating..." : "Update Password"}
               </Button>
             </form>
           </CardContent>
