@@ -17,7 +17,7 @@ import {
   ShieldAlert, Cloud, Check, AlertCircle, AlertTriangle, FileUp, FileSpreadsheet, 
   Download, Paperclip, ArrowUp, ArrowDown, ArrowUpToLine, ArrowDownToLine, 
   GitBranch, Store, ChevronDown, ChevronLeft, ChevronRight, ArrowUpDown, 
-  ArrowDownAz, Users, Copy, Loader2, Zap, Calculator, Eye, Upload, Mic, MicOff, UserCircle 
+  ArrowDownAz, Users, Copy, Loader2, Zap, Calculator, Eye, Upload, Mic, MicOff, UserCircle, Settings
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription, DialogClose } from "@/components/ui/dialog";
@@ -84,6 +84,32 @@ interface PlanItem {
   user_task_status?: string;
   sort_order?: number;
 }
+
+interface ColumnVisibility {
+  notes: boolean;
+  category: boolean;
+  itemProduct: boolean;
+  unit: boolean;
+  dimensions: boolean;
+  qty: boolean;
+  assignee: boolean;
+  pre: boolean;
+  post: boolean;
+  del: boolean;
+}
+
+const DEFAULT_COLUMN_VISIBILITY: ColumnVisibility = {
+  notes: true,
+  category: true,
+  itemProduct: true,
+  unit: true,
+  dimensions: true,
+  qty: true,
+  assignee: true,
+  pre: true,
+  post: true,
+  del: true
+};
 
 const parseImages = (imageField: any): string[] => {
   if (!imageField) return [];
@@ -247,7 +273,7 @@ const SketchPlanRow = React.memo(({
   isSelected, toggleSelect, userRole, onImageDragStart, onImageDrop,
   addDimension, removeDimension, updateDimension, cloneItem, categories,
   includeSupply, setIncludeSupply, includeLabour, setIncludeLabour,
-  openNotesIdx
+  openNotesIdx, columnVisibility
 }: any) => {
   const [itemSearchTab, setItemSearchTab] = useState<"all" | "material" | "product">("all");
   const [showQuickSelection, setShowQuickSelection] = useState(true);
@@ -312,657 +338,669 @@ const SketchPlanRow = React.memo(({
           </SelectContent>
         </Select>
       </td>
-      <td className={cn("px-1", isCompact ? "py-0 w-[130px] min-w-[130px]" : "py-2 w-[220px] min-w-[220px] max-w-[220px]")}>
-        <Dialog onOpenChange={(open) => {
-          if (open) {
-            setOpenNotesIdx(idx);
-            setMaterialSearch(item.description || "");
-          } else if (openNotesIdx === idx) {
-            setOpenNotesIdx(null);
-            setMaterialSearch("");
-          }
-        }}>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DialogTrigger asChild>
-                  <div className={cn("cursor-pointer hover:bg-slate-100 p-0.5 rounded flex items-center justify-between group border border-transparent hover:border-slate-200 w-full", isLocked && "pointer-events-auto hover:bg-transparent", isCompact ? "min-h-[22px]" : "min-h-[32px]")}>
-                    <div className="flex-1 overflow-hidden">
-                      {item.description ? (
-                        <p className={cn("line-clamp-1 text-slate-700 font-medium italic leading-tight", isCompact ? "text-[9px]" : "text-[11px]")}>"{item.description}"</p>
-                      ) : (
-                        <p className={cn("text-slate-400 italic", isCompact ? "text-[9px]" : "text-[11px]")}>No notes...</p>
-                      )}
-                    </div>
-                    <MessageSquare className={cn("text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity ml-1 shrink-0", isCompact ? "w-2.5 h-2.5" : "w-3 h-3")} />
-                  </div>
-                </DialogTrigger>
-              </TooltipTrigger>
-              {item.description && (
-                <TooltipContent side="top" className="max-w-[350px] bg-slate-900 text-white py-2 px-3 rounded-md shadow-lg border border-slate-700 z-[100]">
-                  <p className="text-[12px] font-medium leading-relaxed whitespace-normal">"{item.description}"</p>
-                </TooltipContent>
-              )}
-            </Tooltip>
-          </TooltipProvider>
-
-          <DialogContent className="sm:max-w-[750px] max-h-[90vh] flex flex-col p-0">
-            <DialogHeader className="p-6 pb-2">
-              <DialogTitle>Notes for {item.item_name || `Item ${displayIdx}`}</DialogTitle>
-            </DialogHeader>
-            <div className="flex-1 overflow-y-auto p-6 pt-2 custom-scrollbar space-y-4">
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <Label className="text-xs font-bold uppercase text-slate-500">Main Item Notes (Site Specifications)</Label>
-                  <div className="flex items-center gap-4 px-3 py-1 bg-slate-50 rounded-full border border-slate-200">
-                    <div className="flex items-center space-x-1.5">
-                      <Checkbox
-                        id={`notes-supply-${idx}`}
-                        checked={includeSupply}
-                        onCheckedChange={(checked) => setIncludeSupply(!!checked)}
-                        className="h-3.5 w-3.5"
-                      />
-                      <Label htmlFor={`notes-supply-${idx}`} className="text-[10px] font-bold text-slate-600 cursor-pointer">Supply</Label>
-                    </div>
-                    <div className="flex items-center space-x-1.5">
-                      <Checkbox
-                        id={`notes-labour-${idx}`}
-                        checked={includeLabour}
-                        onCheckedChange={(checked) => setIncludeLabour(!!checked)}
-                        className="h-3.5 w-3.5"
-                      />
-                      <Label htmlFor={`notes-labour-${idx}`} className="text-[10px] font-bold text-slate-600 cursor-pointer">Labour</Label>
-                    </div>
-                  </div>
-                </div>
-                  <div className="flex items-center gap-2 relative">
-                    <Textarea
-                      value={item.description}
-                      onChange={(e) => {
-                        updateItem(idx, "description", e.target.value);
-                        setMaterialSearch(e.target.value);
-                      }}
-                      onFocus={() => {
-                        setOpenNotesIdx(idx);
-                        setMaterialSearch(item.description || "");
-                      }}
-                      placeholder="Enter detailed site notes... (Speak or type)"
-                      className="min-h-[100px] resize-none focus:ring-2 focus:ring-indigo-500/20 pr-10"
-                      disabled={isLocked}
-                    />
-                    <Button 
-                      size="icon" 
-                      variant="ghost" 
-                      className={cn("absolute right-2 bottom-2 rounded-full", isListeningNotes ? "text-red-500 animate-pulse bg-red-50" : "text-slate-400")}
-                      onClick={() => isListeningNotes ? stopNotes() : startNotes()}
-                    >
-                      {isListeningNotes ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
-                    </Button>
-                  </div>
-                
-                {/* Embedded Search Results inside Notes Dialog */}
-                {materialSearch.trim().length >= 2 && (
-                  <div className="mt-2 border rounded-lg bg-white shadow-sm overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div 
-                      className="bg-slate-50 px-3 py-1.5 border-b flex items-center justify-between cursor-pointer hover:bg-slate-100 transition-colors"
-                      onClick={() => setShowQuickSelection(!showQuickSelection)}
-                    >
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                        {showQuickSelection ? <ChevronDown className="w-3 h-3 text-indigo-500" /> : <ChevronRight className="w-3 h-3 text-slate-400" />}
-                        Quick Item Selection {searching && "..."}
-                      </span>
-                      {searching && <Loader2 className="w-3 h-3 animate-spin text-indigo-500" />}
-                    </div>
-                    {showQuickSelection && (
-                      <div className="max-h-[200px] overflow-y-auto divide-y divide-slate-100 custom-scrollbar">
-                      {searchResults
-                        .filter((m: any) => {
-                          if (m.type === "Template") return false;
-
-                          const nameLower = (m.name || "").toLowerCase();
-                          const labourKeywords = ["labour", "service", "installation", "install", "refixing", "removing", "fixing", "fitting", "work", "charges", "repair", "maintenance"];
-                          const isLabourItem = labourKeywords.some(key => nameLower.includes(key));
-                          const isSupplyItem = !isLabourItem;
-
-                          // Both checked -> Only show Products
-                          if (includeSupply && includeLabour) {
-                            return m.type === "Product";
-                          }
-                          
-                          // Supply checked -> Only show Materials that are supply items
-                          if (includeSupply && !includeLabour) {
-                            return m.type === "Material" && isSupplyItem;
-                          }
-
-                          // Labour checked -> Only show Materials that are labour items
-                          if (!includeSupply && includeLabour) {
-                            return m.type === "Material" && isLabourItem;
-                          }
-
-                          // Both unchecked -> show both Materials and Products as fallback
-                          return m.type === "Material" || m.type === "Product";
-                        })
-                        .sort((a: any, b: any) => {
-                          // Prioritize Products in the results
-                          if (a.type === 'Product' && b.type !== 'Product') return -1;
-                          if (a.type !== 'Product' && b.type === 'Product') return 1;
-                          return (a.name || "").localeCompare(b.name || "");
-                        })
-                        .slice(0, 15) // Show a few more for better choice
-                        .map((m: any) => {
-                          const isProduct = m.type === 'Product';
-                          return (
-                            <div 
-                              key={`${m.type}-${m.id}`}
-                              className={cn(
-                                "p-2 hover:bg-indigo-50 cursor-pointer transition-colors flex items-center justify-between group",
-                                isProduct && "bg-blue-50/30 border-l-2 border-l-blue-400"
-                              )}
-                              onClick={() => {
-                                selectMaterial(idx, m);
-                                setMaterialSearch("");
-                                toast({ title: "Item Updated", description: `Selected ${m.type}: ${m.name}` });
-                              }}
-                            >
-                              <div className="flex flex-col">
-                                <div className="flex items-center gap-2">
-                                  <span className={cn("font-semibold text-xs text-slate-700", isProduct && "text-blue-700")}>{m.name}</span>
-                                  <Badge variant={isProduct ? "default" : "outline"} className={cn("text-[8px] h-3.5 px-1 uppercase tracking-tighter scale-90", isProduct && "bg-blue-600")}>{m.type}</Badge>
-                                  {m.rate && (
-                                    <span className="ml-2 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 rounded">₹{m.rate}</span>
-                                  )}
-                                </div>
-                                <span className="text-[9px] text-slate-400 font-medium italic truncate max-w-[400px]">
-                                  {m.category || "Uncategorized"} {m.code ? `• ${m.code}` : ''} {m.unit ? `• Per ${m.unit}` : ''}
-                                </span>
-                              </div>
-                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-indigo-600">
-                                <Plus className="w-3.5 h-3.5" />
-                              </Button>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                </div>
-              )}
-              </div>
-
-              <div className="border-t pt-4">
-                <div className="flex justify-between items-center mb-3">
-                  <Label className="text-xs font-bold uppercase text-slate-500">Sub-Notes (Per Dimension Row)</Label>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-[10px] bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
-                    onClick={() => addDimension(idx)}
-                    disabled={isLocked}
-                  >
-                    <Plus className="w-3 h-3 mr-1" /> Add Sub Note
-                  </Button>
-                </div>
-
-                <div className="space-y-4">
-                  {dims.map((dim: any, dIdx: number) => (
-                    <div key={dim.id} className="flex gap-3 items-start bg-slate-50 p-3 rounded-lg border border-slate-100 shadow-sm">
-                      <div className="flex-1">
-                        <Label className="text-[10px] text-slate-400 font-bold mb-1.5 block uppercase tracking-tight">
-                          {dIdx === 0 ? "Linked to Main Notes" : `Sub Note #${dIdx}`}
-                        </Label>
-                        <Input
-                          value={dIdx === 0 ? item.description : (dim.note || "")}
-                          onChange={(e) => {
-                            if (dIdx === 0) {
-                              updateItem(idx, "description", e.target.value);
-                            } else {
-                              updateDimension(idx, dIdx, "note" as any, e.target.value);
-                            }
-                          }}
-                          placeholder={dIdx === 0 ? "Main notes..." : "Enter sub-note for this dimension..."}
-                          className="h-9 text-xs bg-white"
-                          disabled={isLocked}
-                        />
-                      </div>
-                      <div className="w-[180px] shrink-0">
-                        <Label className="text-[10px] text-slate-400 font-bold mb-1.5 block text-center uppercase tracking-tight">Dimensions (L / W / H)</Label>
-                        <div className="flex gap-1 px-1">
-                          <Input
-                            value={Number(dim.length) === 0 ? "" : dim.length}
-                            onChange={(e) => updateDimension(idx, dIdx, "length", e.target.value)}
-                            placeholder="L"
-                            className="h-9 text-[11px] text-center px-0.5 font-bold bg-white border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                            disabled={isLocked}
-                          />
-                          <div className="flex items-center text-slate-300 px-0.5">/</div>
-                          <Input
-                            value={Number(dim.width) === 0 ? "" : dim.width}
-                            onChange={(e) => updateDimension(idx, dIdx, "width", e.target.value)}
-                            placeholder="W"
-                            className="h-9 text-[11px] text-center px-0.5 font-bold bg-white border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                            disabled={isLocked}
-                          />
-                          <div className="flex items-center text-slate-300 px-0.5">/</div>
-                          <Input
-                            value={Number(dim.height) === 0 ? "" : dim.height}
-                            onChange={(e) => updateDimension(idx, dIdx, "height", e.target.value)}
-                            placeholder="H"
-                            className="h-9 text-[11px] text-center px-0.5 font-bold bg-white border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                            disabled={isLocked}
-                          />
-                        </div>
-                      </div>
-                      {dIdx > 0 && (
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="h-9 w-9 text-red-400 mt-5 hover:bg-red-50 hover:text-red-500 rounded-md"
-                          onClick={() => removeDimension(idx, dIdx)}
-                          disabled={isLocked}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <DialogFooter className="p-6 border-t bg-slate-50/50">
-              <DialogTrigger asChild>
-                <Button className="bg-indigo-600 text-white hover:bg-indigo-700 h-10 px-8 text-sm font-bold shadow-lg shadow-indigo-100">Save Changes</Button>
-              </DialogTrigger>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </td>
-      <td className={cn("px-1", isCompact ? "py-0 w-[80px] min-w-[80px]" : "py-2 w-[100px] min-w-[100px] max-w-[100px]")}>
-        <Popover>
-          <PopoverTrigger asChild>
-            <div className={cn("bg-slate-50 border border-slate-200 rounded px-1.5 flex items-center h-8 cursor-pointer hover:border-indigo-400", isCompact ? "h-6" : "h-8")}>
-              <span className={cn("truncate font-bold italic text-slate-500", isCompact ? "text-[8px]" : "text-[10px]")}>
-                {item.category || "-"}
-              </span>
-            </div>
-          </PopoverTrigger>
-          <PopoverContent className="p-0 w-[200px]" align="start">
-            <Command>
-              <CommandInput placeholder="Search category..." className="h-8 text-xs" />
-              <CommandList className="max-h-[200px]">
-                <CommandEmpty>No category found.</CommandEmpty>
-                <CommandGroup heading="Existing Categories">
-                  {categories.map((catName: string, cIdx: number) => (
-                    <CommandItem
-                      key={cIdx}
-                      onSelect={() => {
-                        updateItem(idx, "category", catName);
-                      }}
-                      className="text-xs cursor-pointer"
-                    >
-                      {catName}
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </CommandList>
-            </Command>
-            <div className="p-2 border-t bg-slate-50">
-              <Input
-                placeholder="Manual entry..."
-                className="h-8 text-xs"
-                value={item.category || ""}
-                onChange={(e) => updateItem(idx, "category", e.target.value)}
-              />
-            </div>
-          </PopoverContent>
-        </Popover>
-      </td>
-      <td className={cn("px-2", isCompact ? "py-0 w-[120px] min-w-[120px] max-w-[120px]" : "py-2 w-[160px] min-w-[160px] max-w-[160px]")}>
-        <Dialog modal={false} open={openPopoverIdx === idx} onOpenChange={(open) => {
-          if (open) {
-            setOpenPopoverIdx(idx);
-            setMaterialSearch("");
-            loadMaterials();
-          } else {
-            setOpenPopoverIdx(null);
-          }
-        }}>
-          <div className="flex items-center gap-1 w-full">
-            <div className="flex-1 min-w-0">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DialogTrigger asChild>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className={cn(
-                          "w-full justify-start text-left font-normal border-dashed border-slate-300 hover:border-indigo-400 p-1.5 flex items-center gap-1", 
-                          isLocked && "pointer-events-auto hover:bg-transparent", 
-                          isCompact ? "min-h-[24px] text-[9px]" : "min-h-[32px] text-[11px]",
-                          item.item_name ? "h-auto" : (isCompact ? "h-6" : "h-8")
-                        )} 
-                        disabled={isLocked}
-                      >
-                        {item.item_name ? (
-                          <span className="line-clamp-2 text-slate-700 font-medium leading-tight whitespace-normal break-words flex-1 pr-1">
-                            {item.item_name}
-                          </span>
+      {columnVisibility.notes && (
+        <td className={cn("px-1", isCompact ? "py-0 w-[130px] min-w-[130px]" : "py-2 w-[220px] min-w-[220px] max-w-[220px]")}>
+          <Dialog onOpenChange={(open) => {
+            if (open) {
+              setOpenNotesIdx(idx);
+              setMaterialSearch(item.description || "");
+            } else if (openNotesIdx === idx) {
+              setOpenNotesIdx(null);
+              setMaterialSearch("");
+            }
+          }}>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DialogTrigger asChild>
+                    <div className={cn("cursor-pointer hover:bg-slate-100 p-0.5 rounded flex items-center justify-between group border border-transparent hover:border-slate-200 w-full", isLocked && "pointer-events-auto hover:bg-transparent", isCompact ? "min-h-[22px]" : "min-h-[32px]")}>
+                      <div className="flex-1 overflow-hidden">
+                        {item.description ? (
+                          <p className={cn("line-clamp-1 text-slate-700 font-medium italic leading-tight", isCompact ? "text-[9px]" : "text-[11px]")}>"{item.description}"</p>
                         ) : (
-                          <span className="text-slate-400 italic font-normal flex-1">+ Add Item</span>
+                          <p className={cn("text-slate-400 italic", isCompact ? "text-[9px]" : "text-[11px]")}>No notes...</p>
                         )}
-                        <Search className={cn("ml-auto opacity-50 shrink-0", isCompact ? "h-2.5 w-2.5" : "h-3.5 w-3.5")} />
-                      </Button>
-                    </DialogTrigger>
-                  </TooltipTrigger>
-                  {item.item_name && (
-                    <TooltipContent side="top" className="max-w-[350px] bg-slate-900 text-white py-2 px-3 rounded-md shadow-lg border border-slate-700 z-[100]">
-                      <p className="text-[12px] font-medium leading-relaxed whitespace-normal">{item.item_name}</p>
-                    </TooltipContent>
-                  )}
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-            {item.item_name && !isLocked && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  "text-slate-400 hover:text-red-500 hover:bg-red-50 border border-slate-200 hover:border-red-200 shrink-0",
-                  isCompact ? "h-5 w-5" : "h-7 w-7"
+                      </div>
+                      <MessageSquare className={cn("text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity ml-1 shrink-0", isCompact ? "w-2.5 h-2.5" : "w-3 h-3")} />
+                    </div>
+                  </DialogTrigger>
+                </TooltipTrigger>
+                {item.description && (
+                  <TooltipContent side="top" className="max-w-[350px] bg-slate-900 text-white py-2 px-3 rounded-md shadow-lg border border-slate-700 z-[100]">
+                    <p className="text-[12px] font-medium leading-relaxed whitespace-normal">"{item.description}"</p>
+                  </TooltipContent>
                 )}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  clearItemMaterial();
-                }}
-                title="Clear Item"
-              >
-                <X className={isCompact ? "w-3 h-3" : "w-3.5 h-3.5"} />
-              </Button>
-            )}
-          </div>
-          <DialogContent hideOverlay className="p-0 sm:max-w-[500px] bg-transparent border-none shadow-none [&>button]:hidden pointer-events-none">
-            <Draggable nodeRef={dialogRef} handle=".drag-handle">
-              <div ref={dialogRef} className="bg-white border shadow-lg sm:rounded-lg pointer-events-auto flex flex-col w-full relative">
-                <DialogHeader className="p-4 border-b drag-handle cursor-move bg-slate-50 hover:bg-slate-100 transition-colors select-none rounded-t-lg flex flex-row items-center justify-between">
-                  <DialogTitle>Select Item for Row #{displayIdx}</DialogTitle>
-                  <DialogClose className="rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-                    <X className="h-4 w-4" />
-                    <span className="sr-only">Close</span>
-                  </DialogClose>
-                </DialogHeader>
-                <Command shouldFilter={false}>
-                  <CommandInput
-                    placeholder="Search materials, products..."
-                    value={materialSearch}
-                    onValueChange={setMaterialSearch}
-                    className="h-10"
-                  />
-                  <div className="flex border-b">
-                    <button
-                      onClick={() => setItemSearchTab("all")}
-                      className={cn(
-                        "flex-1 py-1 text-[10px] font-bold uppercase tracking-wider transition-all border-b-2",
-                        itemSearchTab === "all" ? "border-indigo-600 text-indigo-600 bg-indigo-50/50" : "border-transparent text-slate-400 hover:bg-slate-50"
-                      )}
-                    >
-                      All
-                    </button>
-                    <button
-                      onClick={() => setItemSearchTab("material")}
-                      className={cn(
-                        "flex-1 py-1 text-[10px] font-bold uppercase tracking-wider transition-all border-b-2",
-                        itemSearchTab === "material" ? "border-indigo-600 text-indigo-600 bg-indigo-50/50" : "border-transparent text-slate-400 hover:bg-slate-50"
-                      )}
-                    >
-                      Materials
-                    </button>
-                    <button
-                      onClick={() => setItemSearchTab("product")}
-                      className={cn(
-                        "flex-1 py-1 text-[10px] font-bold uppercase tracking-wider transition-all border-b-2",
-                        itemSearchTab === "product" ? "border-indigo-600 text-indigo-600 bg-indigo-50/50" : "border-transparent text-slate-400 hover:bg-slate-50"
-                      )}
-                    >
-                      Products
-                    </button>
+              </Tooltip>
+            </TooltipProvider>
+
+            <DialogContent className="sm:max-w-[750px] max-h-[90vh] flex flex-col p-0">
+              <DialogHeader className="p-6 pb-2">
+                <DialogTitle>Notes for {item.item_name || `Item ${displayIdx}`}</DialogTitle>
+              </DialogHeader>
+              <div className="flex-1 overflow-y-auto p-6 pt-2 custom-scrollbar space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="text-xs font-bold uppercase text-slate-500">Main Item Notes (Site Specifications)</Label>
+                    <div className="flex items-center gap-4 px-3 py-1 bg-slate-50 rounded-full border border-slate-200">
+                      <div className="flex items-center space-x-1.5">
+                        <Checkbox
+                          id={`notes-supply-${idx}`}
+                          checked={includeSupply}
+                          onCheckedChange={(checked) => setIncludeSupply(!!checked)}
+                          className="h-3.5 w-3.5"
+                        />
+                        <Label htmlFor={`notes-supply-${idx}`} className="text-[10px] font-bold text-slate-600 cursor-pointer">Supply</Label>
+                      </div>
+                      <div className="flex items-center space-x-1.5">
+                        <Checkbox
+                          id={`notes-labour-${idx}`}
+                          checked={includeLabour}
+                          onCheckedChange={(checked) => setIncludeLabour(!!checked)}
+                          className="h-3.5 w-3.5"
+                        />
+                        <Label htmlFor={`notes-labour-${idx}`} className="text-[10px] font-bold text-slate-600 cursor-pointer">Labour</Label>
+                      </div>
+                    </div>
                   </div>
-
-                  <CommandList className="max-h-[280px]">
-                    {item.item_name && (
-                      <CommandGroup heading="Currently Selected">
-                        <CommandItem
-                          onSelect={() => setOpenPopoverIdx(null)}
-                          className="bg-indigo-50/80 hover:bg-indigo-100/80 text-indigo-950 font-medium cursor-pointer border-l-4 border-indigo-600 p-2"
-                        >
-                          <div className="flex items-center justify-between w-full">
-                            <div className="flex items-center gap-2 flex-1 min-w-0">
-                              <Check className="w-4 h-4 text-indigo-600 shrink-0" />
-                              <div className="flex flex-col min-w-0 flex-1">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-bold text-sm text-indigo-900">{item.item_name}</span>
-                                  {item.material_id ? (
-                                    <Badge className="text-[10px] scale-90 bg-indigo-600 hover:bg-indigo-600">
-                                      {searchResults.find((m: any) => m.id === item.material_id)?.type || "Selected"}
-                                    </Badge>
-                                  ) : (
-                                    <Badge className="text-[10px] scale-90 bg-slate-600 hover:bg-slate-600">
-                                      Custom Item
-                                    </Badge>
-                                  )}
-                                </div>
-                                <div className="flex gap-2 text-[10px] text-slate-500">
-                                  {item.category && <span>Category: {item.category}</span>}
-                                  {item.unit && <span>Unit: {item.unit}</span>}
-                                </div>
-                              </div>
-                            </div>
-                            {item.rate ? (
-                              <div className="text-right shrink-0 ml-4">
-                                <span className="text-sm font-bold text-indigo-700">₹{item.rate}</span>
-                                <span className="text-[8px] text-slate-400 block uppercase font-bold tracking-tighter">Rate / {item.unit || 'Unit'}</span>
-                              </div>
-                            ) : null}
-                          </div>
-                        </CommandItem>
-                      </CommandGroup>
-                    )}
-
-                    {searching && <CommandEmpty>Loading...</CommandEmpty>}
-                    {!searching && searchResults.length === 0 && <CommandEmpty>No items found.</CommandEmpty>}
-                    {!searching && searchResults.length > 0 && (
-                      <CommandGroup heading={`${itemSearchTab === 'all' ? 'All Items' : itemSearchTab === 'material' ? 'Materials' : 'Products'} (${searchResults.filter((m: any) => {
-                        if (itemSearchTab === "material") return m.type === "Material";
-                        if (itemSearchTab === "product") return m.type === "Product";
-                        return m.type !== "Template"; // 'all' shows Materials and Products
-                      }).length})`}>
+                    <div className="flex items-center gap-2 relative">
+                      <Textarea
+                        value={item.description}
+                        onChange={(e) => {
+                          updateItem(idx, "description", e.target.value);
+                          setMaterialSearch(e.target.value);
+                        }}
+                        onFocus={() => {
+                          setOpenNotesIdx(idx);
+                          setMaterialSearch(item.description || "");
+                        }}
+                        placeholder="Enter detailed site notes... (Speak or type)"
+                        className="min-h-[100px] resize-none focus:ring-2 focus:ring-indigo-500/20 pr-10"
+                        disabled={isLocked}
+                      />
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className={cn("absolute right-2 bottom-2 rounded-full", isListeningNotes ? "text-red-500 animate-pulse bg-red-50" : "text-slate-400")}
+                        onClick={() => isListeningNotes ? stopNotes() : startNotes()}
+                      >
+                        {isListeningNotes ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+                      </Button>
+                    </div>
+                  
+                  {/* Embedded Search Results inside Notes Dialog */}
+                  {materialSearch.trim().length >= 2 && (
+                    <div className="mt-2 border rounded-lg bg-white shadow-sm overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div 
+                        className="bg-slate-50 px-3 py-1.5 border-b flex items-center justify-between cursor-pointer hover:bg-slate-100 transition-colors"
+                        onClick={() => setShowQuickSelection(!showQuickSelection)}
+                      >
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                          {showQuickSelection ? <ChevronDown className="w-3 h-3 text-indigo-500" /> : <ChevronRight className="w-3 h-3 text-slate-400" />}
+                          Quick Item Selection {searching && "..."}
+                        </span>
+                        {searching && <Loader2 className="w-3 h-3 animate-spin text-indigo-500" />}
+                      </div>
+                      {showQuickSelection && (
+                        <div className="max-h-[200px] overflow-y-auto divide-y divide-slate-100 custom-scrollbar">
                         {searchResults
                           .filter((m: any) => {
-                            if (itemSearchTab === "material") return m.type === "Material";
-                            if (itemSearchTab === "product") return m.type === "Product";
-                            return m.type !== "Template";
-                          })
-                          .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""))
-                          .map((m: any) => {
-                            const isSelected = item.material_id === m.id;
+                            if (m.type === "Template") return false;
+
+                            const nameLower = (m.name || "").toLowerCase();
+                            const labourKeywords = ["labour", "service", "installation", "install", "refixing", "removing", "fixing", "fitting", "work", "charges", "repair", "maintenance"];
+                            const isLabourItem = labourKeywords.some(key => nameLower.includes(key));
+                            const isSupplyItem = !isLabourItem;
+
+                            // Both checked -> Only show Products
+                            if (includeSupply && includeLabour) {
+                              return m.type === "Product";
+                            }
                             
+                            // Supply checked -> Only show Materials that are supply items
+                            if (includeSupply && !includeLabour) {
+                              return m.type === "Material" && isSupplyItem;
+                            }
+
+                            // Labour checked -> Only show Materials that are labour items
+                            if (!includeSupply && includeLabour) {
+                              return m.type === "Material" && isLabourItem;
+                            }
+
+                            // Both unchecked -> show both Materials and Products as fallback
+                            return m.type === "Material" || m.type === "Product";
+                          })
+                          .sort((a: any, b: any) => {
+                            // Prioritize Products in the results
+                            if (a.type === 'Product' && b.type !== 'Product') return -1;
+                            if (a.type !== 'Product' && b.type === 'Product') return 1;
+                            return (a.name || "").localeCompare(b.name || "");
+                          })
+                          .slice(0, 15) // Show a few more for better choice
+                          .map((m: any) => {
+                            const isProduct = m.type === 'Product';
                             return (
-                              <CommandItem
+                              <div 
                                 key={`${m.type}-${m.id}`}
-                                onSelect={() => { selectMaterial(idx, m); setOpenPopoverIdx(null); }}
                                 className={cn(
-                                  "cursor-pointer transition-colors",
-                                  isSelected && "bg-indigo-50/50 hover:bg-indigo-100/50 text-indigo-950 font-medium"
+                                  "p-2 hover:bg-indigo-50 cursor-pointer transition-colors flex items-center justify-between group",
+                                  isProduct && "bg-blue-50/30 border-l-2 border-l-blue-400"
                                 )}
+                                onClick={() => {
+                                  selectMaterial(idx, m);
+                                  setMaterialSearch("");
+                                  toast({ title: "Item Updated", description: `Selected ${m.type}: ${m.name}` });
+                                }}
                               >
-                                <div className="flex items-center justify-between w-full">
-                                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                                    {isSelected && (
-                                      <Check className="w-4 h-4 text-indigo-600 shrink-0" />
+                                <div className="flex flex-col">
+                                  <div className="flex items-center gap-2">
+                                    <span className={cn("font-semibold text-xs text-slate-700", isProduct && "text-blue-700")}>{m.name}</span>
+                                    <Badge variant={isProduct ? "default" : "outline"} className={cn("text-[8px] h-3.5 px-1 uppercase tracking-tighter scale-90", isProduct && "bg-blue-600")}>{m.type}</Badge>
+                                    {m.rate && (
+                                      <span className="ml-2 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 rounded">₹{m.rate}</span>
                                     )}
-                                    <div className="flex flex-col min-w-0 flex-1">
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <span className={cn("font-semibold text-sm", isSelected && "text-indigo-900")}>{m.name}</span>
-                                        <Badge variant={isSelected ? "default" : "outline"} className={cn("text-[10px] scale-90", isSelected && "bg-indigo-600 hover:bg-indigo-600")}>{m.type}</Badge>
-                                      </div>
-                                      <div className="flex gap-2 text-[10px] text-slate-500">
-                                        {m.code && <span>Code: {m.code}</span>}
-                                        {m.category && <span>Category: {m.category}</span>}
-                                        {m.unit && <span>Unit: {m.unit}</span>}
-                                      </div>
-                                    </div>
                                   </div>
-                                  {m.rate && (
-                                    <div className="text-right shrink-0 ml-4">
-                                      <span className={cn("text-sm font-bold text-indigo-600", isSelected && "text-indigo-700")}>₹{m.rate}</span>
-                                      <span className="text-[8px] text-slate-400 block uppercase font-bold tracking-tighter">Rate / {m.unit || 'Unit'}</span>
-                                    </div>
-                                  )}
+                                  <span className="text-[9px] text-slate-400 font-medium italic truncate max-w-[400px]">
+                                    {m.category || "Uncategorized"} {m.code ? `• ${m.code}` : ''} {m.unit ? `• Per ${m.unit}` : ''}
+                                  </span>
                                 </div>
-                              </CommandItem>
+                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-indigo-600">
+                                  <Plus className="w-3.5 h-3.5" />
+                                </Button>
+                              </div>
                             );
                           })}
-                      </CommandGroup>
+                      </div>
                     )}
-                  </CommandList>
-                </Command>
-                <div className="p-3 border-t bg-slate-50 flex flex-col gap-2">
-                  <p className="text-[10px] uppercase font-bold text-slate-400">Custom Item</p>
-                  <Input
-                    placeholder="Or type a custom name and press Enter..."
-                    className="h-10 text-sm"
-                    value={item.material_id ? "" : (item.item_name || "")}
-                    onChange={(e) => {
-                      updateItem(idx, "item_name", e.target.value);
-                      if (item.material_id) {
-                        updateItem(idx, "material_id", undefined);
-                        updateItem(idx, "rate", 0);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        setOpenPopoverIdx(null);
-                      }
-                    }}
-                  />
-                </div>
-              </div>
-            </Draggable>
-          </DialogContent>
-        </Dialog>
-      </td>
-      <td className={cn("px-1", isCompact ? "py-0" : "py-2")}>
-        <Select value={item.dimension_unit} onValueChange={(val: any) => updateItem(idx, "dimension_unit", val)} disabled={isLocked}>
-          <SelectTrigger className={cn("text-[9px] py-0 px-1 min-w-[50px]", isCompact ? "h-5" : "h-8")}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="z-[110] max-h-[180px] overflow-y-auto">
-            <SelectItem value="feet">ft</SelectItem>
-            <SelectItem value="mm">mm</SelectItem>
-            <SelectItem value="inch">inch</SelectItem>
-            <SelectItem value="cm">cm</SelectItem>
-            <SelectItem value="meter">m</SelectItem>
-            <SelectItem value="sqft">sqft</SelectItem>
-            <SelectItem value="sqmt">sqmt</SelectItem>
-            <SelectItem value="rft">rft</SelectItem>
-            <SelectItem value="rmt">rmt</SelectItem>
-            <SelectItem value="nos">nos</SelectItem>
-            <SelectItem value="pcs">pcs</SelectItem>
-            <SelectItem value="kg">kg</SelectItem>
-            <SelectItem value="litre">ltr</SelectItem>
-            <SelectItem value="set">set</SelectItem>
-            <SelectItem value="ls">LS</SelectItem>
-          </SelectContent>
-        </Select>
-      </td>
-      <td className={cn("px-2 align-top border-l w-[110px] min-w-[110px] max-w-[110px]", isCompact ? "py-1" : "py-2")}>
-        <div className="flex flex-col gap-1 w-full h-[calc(100%-4px)] relative justify-center">
-          <div className={cn("relative flex items-center justify-center w-full", isCompact ? "h-5 text-[10px]" : "h-8 text-xs")}>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button type="button" variant="outline" size="sm" className={cn("w-full justify-between px-2 text-slate-500 hover:text-indigo-600 bg-slate-50 relative top-1", isCompact ? "h-5 text-[9px]" : "h-8 text-[11px]", dims.length > 1 && "bg-indigo-100 text-indigo-700 border-indigo-200 font-bold")}>
-                  <span className="truncate">
-                    {dims[0].length || dims[0].width || dims[0].height ? `${dims[0].length || '-'} × ${dims[0].width || '-'} × ${dims[0].height || '-'}` + (dims.length > 1 ? ` (+${dims.length - 1})` : '') : "Add Dims"}
-                  </span>
-                  <ChevronDown className="w-3 h-3 ml-1 shrink-0" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[300px] p-3 shadow-xl z-[200]">
-                <div className="flex justify-between items-center mb-3 border-b pb-2">
-                  <div className="flex items-center gap-2">
-                    <Layers className="w-3.5 h-3.5 text-indigo-500" />
-                    <span className="font-bold text-[10px] uppercase text-slate-500 tracking-wider">Site Measurements</span>
                   </div>
-                  {!isLocked && (
-                    <Button type="button" size="sm" variant="ghost" onClick={() => addDimension(idx)} className="h-6 px-2 text-[10px] text-indigo-600 hover:bg-indigo-50 font-bold uppercase">
+                )}
+                </div>
+
+                <div className="border-t pt-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <Label className="text-xs font-bold uppercase text-slate-500">Sub-Notes (Per Dimension Row)</Label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[10px] bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
+                      onClick={() => addDimension(idx)}
+                      disabled={isLocked}
+                    >
                       <Plus className="w-3 h-3 mr-1" /> Add Sub Note
                     </Button>
-                  )}
-                </div>
-                <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1 custom-scrollbar">
-                  {dims.map((dim: any, dIdx: number) => (
-                    <div key={dim.id} className={cn("bg-white border rounded-lg shadow-sm overflow-hidden", dIdx === 0 ? "border-slate-200" : "border-indigo-100")}>
-                      <div className={cn("px-2 py-1.5 flex items-center gap-2", dIdx === 0 ? "bg-slate-50" : "bg-indigo-50/50")}>
-                        {dIdx === 0 ? (
-                          <FileText className="w-3 h-3 text-slate-400" />
-                        ) : (
-                          <GitBranch className="w-3 h-3 text-indigo-400" />
-                        )}
-                        <span className={cn("text-[9px] font-bold uppercase truncate flex-1", dIdx === 0 ? "text-slate-500" : "text-indigo-600")}>
-                          {dIdx === 0 ? "Primary Dimensions" : `Sub: ${dim.note || 'Untitled'}`}
-                        </span>
-                        {dIdx > 0 && (
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <button className="p-0.5 hover:bg-indigo-100 rounded text-indigo-400">
-                                <ChevronDown className="w-3 h-3" />
-                              </button>
-                            </PopoverTrigger>
-                            <PopoverContent side="right" className="w-[200px] p-2 text-[10px] bg-slate-900 text-white border-slate-700">
-                              <p className="font-bold border-b border-slate-700 pb-1 mb-1">Sub Note Detail</p>
-                              <p className="italic text-slate-300">"{dim.note || 'No description provided'}"</p>
-                            </PopoverContent>
-                          </Popover>
-                        )}
-                        {dIdx > 0 && !isLocked && (
-                          <button type="button" onClick={() => removeDimension(idx, dIdx)} className="p-0.5 hover:bg-red-50 text-red-400 rounded transition-colors ml-1">
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
+                  </div>
 
-                      <div className="p-2 grid grid-cols-3 gap-2">
-                        <div className="space-y-1">
-                          <Label className="text-[8px] text-slate-400 font-bold uppercase block text-center">Length</Label>
-                          <Input value={dim.length} onChange={(e) => updateDimension(idx, dIdx, "length", e.target.value)} placeholder="0" className="h-7 text-[11px] text-center px-1 font-bold" disabled={isLocked} />
+                  <div className="space-y-4">
+                    {dims.map((dim: any, dIdx: number) => (
+                      <div key={dim.id} className="flex gap-3 items-start bg-slate-50 p-3 rounded-lg border border-slate-100 shadow-sm">
+                        <div className="flex-1">
+                          <Label className="text-[10px] text-slate-400 font-bold mb-1.5 block uppercase tracking-tight">
+                            {dIdx === 0 ? "Linked to Main Notes" : `Sub Note #${dIdx}`}
+                          </Label>
+                          <Input
+                            value={dIdx === 0 ? item.description : (dim.note || "")}
+                            onChange={(e) => {
+                              if (dIdx === 0) {
+                                updateItem(idx, "description", e.target.value);
+                              } else {
+                                updateDimension(idx, dIdx, "note" as any, e.target.value);
+                              }
+                            }}
+                            placeholder={dIdx === 0 ? "Main notes..." : "Enter sub-note for this dimension..."}
+                            className="h-9 text-xs bg-white"
+                            disabled={isLocked}
+                          />
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-[8px] text-slate-400 font-bold uppercase block text-center">Width</Label>
-                          <Input value={dim.width} onChange={(e) => updateDimension(idx, dIdx, "width", e.target.value)} placeholder="0" className="h-7 text-[11px] text-center px-1 font-bold" disabled={isLocked} />
+                        <div className="w-[180px] shrink-0">
+                          <Label className="text-[10px] text-slate-400 font-bold mb-1.5 block text-center uppercase tracking-tight">Dimensions (L / W / H)</Label>
+                          <div className="flex gap-1 px-1">
+                            <Input
+                              value={Number(dim.length) === 0 ? "" : dim.length}
+                              onChange={(e) => updateDimension(idx, dIdx, "length", e.target.value)}
+                              placeholder="L"
+                              className="h-9 text-[11px] text-center px-0.5 font-bold bg-white border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                              disabled={isLocked}
+                            />
+                            <div className="flex items-center text-slate-300 px-0.5">/</div>
+                            <Input
+                              value={Number(dim.width) === 0 ? "" : dim.width}
+                              onChange={(e) => updateDimension(idx, dIdx, "width", e.target.value)}
+                              placeholder="W"
+                              className="h-9 text-[11px] text-center px-0.5 font-bold bg-white border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                              disabled={isLocked}
+                            />
+                            <div className="flex items-center text-slate-300 px-0.5">/</div>
+                            <Input
+                              value={Number(dim.height) === 0 ? "" : dim.height}
+                              onChange={(e) => updateDimension(idx, dIdx, "height", e.target.value)}
+                              placeholder="H"
+                              className="h-9 text-[11px] text-center px-0.5 font-bold bg-white border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                              disabled={isLocked}
+                            />
+                          </div>
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-[8px] text-slate-400 font-bold uppercase block text-center">Height</Label>
-                          <Input value={dim.height} onChange={(e) => updateDimension(idx, dIdx, "height", e.target.value)} placeholder="0" className="h-7 text-[11px] text-center px-1 font-bold" disabled={isLocked} />
+                        {dIdx > 0 && (
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-9 w-9 text-red-400 mt-5 hover:bg-red-50 hover:text-red-500 rounded-md"
+                            onClick={() => removeDimension(idx, dIdx)}
+                            disabled={isLocked}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <DialogFooter className="p-6 border-t bg-slate-50/50">
+                <DialogTrigger asChild>
+                  <Button className="bg-indigo-600 text-white hover:bg-indigo-700 h-10 px-8 text-sm font-bold shadow-lg shadow-indigo-100">Save Changes</Button>
+                </DialogTrigger>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </td>
+      )}
+      {columnVisibility.category && (
+        <td className={cn("px-1", isCompact ? "py-0 w-[80px] min-w-[80px]" : "py-2 w-[100px] min-w-[100px] max-w-[100px]")}>
+          <Popover>
+            <PopoverTrigger asChild>
+              <div className={cn("bg-slate-50 border border-slate-200 rounded px-1.5 flex items-center h-8 cursor-pointer hover:border-indigo-400", isCompact ? "h-6" : "h-8")}>
+                <span className={cn("truncate font-bold italic text-slate-500", isCompact ? "text-[8px]" : "text-[10px]")}>
+                  {item.category || "-"}
+                </span>
+              </div>
+            </PopoverTrigger>
+            <PopoverContent className="p-0 w-[200px]" align="start">
+              <Command>
+                <CommandInput placeholder="Search category..." className="h-8 text-xs" />
+                <CommandList className="max-h-[200px]">
+                  <CommandEmpty>No category found.</CommandEmpty>
+                  <CommandGroup heading="Existing Categories">
+                    {categories.map((catName: string, cIdx: number) => (
+                      <CommandItem
+                        key={cIdx}
+                        onSelect={() => {
+                          updateItem(idx, "category", catName);
+                        }}
+                        className="text-xs cursor-pointer"
+                      >
+                        {catName}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+              <div className="p-2 border-t bg-slate-50">
+                <Input
+                  placeholder="Manual entry..."
+                  className="h-8 text-xs"
+                  value={item.category || ""}
+                  onChange={(e) => updateItem(idx, "category", e.target.value)}
+                />
+              </div>
+            </PopoverContent>
+          </Popover>
+        </td>
+      )}
+      {columnVisibility.itemProduct && (
+        <td className={cn("px-2", isCompact ? "py-0 w-[120px] min-w-[120px] max-w-[120px]" : "py-2 w-[160px] min-w-[160px] max-w-[160px]")}>
+          <Dialog modal={false} open={openPopoverIdx === idx} onOpenChange={(open) => {
+            if (open) {
+              setOpenPopoverIdx(idx);
+              setMaterialSearch("");
+              loadMaterials();
+            } else {
+              setOpenPopoverIdx(null);
+            }
+          }}>
+            <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 min-w-0">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DialogTrigger asChild>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className={cn(
+                            "w-full justify-start text-left font-normal border-dashed border-slate-300 hover:border-indigo-400 p-1.5 flex items-center gap-1", 
+                            isLocked && "pointer-events-auto hover:bg-transparent", 
+                            isCompact ? "min-h-[24px] text-[9px]" : "min-h-[32px] text-[11px]",
+                            item.item_name ? "h-auto" : (isCompact ? "h-6" : "h-8")
+                          )} 
+                          disabled={isLocked}
+                        >
+                          {item.item_name ? (
+                            <span className="line-clamp-2 text-slate-700 font-medium leading-tight whitespace-normal break-words flex-1 pr-1">
+                              {item.item_name}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 italic font-normal flex-1">+ Add Item</span>
+                          )}
+                          <Search className={cn("ml-auto opacity-50 shrink-0", isCompact ? "h-2.5 w-2.5" : "h-3.5 w-3.5")} />
+                        </Button>
+                      </DialogTrigger>
+                    </TooltipTrigger>
+                    {item.item_name && (
+                      <TooltipContent side="top" className="max-w-[350px] bg-slate-900 text-white py-2 px-3 rounded-md shadow-lg border border-slate-700 z-[100]">
+                        <p className="text-[12px] font-medium leading-relaxed whitespace-normal">{item.item_name}</p>
+                      </TooltipContent>
+                    )}
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              {item.item_name && !isLocked && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    "text-slate-400 hover:text-red-500 hover:bg-red-50 border border-slate-200 hover:border-red-200 shrink-0",
+                    isCompact ? "h-5 w-5" : "h-7 w-7"
+                  )}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    clearItemMaterial();
+                  }}
+                  title="Clear Item"
+                >
+                  <X className={isCompact ? "w-3 h-3" : "w-3.5 h-3.5"} />
+                </Button>
+              )}
+            </div>
+            <DialogContent hideOverlay className="p-0 sm:max-w-[500px] bg-transparent border-none shadow-none [&>button]:hidden pointer-events-none">
+              <Draggable nodeRef={dialogRef} handle=".drag-handle">
+                <div ref={dialogRef} className="bg-white border shadow-lg sm:rounded-lg pointer-events-auto flex flex-col w-full relative">
+                  <DialogHeader className="p-4 border-b drag-handle cursor-move bg-slate-50 hover:bg-slate-100 transition-colors select-none rounded-t-lg flex flex-row items-center justify-between">
+                    <DialogTitle>Select Item for Row #{displayIdx}</DialogTitle>
+                    <DialogClose className="rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+                      <X className="h-4 w-4" />
+                      <span className="sr-only">Close</span>
+                    </DialogClose>
+                  </DialogHeader>
+                  <Command shouldFilter={false}>
+                    <CommandInput
+                      placeholder="Search materials, products..."
+                      value={materialSearch}
+                      onValueChange={setMaterialSearch}
+                      className="h-10"
+                    />
+                    <div className="flex border-b">
+                      <button
+                        onClick={() => setItemSearchTab("all")}
+                        className={cn(
+                          "flex-1 py-1 text-[10px] font-bold uppercase tracking-wider transition-all border-b-2",
+                          itemSearchTab === "all" ? "border-indigo-600 text-indigo-600 bg-indigo-50/50" : "border-transparent text-slate-400 hover:bg-slate-50"
+                        )}
+                      >
+                        All
+                      </button>
+                      <button
+                        onClick={() => setItemSearchTab("material")}
+                        className={cn(
+                          "flex-1 py-1 text-[10px] font-bold uppercase tracking-wider transition-all border-b-2",
+                          itemSearchTab === "material" ? "border-indigo-600 text-indigo-600 bg-indigo-50/50" : "border-transparent text-slate-400 hover:bg-slate-50"
+                        )}
+                      >
+                        Materials
+                      </button>
+                      <button
+                        onClick={() => setItemSearchTab("product")}
+                        className={cn(
+                          "flex-1 py-1 text-[10px] font-bold uppercase tracking-wider transition-all border-b-2",
+                          itemSearchTab === "product" ? "border-indigo-600 text-indigo-600 bg-indigo-50/50" : "border-transparent text-slate-400 hover:bg-slate-50"
+                        )}
+                      >
+                        Products
+                      </button>
+                    </div>
+
+                    <CommandList className="max-h-[280px]">
+                      {item.item_name && (
+                        <CommandGroup heading="Currently Selected">
+                          <CommandItem
+                            onSelect={() => setOpenPopoverIdx(null)}
+                            className="bg-indigo-50/80 hover:bg-indigo-100/80 text-indigo-950 font-medium cursor-pointer border-l-4 border-indigo-600 p-2"
+                          >
+                            <div className="flex items-center justify-between w-full">
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <Check className="w-4 h-4 text-indigo-600 shrink-0" />
+                                <div className="flex flex-col min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-bold text-sm text-indigo-900">{item.item_name}</span>
+                                    {item.material_id ? (
+                                      <Badge className="text-[10px] scale-90 bg-indigo-600 hover:bg-indigo-600">
+                                        {searchResults.find((m: any) => m.id === item.material_id)?.type || "Selected"}
+                                      </Badge>
+                                    ) : (
+                                      <Badge className="text-[10px] scale-90 bg-slate-600 hover:bg-slate-600">
+                                        Custom Item
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="flex gap-2 text-[10px] text-slate-500">
+                                    {item.category && <span>Category: {item.category}</span>}
+                                    {item.unit && <span>Unit: {item.unit}</span>}
+                                  </div>
+                                </div>
+                              </div>
+                              {item.rate ? (
+                                <div className="text-right shrink-0 ml-4">
+                                  <span className="text-sm font-bold text-indigo-700">₹{item.rate}</span>
+                                  <span className="text-[8px] text-slate-400 block uppercase font-bold tracking-tighter">Rate / {item.unit || 'Unit'}</span>
+                                </div>
+                              ) : null}
+                            </div>
+                          </CommandItem>
+                        </CommandGroup>
+                      )}
+
+                      {searching && <CommandEmpty>Loading...</CommandEmpty>}
+                      {!searching && searchResults.length === 0 && <CommandEmpty>No items found.</CommandEmpty>}
+                      {!searching && searchResults.length > 0 && (
+                        <CommandGroup heading={`${itemSearchTab === 'all' ? 'All Items' : itemSearchTab === 'material' ? 'Materials' : 'Products'} (${searchResults.filter((m: any) => {
+                          if (itemSearchTab === "material") return m.type === "Material";
+                          if (itemSearchTab === "product") return m.type === "Product";
+                          return m.type !== "Template"; // 'all' shows Materials and Products
+                        }).length})`}>
+                          {searchResults
+                            .filter((m: any) => {
+                              if (itemSearchTab === "material") return m.type === "Material";
+                              if (itemSearchTab === "product") return m.type === "Product";
+                              return m.type !== "Template";
+                            })
+                            .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""))
+                            .map((m: any) => {
+                              const isSelected = item.material_id === m.id;
+                              
+                              return (
+                                <CommandItem
+                                  key={`${m.type}-${m.id}`}
+                                  onSelect={() => { selectMaterial(idx, m); setOpenPopoverIdx(null); }}
+                                  className={cn(
+                                    "cursor-pointer transition-colors",
+                                    isSelected && "bg-indigo-50/50 hover:bg-indigo-100/50 text-indigo-950 font-medium"
+                                  )}
+                                >
+                                  <div className="flex items-center justify-between w-full">
+                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                      {isSelected && (
+                                        <Check className="w-4 h-4 text-indigo-600 shrink-0" />
+                                      )}
+                                      <div className="flex flex-col min-w-0 flex-1">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className={cn("font-semibold text-sm", isSelected && "text-indigo-900")}>{m.name}</span>
+                                          <Badge variant={isSelected ? "default" : "outline"} className={cn("text-[10px] scale-90", isSelected && "bg-indigo-600 hover:bg-indigo-600")}>{m.type}</Badge>
+                                        </div>
+                                        <div className="flex gap-2 text-[10px] text-slate-500">
+                                          {m.code && <span>Code: {m.code}</span>}
+                                          {m.category && <span>Category: {m.category}</span>}
+                                          {m.unit && <span>Unit: {m.unit}</span>}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {m.rate && (
+                                      <div className="text-right shrink-0 ml-4">
+                                        <span className={cn("text-sm font-bold text-indigo-600", isSelected && "text-indigo-700")}>₹{m.rate}</span>
+                                        <span className="text-[8px] text-slate-400 block uppercase font-bold tracking-tighter">Rate / {m.unit || 'Unit'}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </CommandItem>
+                              );
+                            })}
+                        </CommandGroup>
+                      )}
+                    </CommandList>
+                  </Command>
+                  <div className="p-3 border-t bg-slate-50 flex flex-col gap-2">
+                    <p className="text-[10px] uppercase font-bold text-slate-400">Custom Item</p>
+                    <Input
+                      placeholder="Or type a custom name and press Enter..."
+                      className="h-10 text-sm"
+                      value={item.material_id ? "" : (item.item_name || "")}
+                      onChange={(e) => {
+                        updateItem(idx, "item_name", e.target.value);
+                        if (item.material_id) {
+                          updateItem(idx, "material_id", undefined);
+                          updateItem(idx, "rate", 0);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          setOpenPopoverIdx(null);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              </Draggable>
+            </DialogContent>
+          </Dialog>
+        </td>
+      )}
+      {columnVisibility.unit && (
+        <td className={cn("px-1", isCompact ? "py-0" : "py-2")}>
+          <Select value={item.dimension_unit} onValueChange={(val: any) => updateItem(idx, "dimension_unit", val)} disabled={isLocked}>
+            <SelectTrigger className={cn("text-[9px] py-0 px-1 min-w-[50px]", isCompact ? "h-5" : "h-8")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="z-[110] max-h-[180px] overflow-y-auto">
+              <SelectItem value="feet">ft</SelectItem>
+              <SelectItem value="mm">mm</SelectItem>
+              <SelectItem value="inch">inch</SelectItem>
+              <SelectItem value="cm">cm</SelectItem>
+              <SelectItem value="meter">m</SelectItem>
+              <SelectItem value="sqft">sqft</SelectItem>
+              <SelectItem value="sqmt">sqmt</SelectItem>
+              <SelectItem value="rft">rft</SelectItem>
+              <SelectItem value="rmt">rmt</SelectItem>
+              <SelectItem value="nos">nos</SelectItem>
+              <SelectItem value="pcs">pcs</SelectItem>
+              <SelectItem value="kg">kg</SelectItem>
+              <SelectItem value="litre">ltr</SelectItem>
+              <SelectItem value="set">set</SelectItem>
+              <SelectItem value="ls">LS</SelectItem>
+            </SelectContent>
+          </Select>
+        </td>
+      )}
+      {columnVisibility.dimensions && (
+        <td className={cn("px-2 align-top border-l w-[110px] min-w-[110px] max-w-[110px]", isCompact ? "py-1" : "py-2")}>
+          <div className="flex flex-col gap-1 w-full h-[calc(100%-4px)] relative justify-center">
+            <div className={cn("relative flex items-center justify-center w-full", isCompact ? "h-5 text-[10px]" : "h-8 text-xs")}>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="outline" size="sm" className={cn("w-full justify-between px-2 text-slate-500 hover:text-indigo-600 bg-slate-50 relative top-1", isCompact ? "h-5 text-[9px]" : "h-8 text-[11px]", dims.length > 1 && "bg-indigo-100 text-indigo-700 border-indigo-200 font-bold")}>
+                    <span className="truncate">
+                      {dims[0].length || dims[0].width || dims[0].height ? `${dims[0].length || '-'} × ${dims[0].width || '-'} × ${dims[0].height || '-'}` + (dims.length > 1 ? ` (+${dims.length - 1})` : '') : "Add Dims"}
+                    </span>
+                    <ChevronDown className="w-3 h-3 ml-1 shrink-0" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[300px] p-3 shadow-xl z-[200]">
+                  <div className="flex justify-between items-center mb-3 border-b pb-2">
+                    <div className="flex items-center gap-2">
+                      <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                      <span className="font-bold text-[10px] uppercase text-slate-500 tracking-wider">Site Measurements</span>
+                    </div>
+                    {!isLocked && (
+                      <Button type="button" size="sm" variant="ghost" onClick={() => addDimension(idx)} className="h-6 px-2 text-[10px] text-indigo-600 hover:bg-indigo-50 font-bold uppercase">
+                        <Plus className="w-3 h-3 mr-1" /> Add Sub Note
+                      </Button>
+                    )}
+                  </div>
+                  <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1 custom-scrollbar">
+                    {dims.map((dim: any, dIdx: number) => (
+                      <div key={dim.id} className={cn("bg-white border rounded-lg shadow-sm overflow-hidden", dIdx === 0 ? "border-slate-200" : "border-indigo-100")}>
+                        <div className={cn("px-2 py-1.5 flex items-center gap-2", dIdx === 0 ? "bg-slate-50" : "bg-indigo-50/50")}>
+                          {dIdx === 0 ? (
+                            <FileText className="w-3 h-3 text-slate-400" />
+                          ) : (
+                            <GitBranch className="w-3 h-3 text-indigo-400" />
+                          )}
+                          <span className={cn("text-[9px] font-bold uppercase truncate flex-1", dIdx === 0 ? "text-slate-500" : "text-indigo-600")}>
+                            {dIdx === 0 ? "Primary Dimensions" : `Sub: ${dim.note || 'Untitled'}`}
+                          </span>
+                          {dIdx > 0 && (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button className="p-0.5 hover:bg-indigo-100 rounded text-indigo-400">
+                                  <ChevronDown className="w-3 h-3" />
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent side="right" className="w-[200px] p-2 text-[10px] bg-slate-900 text-white border-slate-700">
+                                <p className="font-bold border-b border-slate-700 pb-1 mb-1">Sub Note Detail</p>
+                                <p className="italic text-slate-300">"{dim.note || 'No description provided'}"</p>
+                              </PopoverContent>
+                            </Popover>
+                          )}
+                          {dIdx > 0 && !isLocked && (
+                            <button type="button" onClick={() => removeDimension(idx, dIdx)} className="p-0.5 hover:bg-red-50 text-red-400 rounded transition-colors ml-1">
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="p-2 grid grid-cols-3 gap-2">
+                          <div className="space-y-1">
+                            <Label className="text-[8px] text-slate-400 font-bold uppercase block text-center">Length</Label>
+                            <Input value={dim.length} onChange={(e) => updateDimension(idx, dIdx, "length", e.target.value)} placeholder="0" className="h-7 text-[11px] text-center px-1 font-bold" disabled={isLocked} />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[8px] text-slate-400 font-bold uppercase block text-center">Width</Label>
+                            <Input value={dim.width} onChange={(e) => updateDimension(idx, dIdx, "width", e.target.value)} placeholder="0" className="h-7 text-[11px] text-center px-1 font-bold" disabled={isLocked} />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[8px] text-slate-400 font-bold uppercase block text-center">Height</Label>
+                            <Input value={dim.height} onChange={(e) => updateDimension(idx, dIdx, "height", e.target.value)} placeholder="0" className="h-7 text-[11px] text-center px-1 font-bold" disabled={isLocked} />
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </PopoverContent>
-            </Popover>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
-        </div>
-      </td>
-      <td className={cn("px-1 align-top w-[80px] min-w-[80px] max-w-[80px]", isCompact ? "py-1" : "py-2")}>
-        <div className="flex flex-col gap-1 w-full relative h-[calc(100%-4px)]">
-          <div className={cn("relative flex items-center justify-center top-1")}>
-            <Input value={item.qty} onChange={(e) => updateItem(idx, "qty", e.target.value)} className={cn("bg-slate-50 font-bold text-indigo-700 px-1 w-full max-w-[80px] text-center", isCompact ? "h-5 text-[10px]" : "h-8 text-xs")} disabled={isLocked} />
+        </td>
+      )}
+      {columnVisibility.qty && (
+        <td className={cn("px-1 align-top w-[80px] min-w-[80px] max-w-[80px]", isCompact ? "py-1" : "py-2")}>
+          <div className="flex flex-col gap-1 w-full relative h-[calc(100%-4px)]">
+            <div className={cn("relative flex items-center justify-center top-1")}>
+              <Input value={item.qty} onChange={(e) => updateItem(idx, "qty", e.target.value)} className={cn("bg-slate-50 font-bold text-indigo-700 px-1 w-full max-w-[80px] text-center", isCompact ? "h-5 text-[10px]" : "h-8 text-xs")} disabled={isLocked} />
+            </div>
           </div>
-        </div>
-      </td>
-      {!isSupplier && (
+        </td>
+      )}
+      {columnVisibility.assignee && !isSupplier && (
         <td className={cn("px-1", isCompact ? "py-0" : "py-2")}>
           <div className="flex flex-col gap-0.5">
             {item.vendor_name && (
@@ -988,60 +1026,64 @@ const SketchPlanRow = React.memo(({
           </div>
         </td>
       )}
-      {/* Pre-work Photos Column */}
-      <td className={cn("px-1 text-center", isCompact ? "py-0" : "py-2")}>
-        <PhotoColumn
-          item={item}
-          idx={idx}
-          displayIdx={displayIdx}
-          category="pre"
-          images={item.preImages || []}
-          isLocked={isLocked}
-          isCompact={isCompact}
-          handleRowImageUpload={handleRowImageUpload}
-          removeRowImage={removeRowImage}
-          renameRowImage={renameRowImage}
-          setPreviewImage={setPreviewImage}
-          setSketchTarget={setSketchTarget}
-          setSketchInitialData={setSketchInitialData}
-          lastSketchItemIdxRef={lastSketchItemIdxRef}
-          setSketchDialogOpen={setSketchDialogOpen}
-          onImageDragStart={onImageDragStart}
-          onImageDrop={onImageDrop}
-        />
-      </td>
-      {/* Post-work Photos Column */}
-      <td className={cn("px-1 text-center border-l", isCompact ? "py-0" : "py-2")}>
-        <PhotoColumn
-          item={item}
-          idx={idx}
-          displayIdx={displayIdx}
-          category="post"
-          images={item.postImages || []}
-          isLocked={isLocked}
-          isCompact={isCompact}
-          handleRowImageUpload={handleRowImageUpload}
-          removeRowImage={removeRowImage}
-          renameRowImage={renameRowImage}
-          setPreviewImage={setPreviewImage}
-          setSketchTarget={setSketchTarget}
-          setSketchInitialData={setSketchInitialData}
-          lastSketchItemIdxRef={lastSketchItemIdxRef}
-          setSketchDialogOpen={setSketchDialogOpen}
-          onImageDragStart={onImageDragStart}
-          onImageDrop={onImageDrop}
-        />
-      </td>
-      <td className={cn("px-1 text-center border-l", isCompact ? "py-0" : "py-2")}>
-        <div className="flex items-center justify-center gap-1">
-          <Button variant="ghost" size="icon" onClick={() => cloneItem(idx)} className={cn("text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 transition-colors border border-transparent hover:border-indigo-200", isCompact ? "h-5 w-5" : "h-6 w-6")} disabled={isLocked} title="Clone Row">
-            <Copy className={isCompact ? "w-3 h-3" : "w-3.5 h-3.5"} />
-          </Button>
-          <Button variant="ghost" size="icon" onClick={() => removeItem(idx)} className={cn("text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors border border-transparent hover:border-red-200", isCompact ? "h-5 w-5" : "h-6 w-6")} disabled={isLocked} title="Remove Item">
-            <Trash2 className={isCompact ? "w-3 h-3" : "w-3.5 h-3.5"} />
-          </Button>
-        </div>
-      </td>
+      {columnVisibility.pre && (
+        <td className={cn("px-1 text-center", isCompact ? "py-0" : "py-2")}>
+          <PhotoColumn
+            item={item}
+            idx={idx}
+            displayIdx={displayIdx}
+            category="pre"
+            images={item.preImages || []}
+            isLocked={isLocked}
+            isCompact={isCompact}
+            handleRowImageUpload={handleRowImageUpload}
+            removeRowImage={removeRowImage}
+            renameRowImage={renameRowImage}
+            setPreviewImage={setPreviewImage}
+            setSketchTarget={setSketchTarget}
+            setSketchInitialData={setSketchInitialData}
+            lastSketchItemIdxRef={lastSketchItemIdxRef}
+            setSketchDialogOpen={setSketchDialogOpen}
+            onImageDragStart={onImageDragStart}
+            onImageDrop={onImageDrop}
+          />
+        </td>
+      )}
+      {columnVisibility.post && (
+        <td className={cn("px-1 text-center border-l", isCompact ? "py-0" : "py-2")}>
+          <PhotoColumn
+            item={item}
+            idx={idx}
+            displayIdx={displayIdx}
+            category="post"
+            images={item.postImages || []}
+            isLocked={isLocked}
+            isCompact={isCompact}
+            handleRowImageUpload={handleRowImageUpload}
+            removeRowImage={removeRowImage}
+            renameRowImage={renameRowImage}
+            setPreviewImage={setPreviewImage}
+            setSketchTarget={setSketchTarget}
+            setSketchInitialData={setSketchInitialData}
+            lastSketchItemIdxRef={lastSketchItemIdxRef}
+            setSketchDialogOpen={setSketchDialogOpen}
+            onImageDragStart={onImageDragStart}
+            onImageDrop={onImageDrop}
+          />
+        </td>
+      )}
+      {columnVisibility.del && (
+        <td className={cn("px-1 text-center border-l", isCompact ? "py-0" : "py-2")}>
+          <div className="flex items-center justify-center gap-1">
+            <Button variant="ghost" size="icon" onClick={() => cloneItem(idx)} className={cn("text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 transition-colors border border-transparent hover:border-indigo-200", isCompact ? "h-5 w-5" : "h-6 w-6")} disabled={isLocked} title="Clone Row">
+              <Copy className={isCompact ? "w-3 h-3" : "w-3.5 h-3.5"} />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={() => removeItem(idx)} className={cn("text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors border border-transparent hover:border-red-200", isCompact ? "h-5 w-5" : "h-6 w-6")} disabled={isLocked} title="Remove Item">
+              <Trash2 className={isCompact ? "w-3 h-3" : "w-3.5 h-3.5"} />
+            </Button>
+          </div>
+        </td>
+      )}
     </Reorder.Item>
   );
 });
@@ -1495,6 +1537,38 @@ export default function CreateSketchPlan() {
   const userRole = user?.role || "user";
   const isSupplier = userRole === "supplier";
   const isAdmin = userRole === "admin";
+
+  // Column Visibility State and Handlers
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>(DEFAULT_COLUMN_VISIBILITY);
+
+  useEffect(() => {
+    if (user) {
+      const storageKey = `sketch_plan_columns_${user.id}`;
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          setColumnVisibility(JSON.parse(saved));
+        } catch (e) {
+          // Fallback to default
+        }
+      }
+    }
+  }, [user]);
+
+  const toggleColumn = (field: keyof ColumnVisibility) => {
+    setColumnVisibility(prev => {
+      const next = { ...prev, [field]: !prev[field] };
+      const storageKey = user ? `sketch_plan_columns_${user.id}` : "sketch_plan_columns";
+      localStorage.setItem(storageKey, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const showAllColumns = () => {
+    setColumnVisibility(DEFAULT_COLUMN_VISIBILITY);
+    const storageKey = user ? `sketch_plan_columns_${user.id}` : "sketch_plan_columns";
+    localStorage.setItem(storageKey, JSON.stringify(DEFAULT_COLUMN_VISIBILITY));
+  };
 
   // Versioning State
   const [siblingVersions, setSiblingVersions] = useState<any[]>([]);
@@ -3633,13 +3707,78 @@ export default function CreateSketchPlan() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-slate-200 shadow-sm">
-                    <Label htmlFor="compact-mode" className="text-xs font-bold text-slate-600 cursor-pointer">Compact View</Label>
-                    <Checkbox
-                      id="compact-mode"
-                      checked={isCompact}
-                      onCheckedChange={(checked) => setIsCompact(!!checked)}
-                    />
+                  <div className="flex items-center gap-3">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-10 gap-1.5 border-slate-200 hover:border-indigo-400 bg-white shadow-sm">
+                          <Settings className="w-4 h-4 text-slate-500" />
+                          <span className="text-xs font-bold text-slate-700">Manage Columns</span>
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-60 p-3 shadow-xl z-[200]" align="end">
+                        <div className="space-y-3">
+                          <div className="border-b pb-1.5 flex items-center justify-between">
+                            <span className="font-bold text-xs text-slate-700 uppercase tracking-wider">Visible Columns</span>
+                            <span className="text-[10px] text-slate-400 font-medium">({Object.values(columnVisibility).filter(Boolean).length}/10)</span>
+                          </div>
+                          
+                          <div className="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
+                            {[
+                              { key: "notes", label: "Notes/Review" },
+                              { key: "category", label: "Category" },
+                              { key: "itemProduct", label: "Item/Product" },
+                              { key: "unit", label: "Unit" },
+                              { key: "dimensions", label: "Dimensions" },
+                              { key: "qty", label: "QTY" },
+                              { key: "assignee", label: "Assignee" },
+                              { key: "pre", label: "Pre Photo" },
+                              { key: "post", label: "Post Photo" },
+                              { key: "del", label: "Del/Clone Row" },
+                            ].map((col) => (
+                              <div key={col.key} className="flex items-center justify-between py-0.5">
+                                <Label htmlFor={`col-${col.key}`} className="text-xs text-slate-600 font-medium cursor-pointer flex-1 py-1">
+                                  {col.label}
+                                </Label>
+                                <Checkbox
+                                  id={`col-${col.key}`}
+                                  checked={columnVisibility[col.key as keyof ColumnVisibility]}
+                                  onCheckedChange={() => toggleColumn(col.key as keyof ColumnVisibility)}
+                                  className="h-4 w-4"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                          
+                          <div className="border-t pt-2 flex flex-col gap-1.5">
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={showAllColumns}
+                              className="h-7 text-[10px] font-bold text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700 justify-center w-full"
+                            >
+                              Show All Columns
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={showAllColumns}
+                              className="h-7 text-[10px] font-bold text-slate-500 hover:bg-slate-50 hover:text-slate-700 justify-center w-full"
+                            >
+                              Reset Default Layout
+                            </Button>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+
+                    <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-slate-200 shadow-sm h-10">
+                      <Label htmlFor="compact-mode" className="text-xs font-bold text-slate-600 cursor-pointer">Compact View</Label>
+                      <Checkbox
+                        id="compact-mode"
+                        checked={isCompact}
+                        onCheckedChange={(checked) => setIsCompact(!!checked)}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -3887,18 +4026,36 @@ export default function CreateSketchPlan() {
                             )}
                           </th>
                           <th className={cn("w-10 px-2 text-left", isCompact ? "py-1" : "py-3")}>#</th>
-                          <th className={cn("w-[200px] min-w-[200px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Notes/Review</th>
-                          <th className={cn("w-[100px] min-w-[100px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Category</th>
-                          <th className={cn("w-[160px] min-w-[160px] max-w-[160px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Item/Product</th>
-                          <th className={cn("w-[60px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Unit</th>
-                          <th className={cn("w-[110px] min-w-[110px] max-w-[110px] px-2 text-center font-bold text-indigo-900 border-l border-slate-200/50 bg-indigo-50/20", isCompact ? "py-1" : "py-3")}>Dimensions</th>
-                          <th className={cn("w-[80px] min-w-[80px] max-w-[80px] px-2 text-center bg-indigo-50 font-bold text-indigo-700", isCompact ? "py-1" : "py-3")}>QTY</th>
-                          {!isSupplier && (
+                          {columnVisibility.notes && (
+                            <th className={cn("w-[200px] min-w-[200px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Notes/Review</th>
+                          )}
+                          {columnVisibility.category && (
+                            <th className={cn("w-[100px] min-w-[100px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Category</th>
+                          )}
+                          {columnVisibility.itemProduct && (
+                            <th className={cn("w-[160px] min-w-[160px] max-w-[160px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Item/Product</th>
+                          )}
+                          {columnVisibility.unit && (
+                            <th className={cn("w-[60px] px-2 text-left", isCompact ? "py-1" : "py-3")}>Unit</th>
+                          )}
+                          {columnVisibility.dimensions && (
+                            <th className={cn("w-[110px] min-w-[110px] max-w-[110px] px-2 text-center font-bold text-indigo-900 border-l border-slate-200/50 bg-indigo-50/20", isCompact ? "py-1" : "py-3")}>Dimensions</th>
+                          )}
+                          {columnVisibility.qty && (
+                            <th className={cn("w-[80px] min-w-[80px] max-w-[80px] px-2 text-center bg-indigo-50 font-bold text-indigo-700", isCompact ? "py-1" : "py-3")}>QTY</th>
+                          )}
+                          {columnVisibility.assignee && !isSupplier && (
                             <th className={cn("w-[100px] px-2 text-left font-bold text-indigo-900 border-l border-slate-200/50 bg-indigo-50/20", isCompact ? "py-1" : "py-3")}>Assignee</th>
                           )}
-                          <th className={cn("w-[60px] px-2 text-center border-l bg-amber-50/20 font-bold text-amber-700", isCompact ? "py-1" : "py-3")}>Pre</th>
-                          <th className={cn("w-[60px] px-2 text-center bg-amber-50/20 font-bold text-amber-700", isCompact ? "py-1" : "py-3")}>Post</th>
-                          <th className={cn("w-10 px-2 text-center", isCompact ? "py-1" : "py-3")}>Del</th>
+                          {columnVisibility.pre && (
+                            <th className={cn("w-[60px] px-2 text-center border-l bg-amber-50/20 font-bold text-amber-700", isCompact ? "py-1" : "py-3")}>Pre</th>
+                          )}
+                          {columnVisibility.post && (
+                            <th className={cn("w-[60px] px-2 text-center bg-amber-50/20 font-bold text-amber-700", isCompact ? "py-1" : "py-3")}>Post</th>
+                          )}
+                          {columnVisibility.del && (
+                            <th className={cn("w-10 px-2 text-center", isCompact ? "py-1" : "py-3")}>Del</th>
+                          )}
                         </tr>
                       </thead>
                       <Reorder.Group as="tbody" axis="y" values={paginatedItems} onReorder={(newPaginatedOrder) => {
@@ -3921,6 +4078,7 @@ export default function CreateSketchPlan() {
                             isLocked={isLocked || userRole === "supplier"}
                             isFiltering={isFiltering}
                             isCompact={isCompact}
+                            columnVisibility={columnVisibility}
                             updateItem={updateItem}
                             removeItem={removeItem}
                             moveItemToPosition={moveItemToPosition}
