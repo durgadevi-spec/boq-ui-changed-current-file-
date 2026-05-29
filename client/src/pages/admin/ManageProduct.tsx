@@ -333,11 +333,11 @@ export default function ManageProduct() {
         };
         const categoryMatch = inc(m.category, selectedCategory) && inc(m.subcategory, selectedSubcategory);
         if (!categoryMatch) return false;
-        
+
         if (projectPricingFilter) {
             return m.is_project_pricing === true;
         }
-        
+
         return true;
     });
 
@@ -1503,8 +1503,8 @@ export default function ManageProduct() {
                                     </h2>
                                     <div className="flex items-center gap-4">
                                         <div className="flex items-center space-x-2">
-                                            <Checkbox 
-                                                id="project-pricing-filter" 
+                                            <Checkbox
+                                                id="project-pricing-filter"
                                                 checked={projectPricingFilter}
                                                 onCheckedChange={(checked: boolean) => setProjectPricingFilter(!!checked)}
                                             />

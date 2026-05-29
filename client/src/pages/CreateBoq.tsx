@@ -193,6 +193,90 @@ function PriceUpdateBanner({
   );
 }
 
+// ─── Project Pricing Banner ────────────────────────────────────────────────────
+function ProjectPricingBanner({
+  items,
+  onApplyAll,
+  onApplySingle,
+  onIgnoreSingle,
+  isUpdating
+}: {
+  items: any[];
+  onApplyAll: () => void | Promise<void>;
+  onApplySingle: (m: any) => void;
+  onIgnoreSingle: (m: any) => void;
+  isUpdating?: boolean;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  if (items.length === 0) return null;
+  return (
+    <div id="project-pricing-banner" className="bg-blue-50 border border-blue-200 rounded text-sm text-blue-800 mb-4 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
+      <div className="p-4 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="bg-blue-100 p-2 rounded-full hidden sm:block">
+            {isUpdating ? <Loader2 className="h-5 w-5 text-blue-700 animate-spin" /> : <Star className="h-5 w-5 text-blue-700" />}
+          </div>
+          <div>
+            <div className="font-bold text-blue-900">⚠️ Project Pricing Available!</div>
+            <div className="text-blue-700">
+              {items.length} {items.length === 1 ? "item" : "items"} in this BOM have Project Pricing available. Do you want to update and use the Project Pricing?
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-blue-300 text-blue-800 hover:bg-blue-100 h-9 font-bold bg-white"
+            onClick={() => setIsExpanded(!isExpanded)}
+          >
+            {isExpanded ? "Hide Details" : "View Details"}
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 h-9 shadow-sm"
+            onClick={onApplyAll}
+            disabled={isUpdating}
+          >
+            {isUpdating ? "Updating..." : "Use Project Pricing"}
+          </Button>
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div className="border-t border-blue-200 bg-white/50 p-3 max-h-[250px] overflow-y-auto w-full">
+          <table className="w-full text-xs">
+            <thead className="text-left text-blue-900/70 border-b border-blue-200">
+              <tr>
+                <th className="pb-1.5 font-bold uppercase w-[15%]">Product</th>
+                <th className="pb-1.5 font-bold uppercase w-[35%]">Item Name</th>
+                <th className="pb-1.5 font-bold uppercase text-right w-[15%]">Current Rate</th>
+                <th className="pb-1.5 font-bold uppercase text-right w-[15%]">PP Rate</th>
+                <th className="pb-1.5 font-bold uppercase text-center w-[20%]">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-blue-100">
+              {items.map((m, idx) => (
+                <tr key={`pp-${m.boqItemId}-${m.type}-${m.index}-${idx}`} className="hover:bg-blue-50/50">
+                  <td className="py-1.5 text-slate-500 font-semibold truncate max-w-[120px]" title={m.productName}>{m.productName}</td>
+                  <td className="py-1.5 font-bold truncate max-w-[200px]" title={m.name || "Item"}>{m.name || "Item"}</td>
+                  <td className="py-1.5 text-right text-slate-600">₹{m.currentRate}</td>
+                  <td className="py-1.5 text-right font-bold text-blue-700">₹{m.ppRate}</td>
+                  <td className="py-1.5 flex justify-center gap-1">
+                    <Button variant="ghost" size="sm" className="h-6 text-[10px] px-1.5 text-slate-500 hover:bg-slate-100 font-bold" onClick={() => onIgnoreSingle(m)}>Ignore</Button>
+                    <Button variant="outline" size="sm" className="h-6 text-[10px] px-1.5 border-blue-300 text-blue-700 hover:bg-blue-100 font-bold bg-white" onClick={() => onApplySingle(m)}>Use PP</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EditableHsnSac({ tableData, onUpdate }: { tableData: any; onUpdate: (hsn: string, sac: string) => void }) {
   const [hsn, setHsn] = useState(tableData.hsn_code || (tableData.hsn_sac_type === "hsn" ? tableData.hsn_sac_code : "") || "");
   const [sac, setSac] = useState(tableData.sac_code || (tableData.hsn_sac_type === "sac" ? tableData.hsn_sac_code : "") || "");
@@ -1034,7 +1118,7 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
                   {item.category}
                 </Badge>
               )}
-              {item.is_project_pricing === true && (
+              {item.is_project_pricing && (
                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300 whitespace-nowrap">
                   ★ Project Pricing
                 </span>
@@ -1194,6 +1278,11 @@ function BoqItemRow({ item, itemIdx, boqItem, tableData, isEngineBased, isVersio
               <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[9px] px-1.5 py-0 font-bold uppercase leading-tight">
                 Manual
               </Badge>
+            )}
+            {item.is_project_pricing && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300 whitespace-nowrap">
+                ★ Project Pricing
+              </span>
             )}
           </div>
           {!isVersionSubmitted && (
@@ -1794,6 +1883,7 @@ export default function CreateBom() {
   const [qtyIncreases, setQtyIncreases] = useState<any[]>([]);
   const [pendingAddProductData, setPendingAddProductData] = useState<any>(null);
   const [ignoredMismatches, setIgnoredMismatches] = useState<Set<string>>(new Set());
+  const [ignoredPpMismatches, setIgnoredPpMismatches] = useState<Set<string>>(new Set());
   const [projectStatusFilter, setProjectStatusFilter] = useState<string>("all");
   const [projectSearchTerm, setProjectSearchTerm] = useState("");
   const [productCategoryOrder, setProductCategoryOrder] = useState<string[]>([]);
@@ -2516,7 +2606,7 @@ export default function CreateBom() {
         if (!data) return;
         const list: BOMVersion[] = data.versions || [];
         setVersions(list);
-        
+
         // Priority: 1. Previously selected ID (from URL or state), 2. First Draft, 3. Latest version
         setSelectedVersionId((prev: string | null) => {
           if (prev && list.some((v: BOMVersion) => v.id === prev)) return prev;
@@ -2975,6 +3065,132 @@ export default function CreateBom() {
     });
   };
 
+  const ppMatches = useMemo(() => {
+    const list: any[] = [];
+    boqItems.forEach(boqItem => {
+      const td = parseTableData(boqItem.table_data);
+      const productName = td.product_name || boqItem.estimator || "Unknown Product";
+      if (td.materialLines) {
+        td.materialLines.forEach((ml: any, idx: number) => {
+          if (!ml.is_project_pricing) {
+            const currentMat = materialsById[ml.id || ml.materialId];
+            const templateId = currentMat?.template_id || ml.template_id;
+            if (templateId) {
+              const ppAlt = Object.values(materialsById).find(mat => mat.template_id === templateId && mat.is_project_pricing);
+              if (ppAlt) {
+                list.push({ boqItemId: boqItem.id, type: 'materialLine', index: idx, currentRate: ml.supplyRate, ppRate: ppAlt.rate, name: ml.materialName || ml.name || "Material", productName, ppAlt });
+              }
+            }
+          }
+        });
+      }
+      if (td.step11_items) {
+        td.step11_items.forEach((s11: any, idx: number) => {
+          if (!s11.is_project_pricing) {
+            const currentMat = materialsById[s11.id];
+            const templateId = currentMat?.template_id || s11.template_id;
+            if (templateId) {
+              const ppAlt = Object.values(materialsById).find(mat => mat.template_id === templateId && mat.is_project_pricing);
+              if (ppAlt) {
+                list.push({ boqItemId: boqItem.id, type: 'step11', index: idx, currentRate: (s11.supply_rate || 0), ppRate: ppAlt.rate, name: s11.title || "Item", productName, ppAlt });
+              }
+            }
+          }
+        });
+      }
+    });
+    return list;
+  }, [boqItems, materialsById]);
+
+  const activePpMatches = useMemo(() => {
+    return ppMatches.filter(m => !ignoredPpMismatches.has(`${m.boqItemId}-${m.type}-${m.index}`));
+  }, [ppMatches, ignoredPpMismatches]);
+
+  const handleUpdateAllPp = async () => {
+    if (activePpMatches.length === 0 || isUpdatingRates) return;
+    setIsUpdatingRates(true);
+    try {
+      const byBoqItem: Record<string, any[]> = {};
+      activePpMatches.forEach(m => {
+        if (!byBoqItem[m.boqItemId]) byBoqItem[m.boqItemId] = [];
+        byBoqItem[m.boqItemId].push(m);
+      });
+
+      const updates = Object.entries(byBoqItem).map(async ([boqItemId, ms]) => {
+        const boqItem = boqItems.find(i => i.id === boqItemId);
+        if (!boqItem) return;
+
+        const td = parseTableData(boqItem.table_data);
+        ms.forEach(m => {
+          if (m.type === 'materialLine') {
+            td.materialLines[m.index].supplyRate = m.ppRate;
+            td.materialLines[m.index].is_project_pricing = true;
+            td.materialLines[m.index].materialId = m.ppAlt.id;
+          } else if (m.type === 'step11') {
+            td.step11_items[m.index].supply_rate = m.ppRate;
+            td.step11_items[m.index].is_project_pricing = true;
+            td.step11_items[m.index].id = m.ppAlt.id;
+          }
+        });
+
+        return apiFetch(`/api/boq-items/${boqItemId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ table_data: td }),
+        });
+      });
+
+      await Promise.all(updates);
+      toast({ title: "Success", description: "Applied Project Pricing" });
+      loadBoqItemsAndEdits();
+    } catch (err) {
+      console.error(err);
+      toast({ title: "Error", description: "Failed to apply project pricing", variant: "destructive" });
+    } finally {
+      setIsUpdatingRates(false);
+    }
+  };
+
+  const handleUpdateSinglePp = async (m: any) => {
+    setIsUpdatingRates(true);
+    try {
+      const boqItem = boqItems.find(i => i.id === m.boqItemId);
+      if (!boqItem) return;
+
+      const td = parseTableData(boqItem.table_data);
+      if (m.type === 'materialLine') {
+        td.materialLines[m.index].supplyRate = m.ppRate;
+        td.materialLines[m.index].is_project_pricing = true;
+        td.materialLines[m.index].materialId = m.ppAlt.id;
+      } else if (m.type === 'step11') {
+        td.step11_items[m.index].supply_rate = m.ppRate;
+        td.step11_items[m.index].is_project_pricing = true;
+        td.step11_items[m.index].id = m.ppAlt.id;
+      }
+
+      await apiFetch(`/api/boq-items/${m.boqItemId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ table_data: td }),
+      });
+      toast({ title: "Success", description: `Applied project pricing for ${m.name}` });
+      loadBoqItemsAndEdits();
+    } catch (err) {
+      console.error(err);
+      toast({ title: "Error", description: "Failed to apply project pricing", variant: "destructive" });
+    } finally {
+      setIsUpdatingRates(false);
+    }
+  };
+
+  const handleIgnoreSinglePp = (m: any) => {
+    setIgnoredPpMismatches(prev => {
+      const next = new Set(prev);
+      next.add(`${m.boqItemId}-${m.type}-${m.index}`);
+      return next;
+    });
+  };
+
   const handleViewMismatch = (m: any) => {
     setExpandedProductIds(prev => new Set(prev).add(m.boqItemId));
     // Optional: scroll to the element. We'll add a slight delay to allow expansion.
@@ -2997,11 +3213,11 @@ export default function CreateBom() {
       const params = new URLSearchParams(qs);
       const projectParam = params.get("projectId") || params.get("project");
       const versionParam = params.get("versionId") || params.get("version");
-      
+
       if (projectParam && projectParam !== selectedProjectId && projects.find(p => p.id === projectParam)) {
         setSelectedProjectId(projectParam);
       }
-      
+
       // We can only set version if the versions array is loaded and contains the versionId.
       // But versions array is loaded based on selectedProjectId. 
       // If versionParam is present, it will be set once versions array is loaded.
@@ -3976,7 +4192,7 @@ export default function CreateBom() {
         // Calculate logical rounding or standard rate rounding
         const useStandardRate = !!tableData.use_standard_rate;
         const targetQty = tableData.targetRequiredQty || 1;
-        
+
         let productGrandTotal = productTotal;
         let roundOff = 0;
         let adjustmentLabel = "Round Off (Adjustment)";
@@ -5108,7 +5324,7 @@ export default function CreateBom() {
                               if (projectPricingFilter) {
                                 const materialLines = td.materialLines || [];
                                 const step11Items = td.step11_items || [];
-                                hasProjectPricing = td.is_project_pricing === true || 
+                                hasProjectPricing = td.is_project_pricing === true ||
                                   materialLines.some((ml: any) => ml.is_project_pricing === true) ||
                                   step11Items.some((si: any) => si.is_project_pricing === true);
                               }
@@ -5288,6 +5504,13 @@ export default function CreateBom() {
                       onApplySingle={handleUpdateSingleMismatch}
                       onIgnoreSingle={handleIgnoreMismatch}
                       onViewSingle={handleViewMismatch}
+                      isUpdating={isUpdatingRates}
+                    />
+                    <ProjectPricingBanner
+                      items={activePpMatches}
+                      onApplyAll={handleUpdateAllPp}
+                      onApplySingle={handleUpdateSinglePp}
+                      onIgnoreSingle={handleIgnoreSinglePp}
                       isUpdating={isUpdatingRates}
                     />
 
@@ -6173,6 +6396,29 @@ export default function CreateBom() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Floating Project Pricing Indicator */}
+      {activePpMatches && activePpMatches.length > 0 && (
+        <div 
+          className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-5 fade-in duration-500"
+          title="Project Pricing Available"
+        >
+          <Button 
+            onClick={() => document.getElementById('project-pricing-banner')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+            className="bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg h-14 w-14 p-0 flex items-center justify-center gap-2 overflow-hidden group transition-all duration-300 hover:w-auto hover:px-4 border-2 border-white/20"
+          >
+            <div className="relative flex items-center justify-center shrink-0">
+              <Star className="h-6 w-6 fill-yellow-400 text-yellow-400 animate-pulse" />
+              <div className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold h-4 w-4 rounded-full flex items-center justify-center ring-2 ring-blue-600">
+                {activePpMatches.length}
+              </div>
+            </div>
+            <span className="font-bold text-sm whitespace-nowrap opacity-0 w-0 group-hover:opacity-100 group-hover:w-auto transition-all duration-300 overflow-hidden">
+              Project Pricing Available
+            </span>
+          </Button>
+        </div>
+      )}
     </>
   );
 }
