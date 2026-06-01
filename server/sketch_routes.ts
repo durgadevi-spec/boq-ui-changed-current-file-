@@ -4,6 +4,32 @@ import { authMiddleware, requireRole } from "./middleware";
 
 import { sendSketchPlanEmail } from "./email";
 import { convertSketchToBoqItems } from "./lib/sketch_converter";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+const supabaseStorage = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+
+/** Delete files from Supabase bucket. Only deletes files with http URLs (Supabase-hosted). Old base64 images are safely ignored. */
+const deleteFromSupabaseBucket = async (urls: string[]) => {
+  if (!supabaseStorage) return;
+  const filePaths = urls
+    .filter(url => url && url.startsWith('http'))
+    .map(url => {
+      // Extract filename from URL like https://xxx.supabase.co/storage/v1/object/public/boq-images/filename.webp
+      const parts = url.split('/boq-images/');
+      return parts.length > 1 ? parts[1].split('?')[0] : null;
+    })
+    .filter(Boolean) as string[];
+  
+  if (filePaths.length > 0) {
+    try {
+      await supabaseStorage.storage.from('boq-images').remove(filePaths);
+    } catch (err) {
+      console.error('Failed to delete files from Supabase bucket:', err);
+    }
+  }
+};
 
 
 /**
@@ -349,11 +375,11 @@ export async function registerSketchRoutes(app: Express) {
         items: itemsRes.rows || [],
         images: (imagesRes.rows || []).map(img => ({
           ...img,
-          image_url: `/api/sketch-images/${img.id}`
+          image_url: img.image_url?.startsWith('http') ? img.image_url : `/api/sketch-images/${img.id}`
         })),
         attachments: (attachmentsRes.rows || []).map(att => ({
           ...att,
-          file_url: `/api/sketch-attachments/${att.id}`
+          file_url: att.file_url?.startsWith('http') ? att.file_url : `/api/sketch-attachments/${att.id}`
         }))
       });
     } catch (err) {
@@ -402,9 +428,9 @@ export async function registerSketchRoutes(app: Express) {
 
         // Batch all images
         const allImages: any[] = [];
-        items.forEach(item => {
+        items.forEach((item: any) => {
           if (item.images && Array.isArray(item.images)) {
-            item.images.forEach(img => {
+            item.images.forEach((img: any) => {
               allImages.push({
                 item_id: item.id,
                 url: typeof img === "string" ? img : (img.url || img.image_url),
@@ -414,7 +440,7 @@ export async function registerSketchRoutes(app: Express) {
           }
         });
         if (images && Array.isArray(images)) {
-          images.forEach(img => {
+          images.forEach((img: any) => {
             if (!img.item_id) {
               allImages.push({
                 item_id: null,
@@ -426,7 +452,7 @@ export async function registerSketchRoutes(app: Express) {
         }
 
         if (allImages.length > 0) {
-          await Promise.all(allImages.map(img => {
+          await Promise.all(allImages.map((img: any) => {
             const imgId = `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
             return client.query(
               `INSERT INTO sketch_plan_images (id, plan_id, item_id, image_url, image_name) VALUES ($1, $2, $3, $4, $5)`,
@@ -437,7 +463,7 @@ export async function registerSketchRoutes(app: Express) {
       }
 
       if (attachments && Array.isArray(attachments)) {
-        await Promise.all(attachments.map(att => {
+        await Promise.all(attachments.map((att: any) => {
           const attId = `att-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
           return client.query(
             `INSERT INTO sketch_plan_attachments (id, plan_id, file_url, file_name, file_type) 
@@ -501,12 +527,21 @@ export async function registerSketchRoutes(app: Express) {
       // Handle deletions
       if (isDelta) {
         if (deletedItemIds && Array.isArray(deletedItemIds) && deletedItemIds.length > 0) {
+          // Fetch image URLs for items being deleted, then clean up from Supabase
+          const itemImgRes = await client.query("SELECT image_url FROM sketch_plan_images WHERE plan_id = $1 AND item_id IN (SELECT unnest($2::text[]))", [id, deletedItemIds]);
+          await deleteFromSupabaseBucket(itemImgRes.rows.map((r: any) => r.image_url));
           await client.query("DELETE FROM sketch_plan_items WHERE plan_id = $1 AND id IN (SELECT unnest($2::text[]))", [id, deletedItemIds]);
         }
         if (deletedImageIds && Array.isArray(deletedImageIds) && deletedImageIds.length > 0) {
+          // Fetch URLs before deleting, then clean up from Supabase
+          const imgRes = await client.query("SELECT image_url FROM sketch_plan_images WHERE plan_id = $1 AND id IN (SELECT unnest($2::text[]))", [id, deletedImageIds]);
+          await deleteFromSupabaseBucket(imgRes.rows.map((r: any) => r.image_url));
           await client.query("DELETE FROM sketch_plan_images WHERE plan_id = $1 AND id IN (SELECT unnest($2::text[]))", [id, deletedImageIds]);
         }
         if (deletedAttachmentIds && Array.isArray(deletedAttachmentIds) && deletedAttachmentIds.length > 0) {
+          // Fetch URLs before deleting, then clean up from Supabase
+          const attRes = await client.query("SELECT file_url FROM sketch_plan_attachments WHERE plan_id = $1 AND id IN (SELECT unnest($2::text[]))", [id, deletedAttachmentIds]);
+          await deleteFromSupabaseBucket(attRes.rows.map((r: any) => r.file_url));
           await client.query("DELETE FROM sketch_plan_attachments WHERE plan_id = $1 AND id IN (SELECT unnest($2::text[]))", [id, deletedAttachmentIds]);
         }
       } else {
@@ -557,7 +592,9 @@ export async function registerSketchRoutes(app: Express) {
       const getResolvedData = (url: string) => {
         if (!url) return null;
         const base = url.split('?')[0];
-        return resolvedProxyMap.get(base) || (url.startsWith('data:') ? url : null);
+        if (resolvedProxyMap.has(base)) return resolvedProxyMap.get(base);
+        if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) return url;
+        return null;
       };
 
       // 2. Upsert items and their images
@@ -637,7 +674,7 @@ export async function registerSketchRoutes(app: Express) {
         for (const att of attachments) {
           const attId = (att.id && att.id.startsWith('att-')) ? att.id : `att-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
           const rawAttUrl = att.file_url || att.url;
-          const resolvedData = resolvedProxyMap.get(rawAttUrl.split('?')[0]) || (rawAttUrl.startsWith('data:') ? rawAttUrl : null);
+          const resolvedData = getResolvedData(rawAttUrl);
 
           if (resolvedData) {
             await client.query(
@@ -656,19 +693,19 @@ export async function registerSketchRoutes(app: Express) {
         SELECT spi.*
         FROM sketch_plan_items spi
         WHERE spi.plan_id = $1 ORDER BY spi.sort_order ASC, spi.created_at ASC, spi.id ASC`, [id]);
-      const imagesRes = await client.query("SELECT id, item_id, image_name FROM sketch_plan_images WHERE plan_id = $1", [id]);
-      const attachmentsRes = await client.query("SELECT id, file_name, file_type FROM sketch_plan_attachments WHERE plan_id = $1", [id]);
+      const imagesRes = await client.query("SELECT id, item_id, image_url, image_name FROM sketch_plan_images WHERE plan_id = $1", [id]);
+      const attachmentsRes = await client.query("SELECT id, file_url, file_name, file_type FROM sketch_plan_attachments WHERE plan_id = $1", [id]);
 
       res.json({
         message: "Sketch plan updated successfully",
         items: itemsRes.rows || [],
         images: (imagesRes.rows || []).map(img => ({
           ...img,
-          image_url: `/api/sketch-images/${img.id}`
+          image_url: img.image_url?.startsWith('http') ? img.image_url : `/api/sketch-images/${img.id}`
         })),
         attachments: (attachmentsRes.rows || []).map(att => ({
           ...att,
-          file_url: `/api/sketch-attachments/${att.id}`
+          file_url: att.file_url?.startsWith('http') ? att.file_url : `/api/sketch-attachments/${att.id}`
         }))
       });
     } catch (err) {

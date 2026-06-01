@@ -1,6 +1,14 @@
 import type { Express, Request, Response } from "express";
 import fs from "fs";
 import path from "path";
+import { createClient } from "@supabase/supabase-js";
+import multer from "multer";
+import sharp from "sharp";
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+const supabaseStorage = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { comparePasswords, generateToken, hashPassword } from "./auth";
@@ -22,6 +30,60 @@ export async function registerRoutes(
 
   // Sketch Plan Routes
   await registerSketchRoutes(app);
+
+  // Upload Route for Supabase Storage
+  app.post("/api/upload", authMiddleware, upload.single("file"), async (req: Request, res: Response): Promise<any> => {
+    try {
+      if (!supabaseStorage) {
+        return res.status(500).json({ message: "Supabase storage is not configured." });
+      }
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded." });
+      }
+
+      const file = req.file;
+      let fileExt = file.originalname.split(".").pop();
+      let fileBuffer = file.buffer;
+      let mimeType = file.mimetype;
+
+      if (mimeType.startsWith('image/') && !mimeType.includes('svg')) {
+        try {
+          // Compress large images to WebP
+          fileBuffer = await sharp(file.buffer)
+            .resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true })
+            .webp({ quality: 80 })
+            .toBuffer();
+          fileExt = 'webp';
+          mimeType = 'image/webp';
+        } catch (err) {
+          console.error("Failed to compress image, falling back to original:", err);
+        }
+      }
+
+      const fileName = `${randomUUID()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      const { data, error } = await supabaseStorage.storage
+        .from("boq-images")
+        .upload(filePath, fileBuffer, {
+          contentType: mimeType,
+          upsert: true,
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      const { data: publicUrlData } = supabaseStorage.storage
+        .from("boq-images")
+        .getPublicUrl(filePath);
+
+      res.json({ url: publicUrlData.publicUrl, name: file.originalname });
+    } catch (err: any) {
+      console.error("/api/upload error:", err);
+      res.status(500).json({ message: "Upload failed", error: err.message });
+    }
+  });
 
   // ==================== REAL-TIME PRESENCE ====================
   const wss = new WebSocketServer({ noServer: true });

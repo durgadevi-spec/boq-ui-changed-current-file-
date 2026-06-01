@@ -2538,54 +2538,90 @@ export default function CreateSketchPlan() {
     setSortBy("none");
   }, []);
 
-  const handlePlanImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePlanImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
-    files.forEach(file => {
-      const reader = new FileReader();
+    for (const file of files) {
       const fileName = file.name;
-      reader.onloadend = () => {
-        setPlanImages(prev => [...prev, { url: reader.result as string, name: fileName }]);
-      };
-      reader.readAsDataURL(file);
-    });
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const token = typeof localStorage !== "undefined" ? localStorage.getItem("authToken") : null;
+        const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL?.replace(/\/+$/, "") || "/api";
+        const res = await fetch(`${API_BASE}/upload`, {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        });
+        if (!res.ok) throw new Error("Upload failed");
+        const data = await res.json();
+        setPlanImages(prev => [...prev, { url: data.url, name: data.name || fileName }]);
+      } catch (err) {
+        console.error("Plan image upload error:", err);
+        toast({ title: "Upload Failed", description: `Failed to upload ${fileName}`, variant: "destructive" });
+      }
+    }
   };
 
-  const handleAttachmentUpload = (e: React.ChangeEvent<HTMLInputElement>, type: "pdf" | "excel") => {
+  const handleAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: "pdf" | "excel") => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
-    files.forEach(file => {
-      const reader = new FileReader();
+    for (const file of files) {
       const fileName = file.name;
-      reader.onloadend = () => {
-        setAttachments(prev => [...prev, { url: reader.result as string, name: fileName, type }]);
-      };
-      reader.readAsDataURL(file);
-    });
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const token = typeof localStorage !== "undefined" ? localStorage.getItem("authToken") : null;
+        const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL?.replace(/\/+$/, "") || "/api";
+        const res = await fetch(`${API_BASE}/upload`, {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        });
+        if (!res.ok) throw new Error("Upload failed");
+        const data = await res.json();
+        setAttachments(prev => [...prev, { url: data.url, name: data.name || fileName, type }]);
+      } catch (err) {
+        console.error("Attachment upload error:", err);
+        toast({ title: "Upload Failed", description: `Failed to upload ${fileName}`, variant: "destructive" });
+      }
+    }
   };
 
-  const handleRowImageUpload = (idx: number, e: React.ChangeEvent<HTMLInputElement>, category: "pre" | "post") => {
+  const handleRowImageUpload = async (idx: number, e: React.ChangeEvent<HTMLInputElement>, category: "pre" | "post") => {
     const files = e.target.files;
     if (!files) return;
 
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
+    for (const file of Array.from(files)) {
       const fileName = file.name.split('.').slice(0, -1).join('.') || "Untitled Photo";
-      reader.onloadend = () => {
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const token = typeof localStorage !== "undefined" ? localStorage.getItem("authToken") : null;
+        const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL?.replace(/\/+$/, "") || "/api";
+        const res = await fetch(`${API_BASE}/upload`, {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        });
+        if (!res.ok) throw new Error("Upload failed");
+        const data = await res.json();
         setItems(prevItems => {
           const newItems = [...prevItems];
           const item = { ...newItems[idx] };
           if (category === "pre") {
-            item.preImages = [...(item.preImages || []), { url: reader.result as string, name: fileName }];
+            item.preImages = [...(item.preImages || []), { url: data.url, name: data.name || fileName }];
           } else {
-            item.postImages = [...(item.postImages || []), { url: reader.result as string, name: fileName }];
+            item.postImages = [...(item.postImages || []), { url: data.url, name: data.name || fileName }];
           }
           newItems[idx] = item;
           return newItems;
         });
-      };
-      reader.readAsDataURL(file);
-    });
+      } catch (err) {
+        console.error("Row image upload error:", err);
+        toast({ title: "Upload Failed", description: `Failed to upload ${fileName}`, variant: "destructive" });
+      }
+    }
   };
 
   const removeRowImage = (itemIdx: number, imgIdx: number, category: "pre" | "post") => {
