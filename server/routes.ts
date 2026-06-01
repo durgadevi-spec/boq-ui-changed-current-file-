@@ -4,11 +4,16 @@ import path from "path";
 import { createClient } from "@supabase/supabase-js";
 import multer from "multer";
 import sharp from "sharp";
+import ws from "ws";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
-const supabaseStorage = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const supabaseStorage = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey, {
+  realtime: {
+    transport: ws as any
+  }
+}) : null;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { comparePasswords, generateToken, hashPassword } from "./auth";

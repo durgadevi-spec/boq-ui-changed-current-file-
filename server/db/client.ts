@@ -76,8 +76,6 @@ const poolConfig: any = {
 };
 
 if (connectionString.includes("supabase")) {
-  // Use environment variable to disable cert validation
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
   poolConfig.ssl = {
     rejectUnauthorized: false
   };
