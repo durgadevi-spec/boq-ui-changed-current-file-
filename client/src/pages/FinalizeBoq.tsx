@@ -657,12 +657,6 @@ export default function FinalizeBoq() {
       return (td.category_name || td.category || (item as any).category || "General").trim();
     };
 
-    // Read category_order from the BOM version (where Generate BOM saves it)
-    const bomVersion = bomVersions.find(v => v.id === selectedBomVersionId);
-    const savedOrder: string[] = Array.isArray((bomVersion as any)?.category_order)
-      ? (bomVersion as any).category_order
-      : [];
-
     const filtered = boqItems.filter(item => {
       let td = item.table_data || {};
       if (typeof td === "string") try { td = JSON.parse(td); } catch { td = {}; }
@@ -683,21 +677,21 @@ export default function FinalizeBoq() {
       return true;
     });
 
-    // Sort items to match the Generate BOM category order (only when showing all)
-    if (savedOrder.length > 0 && categoryFilter === "all" && !boqSearchTerm) {
+    // Sort items to match the current visual category order (only when showing all)
+    if (categoryOrder.length > 0 && categoryFilter === "all" && !boqSearchTerm) {
       filtered.sort((a, b) => {
         const catA = getItemCategory(a);
         const catB = getItemCategory(b);
-        const idxA = savedOrder.indexOf(catA);
-        const idxB = savedOrder.indexOf(catB);
-        const orderA = idxA === -1 ? savedOrder.length : idxA;
-        const orderB = idxB === -1 ? savedOrder.length : idxB;
+        const idxA = categoryOrder.indexOf(catA);
+        const idxB = categoryOrder.indexOf(catB);
+        const orderA = idxA === -1 ? categoryOrder.length : idxA;
+        const orderB = idxB === -1 ? categoryOrder.length : idxB;
         return orderA - orderB;
       });
     }
 
     return filtered;
-  }, [boqItems, boqSearchTerm, categoryFilter, bomVersions, selectedBomVersionId]);
+  }, [boqItems, boqSearchTerm, categoryFilter, categoryOrder]);
 
   const totalPages = Math.ceil(filteredBoqItems.length / pageSize);
   const paginatedBoqItems = React.useMemo(() => {
