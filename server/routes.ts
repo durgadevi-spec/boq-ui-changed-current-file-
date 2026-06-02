@@ -573,6 +573,7 @@ export async function registerRoutes(
     await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS final_revenue NUMERIC");
     await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS final_profit NUMERIC");
     await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS final_margin NUMERIC");
+    await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS category_order JSONB");
 
     // Fix unique constraint to include type
     try {
@@ -584,7 +585,7 @@ export async function registerRoutes(
         console.warn("[migrations] Could not update unique constraint for boq_versions:", e?.message || e);
       }
     }
-    console.log("[migrations] boq_versions 'type', 'is_locked', 'last_template_snapshot', and 'is_last_final' ensured");
+    console.log("[migrations] boq_versions 'type', 'is_locked', 'last_template_snapshot', 'is_last_final', and 'category_order' ensured");
 
     // Ensure image column exists on products
     await query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS image TEXT`);
@@ -5561,19 +5562,21 @@ export async function registerRoutes(
 
 
         // Create new version (store project name, client, location for easier querying/version display)
-        // Also copy column_config from previous version if expanding from one
+        // Also copy column_config and category_order from previous version if expanding from one
         let initialColumnConfig = null;
+        let initialCategoryOrder = null;
         if (copy_from_version) {
-          const prevVer = await query("SELECT column_config FROM boq_versions WHERE id = $1", [copy_from_version]);
+          const prevVer = await query("SELECT column_config, category_order FROM boq_versions WHERE id = $1", [copy_from_version]);
           if (prevVer.rows.length > 0) {
             initialColumnConfig = prevVer.rows[0].column_config;
+            initialCategoryOrder = prevVer.rows[0].category_order;
           }
         }
 
         await query(
-          `INSERT INTO boq_versions (id, project_id, project_name, project_client, project_location, project_client_address, project_gst_no, project_value, version_number, status, type, column_config, is_locked, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, FALSE, NOW(), NOW())`,
-          [versionId, project_id, projectName, projectClient, projectLocation, projectClientAddress, projectGstNo, projectVal, nextVersion, "draft", type, initialColumnConfig],
+          `INSERT INTO boq_versions (id, project_id, project_name, project_client, project_location, project_client_address, project_gst_no, project_value, version_number, status, type, column_config, category_order, is_locked, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, FALSE, NOW(), NOW())`,
+          [versionId, project_id, projectName, projectClient, projectLocation, projectClientAddress, projectGstNo, projectVal, nextVersion, "draft", type, initialColumnConfig, initialCategoryOrder ? JSON.stringify(initialCategoryOrder) : null],
         );
 
 
@@ -6337,18 +6340,18 @@ export async function registerRoutes(
         await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS purchase_rejection_reason TEXT");
         await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS is_boq_submission BOOLEAN DEFAULT FALSE");
 
-        let queryStr = "SELECT * FROM boq_versions WHERE status != 'draft' AND ((is_cleared IS FALSE OR is_cleared IS NULL) OR status = 'edit_requested' OR status = 'pending_approval' OR status = 'submitted')";
+        let queryStr = "SELECT bv.*, bp.name as project_name, bp.client as project_client FROM boq_versions bv LEFT JOIN boq_projects bp ON bv.project_id = bp.id WHERE bv.status != 'draft' AND ((bv.is_cleared IS FALSE OR bv.is_cleared IS NULL) OR bv.status = 'edit_requested' OR bv.status = 'pending_approval' OR bv.status = 'submitted')";
         const params: any[] = [];
 
         // Admin/purchase/product/pre_sales/software_team should see all approvals; enforce project permissions only on other roles.
         const allowedToSeeAll = ["admin", "software_team", "purchase_team", "product_manager", "pre_sales"].includes(user.role);
 
         if (!allowedToSeeAll) {
-          queryStr += ` AND project_id IN (SELECT project_id FROM user_project_permissions WHERE user_id = $1)`;
+          queryStr += ` AND bv.project_id IN (SELECT project_id FROM user_project_permissions WHERE user_id = $1)`;
           params.push(user.id);
         }
 
-        queryStr += " ORDER BY created_at DESC";
+        queryStr += " ORDER BY bv.created_at DESC";
 
         const result = await query(queryStr, params);
         res.json({ approvals: result.rows });
@@ -6463,9 +6466,9 @@ export async function registerRoutes(
       try {
         const user = (req as any).user;
         // Purchase team views ALL BOM versions that aren't drafts and pending purchase approval
-        let queryStr = "SELECT * FROM boq_versions WHERE status != 'draft' AND (purchase_approval_status = 'pending' OR purchase_approval_status IS NULL)";
+        let queryStr = "SELECT bv.*, bp.name as project_name, bp.client as project_client FROM boq_versions bv LEFT JOIN boq_projects bp ON bv.project_id = bp.id WHERE bv.status != 'draft' AND (bv.purchase_approval_status = 'pending' OR bv.purchase_approval_status IS NULL)";
         const params: any[] = [];
-        queryStr += " ORDER BY created_at DESC";
+        queryStr += " ORDER BY bv.created_at DESC";
 
         const result = await query(queryStr, params);
         res.json({ approvals: result.rows });

@@ -642,9 +642,9 @@ export default function FinalizeBoq() {
   }, [projects, projectStatusFilter, projectSearchTerm]);
   const [boqSearchTerm, setBoqSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [projectPricingFilter, setProjectPricingFilter] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
 
   const activeVersionId = selectedBoqVersionId || selectedBomVersionId;
   const activeVersion = [...bomVersions, ...boqVersions].find(v => v.id === activeVersionId);
@@ -680,16 +680,6 @@ export default function FinalizeBoq() {
         if (itemCat !== categoryFilter) return false;
       }
 
-      // Filter by project pricing
-      if (projectPricingFilter) {
-        const materialLines = Array.isArray(td.materialLines) ? td.materialLines : [];
-        const step11Items = Array.isArray(td.step11_items) ? td.step11_items : [];
-        const hasProjectPricing = td.is_project_pricing === true ||
-          materialLines.some((ml: any) => ml.is_project_pricing === true) ||
-          step11Items.some((si: any) => si.is_project_pricing === true);
-        if (!hasProjectPricing) return false;
-      }
-
       return true;
     });
 
@@ -717,14 +707,28 @@ export default function FinalizeBoq() {
   // Reset to page 1 when filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [boqSearchTerm, categoryFilter, projectPricingFilter]);
+  }, [boqSearchTerm, categoryFilter]);
 
   const availableCategories = React.useMemo(() => {
-    // Read category_order from the BOM version (where Generate BOM saves it)
-    const bomVersion = bomVersions.find(v => v.id === selectedBomVersionId);
-    const savedOrder: string[] = Array.isArray((bomVersion as any)?.category_order)
-      ? (bomVersion as any).category_order
-      : [];
+    // Read category_order from active BOQ version first, then fallback to BOM version
+    const activeVer = boqVersions.find(v => v.id === activeVersionId);
+    let savedOrder: string[] = [];
+
+    const parseCategoryOrder = (raw: any): string[] => {
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw === 'string') {
+        try { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) return parsed; } catch {}
+      }
+      return [];
+    };
+
+    if (activeVer) {
+      savedOrder = parseCategoryOrder((activeVer as any)?.category_order);
+    }
+    if (savedOrder.length === 0) {
+      const bomVersion = bomVersions.find(v => v.id === selectedBomVersionId);
+      savedOrder = parseCategoryOrder((bomVersion as any)?.category_order);
+    }
 
     // Use SAME category resolution as Generate BOM: category_name first, then category
     const getItemCategory = (item: BOMItem): string => {
@@ -749,7 +753,7 @@ export default function FinalizeBoq() {
     }
 
     return allCatsArr.sort();
-  }, [boqItems, bomVersions, selectedBomVersionId]);
+  }, [boqItems, bomVersions, boqVersions, selectedBomVersionId, activeVersionId]);
 
 
 
@@ -1770,6 +1774,11 @@ export default function FinalizeBoq() {
   useEffect(() => {
     loadBoqItemsAndEdits(selectedBoqVersionId || selectedBomVersionId);
   }, [selectedBomVersionId, selectedBoqVersionId, loadBoqItemsAndEdits, refreshKey]);
+
+  // Sync categoryOrder state whenever availableCategories changes
+  useEffect(() => {
+    setCategoryOrder(availableCategories);
+  }, [availableCategories]);
 
   useEffect(() => {
     try {
@@ -4407,16 +4416,6 @@ export default function FinalizeBoq() {
                 </div>
 
                 <div className="flex items-center gap-4">
-                  <div className="flex items-center space-x-2 mr-4">
-                    <Checkbox
-                      id="boq-project-pricing-filter"
-                      checked={projectPricingFilter}
-                      onCheckedChange={(checked: boolean) => setProjectPricingFilter(!!checked)}
-                    />
-                    <label htmlFor="boq-project-pricing-filter" className="text-sm font-semibold cursor-pointer whitespace-nowrap">
-                      Project Pricing Only
-                    </label>
-                  </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Per Page:</span>
                     <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
@@ -4439,31 +4438,48 @@ export default function FinalizeBoq() {
                 </div>
               </div>
 
-              {availableCategories.length > 0 && (
+              {categoryOrder.length > 0 && (
                 <div className="border-t pt-3 overflow-x-auto">
-                  <Tabs value={categoryFilter} onValueChange={setCategoryFilter} className="w-full">
-                    <TabsList className="bg-slate-100/50 p-1 flex justify-start h-auto flex-nowrap gap-1">
-                      <TabsTrigger
-                        value="all"
-                        className="text-[10px] font-bold px-4 py-2 uppercase tracking-wider data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm rounded-md transition-all shrink-0"
-                      >
-                        All ({boqItems.length})
-                      </TabsTrigger>
-                      {availableCategories.map(cat => (
-                        <TabsTrigger
-                          key={cat}
-                          value={cat}
-                          className="text-[10px] font-bold px-4 py-2 uppercase tracking-wider data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm rounded-md transition-all shrink-0"
-                        >
+                  <Reorder.Group as="div" axis="x" values={categoryOrder} onReorder={(newOrder) => {
+                    setCategoryOrder(newOrder);
+                    
+                    // Make the API call asynchronously without blocking the UI
+                    if (activeVersionId && selectedProjectId && !isVersionSubmitted) {
+                      apiFetch(`/api/boq-versions/${activeVersionId}/category-order`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ categoryOrder: newOrder })
+                      }).then(resp => {
+                        if (resp.ok) {
+                          toast({ title: "Success", description: "Category order updated" });
+                        } else {
+                          toast({ title: "Error", description: "Failed to save category order", variant: "destructive" });
+                        }
+                      }).catch(err => {
+                        console.error("Failed to save category order:", err);
+                        toast({ title: "Error", description: "Failed to save category order", variant: "destructive" });
+                      });
+                    }
+                  }} className="flex justify-start h-auto flex-nowrap gap-1 bg-slate-100/50 p-1 rounded">
+                    <button
+                      onClick={() => setCategoryFilter("all")}
+                      className={`text-[10px] font-bold px-4 py-2 uppercase tracking-wider rounded-md transition-all shrink-0 ${categoryFilter === "all" ? "bg-white text-blue-600 shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
+                    >
+                      All ({boqItems.length})
+                    </button>
+                    {categoryOrder.map((cat) => (
+                      <Reorder.Item key={cat} value={cat} as="div" drag={!isVersionSubmitted} dragElastic={0.2} dragMomentum={false} className={`flex items-center gap-1.5 text-[10px] font-bold px-4 py-2 uppercase tracking-wider rounded-md transition-all shrink-0 ${categoryFilter === cat ? "bg-white text-blue-600 shadow-sm" : "text-slate-600 hover:bg-slate-50"} ${!isVersionSubmitted ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`} onClick={() => setCategoryFilter(cat)}>
+                        {!isVersionSubmitted && <GripVertical className="h-3 w-3 text-slate-400" />}
+                        <span>
                           {cat} ({boqItems.filter(i => {
                             let td = i.table_data;
                             if (typeof td === 'string') try { td = JSON.parse(td); } catch { td = {}; }
-                            return td.category === cat;
+                            return td.category === cat || td.category_name === cat;
                           }).length})
-                        </TabsTrigger>
-                      ))}
-                    </TabsList>
-                  </Tabs>
+                        </span>
+                      </Reorder.Item>
+                    ))}
+                  </Reorder.Group>
                 </div>
               )}
             </div>
@@ -5268,11 +5284,6 @@ export default function FinalizeBoq() {
                           if (!category && tableData.product_info?.category) category = tableData.product_info.category;
                         }
 
-                        // Check if product or any of its materials have project pricing
-                        const hasProjectPricing = tableData.is_project_pricing === true ||
-                          (tableData.materialLines || []).some((ml: any) => ml.is_project_pricing === true) ||
-                          (tableData.step11_items || []).some((si: any) => si.is_project_pricing === true);
-
                         const isSelected = selectedProductIds.has(boqItem.id);
 
                         let total = 0;
@@ -5370,12 +5381,7 @@ export default function FinalizeBoq() {
                                     ) : null;
                                   })()}
                                   <div className="flex flex-col gap-0.5">
-                                    <div className="font-bold leading-tight line-clamp-2 flex flex-wrap items-center gap-1">
-                                      <span>{productName}</span>
-                                      {hasProjectPricing && (
-                                        <Badge className="bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 py-0 h-3 uppercase tracking-wider shrink-0">PP</Badge>
-                                      )}
-                                    </div>
+                                    <div className="font-bold leading-tight line-clamp-2">{productName}</div>
                                     {category && <div className="text-[8px] text-blue-500 font-extrabold uppercase tracking-tighter">{category}</div>}
                                   </div>
                                 </div>
@@ -6170,6 +6176,45 @@ export default function FinalizeBoq() {
                       disabled={isVersionSubmitted || boqItems.length === 0}
                     >
                       Lock Version
+                    </Button>
+                  )}
+                  
+                  {isVersionSubmitted && user?.role === 'admin' && (
+                    <Button
+                      onClick={async () => {
+                        if (!activeVersionId) return;
+                        if (!confirm("Are you sure you want to unlock this version? This will enable editing again.")) return;
+                        try {
+                          await apiFetch(`/api/boq-versions/${activeVersionId}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ status: "draft", is_locked: false }),
+                          });
+
+                          const [bomResp, boqResp] = await Promise.all([
+                            apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId!)}?type=bom`),
+                            apiFetch(`/api/boq-versions/${encodeURIComponent(selectedProjectId!)}?type=boq`)
+                          ]);
+                          if (bomResp.ok) setBomVersions((await bomResp.json()).versions || []);
+                          if (boqResp.ok) setBoqVersions((await boqResp.json()).versions || []);
+
+                          toast({
+                            title: "Success",
+                            description: "Version unlocked successfully",
+                          });
+                        } catch (err) {
+                          console.error("Failed to unlock version:", err);
+                          toast({
+                            title: "Error",
+                            description: "Failed to unlock version",
+                            variant: "destructive",
+                          });
+                        }
+                      }}
+                      variant="destructive"
+                      className="bg-red-600 hover:bg-red-700 text-white font-bold"
+                    >
+                      <Unlock className="h-4 w-4 mr-2" /> Unlock Version
                     </Button>
                   )}
 
