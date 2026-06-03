@@ -1538,6 +1538,14 @@ export default function CreateSketchPlan() {
   const isSavingRef = useRef<boolean>(false);
   const [initialLoading, setInitialLoading] = useState(!!paramId);
 
+  // Helper for deep equality ignoring key order
+  const stableStringify = (obj: any): string => {
+    if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+    if (Array.isArray(obj)) return `[${obj.map(stableStringify).join(',')}]`;
+    const keys = Object.keys(obj).sort();
+    return `{${keys.map(k => `"${k}":${stableStringify(obj[k])}`).join(',')}}`;
+  };
+
   // Check dirty state
   useEffect(() => {
     let lastSaved: any = {};
@@ -1545,20 +1553,21 @@ export default function CreateSketchPlan() {
 
     let isDirty = false;
     
-    if (name !== (lastSaved.name || "")) isDirty = true;
-    else if (locationStr !== (lastSaved.location || "")) isDirty = true;
-    else if (planDate !== (lastSaved.plan_date || "")) isDirty = true;
-    else if ((projectId === "none" ? null : projectId) !== lastSaved.project_id) isDirty = true;
-    else if (deletedItemIds.length > 0 || deletedImageIds.length > 0 || deletedAttachmentIds.length > 0) isDirty = true;
-    else if (items.length !== (lastSaved.items || []).length) isDirty = true;
-    else if (planImages.length !== (lastSaved.images || []).length) isDirty = true;
-    else if (attachments.length !== (lastSaved.attachments || []).length) isDirty = true;
+    if (name !== (lastSaved.name || "")) { isDirty = true; console.log("DIRTY name", name, lastSaved.name); }
+    else if (locationStr !== (lastSaved.location || "")) { isDirty = true; console.log("DIRTY location", locationStr, lastSaved.location); }
+    else if (planDate !== (lastSaved.plan_date || "")) { isDirty = true; console.log("DIRTY date", planDate, lastSaved.plan_date); }
+    else if ((projectId === "none" ? null : projectId) !== (lastSaved.project_id === "none" ? null : lastSaved.project_id)) { isDirty = true; console.log("DIRTY proj", projectId, lastSaved.project_id); }
+    else if (deletedItemIds.length > 0 || deletedImageIds.length > 0 || deletedAttachmentIds.length > 0) { isDirty = true; console.log("DIRTY deleted", deletedItemIds, deletedImageIds, deletedAttachmentIds); }
+    else if (items.length !== (lastSaved.items || []).length) { isDirty = true; console.log("DIRTY items len", items.length, lastSaved.items?.length); }
+    else if (planImages.length !== (lastSaved.images || []).length) { isDirty = true; console.log("DIRTY planImages len", planImages.length, lastSaved.images?.length); }
+    else if (attachments.length !== (lastSaved.attachments || []).length) { isDirty = true; console.log("DIRTY attachments len", attachments.length, lastSaved.attachments?.length); }
     else {
       for (let i = 0; i < items.length; i++) {
          const currentClean = { ...items[i], images: [] };
          const originalClean = { ...(lastSaved.items || [])[i], images: [] };
-         if (JSON.stringify(currentClean) !== JSON.stringify(originalClean)) {
+         if (stableStringify(currentClean) !== stableStringify(originalClean)) {
            isDirty = true;
+           console.log("DIRTY items mismatch at", i, "\nCURRENT:", stableStringify(currentClean), "\nORIGINAL:", stableStringify(originalClean));
            break;
          }
       }
@@ -2879,7 +2888,7 @@ export default function CreateSketchPlan() {
         // Include sort_order in comparison
         const currentClean = { ...item, images: [] };
         const originalClean = { ...original, images: [] };
-        return JSON.stringify(currentClean) !== JSON.stringify(originalClean);
+        return stableStringify(currentClean) !== stableStringify(originalClean);
       });
 
       // Identify modified plan images

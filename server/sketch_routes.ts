@@ -24,7 +24,7 @@ const deleteFromSupabaseBucket = async (urls: string[]) => {
       return parts.length > 1 ? parts[1].split('?')[0] : null;
     })
     .filter(Boolean) as string[];
-  
+
   if (filePaths.length > 0) {
     try {
       await supabaseStorage.storage.from('boq-images').remove(filePaths);
@@ -548,7 +548,7 @@ export async function registerSketchRoutes(app: Express) {
           await client.query("DELETE FROM sketch_plan_attachments WHERE plan_id = $1 AND id IN (SELECT unnest($2::text[]))", [id, deletedAttachmentIds]);
         }
       } else {
-        const incomingItemIds = (items || []).map((it: any) => it.id).filter((iid: any) => iid && iid.startsWith('ski-'));
+        const incomingItemIds = (items || []).map((it: any) => it.id).filter(Boolean);
         if (incomingItemIds.length > 0) {
           await client.query("DELETE FROM sketch_plan_items WHERE plan_id = $1 AND id NOT IN (SELECT unnest($2::text[]))", [id, incomingItemIds]);
         } else {
@@ -603,7 +603,7 @@ export async function registerSketchRoutes(app: Express) {
       // 2. Upsert items and their images
       if (items && Array.isArray(items)) {
         for (const item of items) {
-          const itemId = (item.id && item.id.startsWith('ski-')) ? item.id : `ski-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+          const itemId = item.id ? item.id : `ski-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
           await client.query(
             `INSERT INTO sketch_plan_items (
               id, plan_id, item_name, description, length, width, height, qty, unit, 
