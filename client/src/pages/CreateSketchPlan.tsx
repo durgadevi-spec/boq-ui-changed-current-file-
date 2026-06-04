@@ -2687,6 +2687,7 @@ export default function CreateSketchPlan() {
 
   const applyMaterialSelection = (idx: number, material: any, updateCategory: boolean = true) => {
     const newItems = [...items];
+    newItems[idx] = { ...newItems[idx] };
     newItems[idx].material_id = material.id;
     newItems[idx].item_name = material.name;
     newItems[idx].rate = parseFloat(material.rate) || 0;
@@ -2715,84 +2716,7 @@ export default function CreateSketchPlan() {
       }
     }
 
-    // Smart Supply & Labour Auto Matching
-    if (includeSupply && includeLabour) {
-      const name = (material.name || "").toLowerCase();
-      const labourKeywords = ["labour", "service", "installation", "install", "refixing", "removing", "fixing", "fitting", "work", "charges", "repair", "maintenance"];
-      const isLabour = labourKeywords.some(key => name.includes(key));
-      const isSupply = !isLabour;
 
-      if (isSupply || isLabour) {
-        // More robust base name extraction
-        const baseName = material.name
-          .replace(/\b(supply|labour|service|installation|install)\b/gi, "")
-          .replace(/[-\s]+$/, "")
-          .replace(/^[-\s]+/, "")
-          .trim();
-        
-        if (baseName.length > 2) {
-          const oppositeType = isSupply ? "labour" : "supply";
-          const baseWords = baseName.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
-          
-          // Look for the pair in current search results
-          const pair = searchResults.find(m => {
-            if (m.id === material.id) return false;
-            const mName = (m.name || "").toLowerCase();
-            const mIsLabour = mName.includes("labour") || mName.includes("service") || mName.includes("installation") || mName.includes("install");
-            
-            // Type must be opposite
-            if (isSupply && !mIsLabour) return false;
-            if (isLabour && mIsLabour) return false;
-
-            // Name must contain the primary keywords of the base name
-            // For example, if searching 'Grid Ceiling', the pair must also have 'Grid' and 'Ceiling'
-            return baseWords.every((word: string) => mName.includes(word));
-          });
-
-          if (pair) {
-            // Check if it's already in the items list to avoid duplicates
-            const alreadyExists = newItems.some(it => 
-              it.item_name === pair.name && 
-              it.category === (pair.category || newItems[idx].category)
-            );
-            
-            if (!alreadyExists) {
-              const pairedItem: PlanItem = {
-                id: `ski-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-                item_name: pair.name,
-                material_id: pair.id,
-                rate: parseFloat(pair.rate) || 0,
-                description: newItems[idx].description,
-                length: newItems[idx].length,
-                width: newItems[idx].width,
-                height: newItems[idx].height,
-                qty: newItems[idx].qty,
-                unit: pair.unit || newItems[idx].unit,
-                dimension_unit: newItems[idx].dimension_unit,
-                category: pair.category || newItems[idx].category,
-                remarks: "",
-                preImages: [],
-                postImages: [],
-                images: []
-              };
-              
-              if (pair.image) {
-                const pairUrls = parseImages(pair.image);
-                if (pairUrls.length > 0) {
-                  pairedItem.preImages = [{ url: pairUrls[0], name: `Template_${pair.name}` }];
-                }
-              }
-
-              newItems.splice(idx + 1, 0, pairedItem);
-              toast({ 
-                title: "Smart Matching", 
-                description: `Automatically added matching ${oppositeType === 'labour' ? 'Labour' : 'Supply'} item: ${pair.name}` 
-              });
-            }
-          }
-        }
-      }
-    }
 
     setItems(newItems);
     setMaterialSearch("");
@@ -2804,13 +2728,15 @@ export default function CreateSketchPlan() {
       applyMaterialSelection(rowToConfirm.idx, rowToConfirm.material, true);
       setRowToConfirm(null);
       setShowCategoryConfirm(false);
+      setOpenPopoverIdx(null);
     }
   };
 
   const cancelCategoryReplace = () => {
-    // "On cancel → keep existing category and prevent mismatch"
-    // This implies we don't apply the material selection because it has a different category.
-    setRowToConfirm(null);
+    if (rowToConfirm) {
+      applyMaterialSelection(rowToConfirm.idx, rowToConfirm.material, false);
+      setRowToConfirm(null);
+    }
     setShowCategoryConfirm(false);
     setOpenPopoverIdx(null); // Close the item picker
     setMaterialSearch("");
