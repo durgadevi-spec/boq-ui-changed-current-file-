@@ -68,6 +68,10 @@ import {
   Send,
   CheckCheck,
   Loader2,
+  Store,
+  Diamond,
+  ChevronRight,
+  FileDown,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { postJSON, apiFetch } from "@/lib/api";
@@ -203,6 +207,45 @@ export default function AdminDashboard() {
   const [masterMaterials, setMasterMaterials] = useState<any[]>([]);
   const [supportMsgs, setSupportMsgs] = useState<any[]>([]);
 
+  const [displayShops, setDisplayShops] = useState(0);
+  const [displayMaterials, setDisplayMaterials] = useState(0);
+  const [displayPricing, setDisplayPricing] = useState(0);
+  const [cardsVisible, setCardsVisible] = useState(false);
+
+  useEffect(() => {
+    if (!shops.length && !materials.length) return;
+    setCardsVisible(true);
+
+    const animateCount = (
+      target: number,
+      setter: (v: number) => void
+    ) => {
+      const duration = 1500;
+      const steps = 60;
+      const increment = target / steps;
+      let current = 0;
+      const timer = setInterval(() => {
+        current += increment;
+        if (current >= target) {
+          setter(target);
+          clearInterval(timer);
+        } else {
+          setter(Math.floor(current));
+        }
+      }, duration / steps);
+    };
+
+    animateCount(shops.length, setDisplayShops);
+    animateCount(
+      materials.length,
+      setDisplayMaterials
+    );
+    animateCount(
+      materials.filter((m: any) => m.is_project_pricing).length,
+      setDisplayPricing
+    );
+  }, [shops.length, materials.length]);
+
   const [newMasterMaterial, setNewMasterMaterial] = useState<{
     name: string;
     code: string;
@@ -234,6 +277,41 @@ export default function AdminDashboard() {
       adminChatScrollRef.current.scrollTop = adminChatScrollRef.current.scrollHeight;
     }
   }, [selectedConversationEmail, supportMessages]);
+
+  // Load proposal material submissions
+  useEffect(() => {
+    const loadProposalMaterials = async () => {
+      try {
+        setLoadingProposalMaterials(true);
+        const token = localStorage.getItem("authToken");
+        const response = await fetch("/api/proposal-material-submissions-pending-approval", {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+
+        if (!response.ok) {
+          console.warn("Failed to load proposal materials, status:", response.status);
+          setProposalMaterialSubmissions([]);
+          setLoadingProposalMaterials(false);
+          return;
+        }
+
+        const data = await response.json();
+        setProposalMaterialSubmissions(data.submissions?.map((s: any) => s.submission) || []);
+      } catch (err) {
+        console.error("Error loading proposal material submissions:", err);
+        setProposalMaterialSubmissions([]);
+      } finally {
+        setLoadingProposalMaterials(false);
+      }
+    };
+
+    // Load initially
+    loadProposalMaterials();
+
+    // Reload every 30 seconds
+    const interval = setInterval(loadProposalMaterials, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleSendReply = async (id: string) => {
     const text = replyTexts[id];
@@ -1434,6 +1512,11 @@ export default function AdminDashboard() {
   const [supportSenderName, setSupportSenderName] = useState("");
   const [supportSenderInfo, setSupportSenderInfo] = useState("");
 
+  // State for proposal material submissions
+  const [proposalMaterialSubmissions, setProposalMaterialSubmissions] = useState<any[]>([]);
+  const [loadingProposalMaterials, setLoadingProposalMaterials] = useState(false);
+  const [rejectingProposalMaterialId, setRejectingProposalMaterialId] = useState<string | null>(null);
+
   const handleAddShop = () => {
     if (
       !newShop.name ||
@@ -1667,6 +1750,91 @@ export default function AdminDashboard() {
         toast({ title: "Error", description: "Failed to reject material", variant: "destructive" });
       }
     })();
+  };
+
+  const handleApproveProposalMaterial = async (submissionId: string) => {
+    try {
+      const token = localStorage.getItem("authToken");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const response = await fetch(`/api/proposal-material-submissions/${submissionId}/approve`, {
+        method: "POST",
+        headers,
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to approve");
+      }
+
+      toast({
+        title: "Success",
+        description: "Supplier material approved and added to materials",
+      });
+
+      // Remove from pending list
+      setProposalMaterialSubmissions((prev) =>
+        prev.filter((s) => s.id !== submissionId)
+      );
+    } catch (err) {
+      console.error("Error approving proposal material:", err);
+      toast({
+        title: "Error",
+        description: "Failed to approve proposal material",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRejectProposalMaterial = async (submissionId: string) => {
+    if (!rejectReason.trim()) {
+      toast({
+        title: "Error",
+        description: "Please provide a rejection reason",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("authToken");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const response = await fetch(`/api/proposal-material-submissions/${submissionId}/reject`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ reason: rejectReason }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to reject");
+      }
+
+      toast({
+        title: "Success",
+        description: "Supplier material rejected",
+      });
+
+      setRejectReason("");
+      setRejectingProposalMaterialId(null);
+
+      // Remove from pending list
+      setProposalMaterialSubmissions((prev) =>
+        prev.filter((s) => s.id !== submissionId)
+      );
+    } catch (err) {
+      console.error("Error rejecting proposal material:", err);
+      toast({
+        title: "Error",
+        description: "Failed to reject proposal material",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleSupportSubmit = async () => {
@@ -1929,291 +2097,369 @@ export default function AdminDashboard() {
         {/* Stats Overview (shown only on Dashboard tab) */}
         {activeTab === "dashboard" && !isProductManager && (
           <div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div
+                className="rounded-2xl p-5 flex items-center gap-4 transition-all duration-700"
+                style={{
+                  background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+                  opacity: cardsVisible ? 1 : 0,
+                  transform: cardsVisible
+                    ? 'translateY(0)'
+                    : 'translateY(20px)',
+                  transitionDelay: '0ms'
+                }}
+              >
+                <div className="p-3 rounded-xl bg-green-100">
+                  <Store className="h-6 w-6 text-green-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-green-700 font-medium">
                     Total Shops
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">{shops.length}</div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                  </p>
+                  <p className="text-2xl font-bold text-green-900">
+                    {displayShops}
+                  </p>
+                </div>
+              </div>
+
+              <div
+                className="rounded-2xl p-5 flex items-center gap-4 transition-all duration-700"
+                style={{
+                  background: 'linear-gradient(135deg, #faf5ff 0%, #ede9fe 100%)',
+                  opacity: cardsVisible ? 1 : 0,
+                  transform: cardsVisible
+                    ? 'translateY(0)'
+                    : 'translateY(20px)',
+                  transitionDelay: '150ms'
+                }}
+              >
+                <div className="p-3 rounded-xl bg-purple-100">
+                  <Layers className="h-6 w-6 text-purple-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-purple-700 font-medium">
                     Total Materials
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">{materials.length}</div>
-                </CardContent>
-              </Card>
-              <Card onClick={() => setActiveTab("project-pricing-materials")} className="cursor-pointer hover:border-amber-300 transition-colors">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium text-amber-600">
+                  </p>
+                  <p className="text-2xl font-bold text-purple-900">
+                    {displayMaterials}
+                  </p>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setActiveTab("project-pricing-materials")}
+                className="rounded-2xl p-5 flex items-center gap-4 transition-all duration-700 cursor-pointer hover:shadow-md transition-shadow"
+                style={{
+                  background: 'linear-gradient(135deg, #fff7ed 0%, #fed7aa 100%)',
+                  opacity: cardsVisible ? 1 : 0,
+                  transform: cardsVisible
+                    ? 'translateY(0)'
+                    : 'translateY(20px)',
+                  transitionDelay: '300ms'
+                }}
+              >
+                <div className="p-3 rounded-xl bg-orange-100">
+                  <Diamond className="h-6 w-6 text-orange-500" />
+                </div>
+                <div>
+                  <p className="text-sm text-orange-700 font-medium">
                     Project Pricing Materials
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold text-amber-600">{materials.filter((m: any) => m.is_project_pricing).length}</div>
-                </CardContent>
-              </Card>
+                  </p>
+                  <p className="text-2xl font-bold text-orange-900">
+                    {displayPricing}
+                  </p>
+                </div>
+              </div>
             </div>
 
             {(isAdminOrSoftwareTeam || user?.role === "purchase_team" || user?.role === "pre_sales") && (
-              <div className="space-y-4">
-                <Card>
-                  <CardHeader className="cursor-pointer select-none" onClick={() => setShowShopsList(!showShopsList)}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle className="font-bold text-lg text-foreground flex items-center gap-2">
-                          All Shops {showShopsList ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                        </CardTitle>
-                        <CardDescription className="text-sm flex items-center justify-between">
-                          <span>List of registered shops</span>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => { e.stopPropagation(); handleExportShops(); }}
-                            className="h-7 text-xs bg-green-50 hover:bg-green-100 border-green-200 text-green-700 font-bold"
-                          >
-                            <Layers className="h-3 w-3 mr-1" /> Download Shops Excel
-                          </Button>
-                        </CardDescription>
+              <div className="space-y-6">
+                <div className="space-y-3">
+                  <Card className="px-4 py-3 cursor-pointer select-none" onClick={() => setShowShopsList(!showShopsList)}>
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 rounded-xl bg-green-50">
+                        <Store className="h-5 w-5 text-green-600" />
                       </div>
+                      <div className="flex-1">
+                        <p className="font-semibold text-base">All Shops</p>
+                        <p className="text-xs text-muted-foreground">
+                          List of registered shops
+                        </p>
+                      </div>
+                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-green-100 text-green-700">
+                        {shops.length}
+                      </span>
+                      <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", showShopsList && "rotate-90")} />
                     </div>
-                  </CardHeader>
-                  {showShopsList && (
-                    <CardContent className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                      <div className="flex flex-col md:flex-row items-center gap-3">
-                        <div className="relative flex-1">
-                          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            value={shopSearch}
-                            onChange={(e) => setShopSearch(e.target.value)}
-                            placeholder="Search shops by name, city or location..."
-                            className="h-10 pl-9"
-                          />
+                    {showShopsList && (
+                      <div onClick={(e) => e.stopPropagation()} className="mt-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                        <div className="flex flex-col md:flex-row items-center gap-3">
+                          <div className="relative flex-1">
+                            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                              value={shopSearch}
+                              onChange={(e) => setShopSearch(e.target.value)}
+                              placeholder="Search shops by name, city or location..."
+                              className="h-10 pl-9"
+                            />
+                          </div>
+                          <Select
+                            value={shopVendorCategoryFilter}
+                            onValueChange={setShopVendorCategoryFilter}
+                          >
+                            <SelectTrigger className="w-full md:w-[220px] h-10">
+                              <SelectValue placeholder="All Vendor Categories" />
+                            </SelectTrigger>
+                            <SelectContent className="max-h-[300px]">
+                              <SelectItem value="all">All Vendor Categories</SelectItem>
+                              {vendorCategories.map((vc: any) => (
+                                <SelectItem key={vc.id} value={vc.name}>{vc.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
-                        <Select
-                          value={shopVendorCategoryFilter}
-                          onValueChange={setShopVendorCategoryFilter}
-                        >
-                          <SelectTrigger className="w-full md:w-[220px] h-10">
-                            <SelectValue placeholder="All Vendor Categories" />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-[300px]">
-                            <SelectItem value="all">All Vendor Categories</SelectItem>
-                            {vendorCategories.map((vc: any) => (
-                              <SelectItem key={vc.id} value={vc.name}>{vc.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="max-h-[800px] overflow-y-auto pr-2 border rounded-md">
-                        {filteredShops.length === 0 ? (
-                          <p className="text-muted-foreground">No shops available</p>
-                        ) : (
-                          filteredShops.map((shop: any) => (
-                            <div key={shop.id} className="p-3 border-b hover:bg-muted/30 transition-colors">
-                              {editingShopId === shop.id ? (
-                                <div className="space-y-4 p-2 bg-muted/20 rounded-lg">
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                      <Label className="text-xs font-semibold">Shop Name</Label>
-                                      <Input value={newShop.name || ''} onChange={(e) => setNewShop({ ...newShop, name: e.target.value })} placeholder="Shop Name" />
-                                    </div>
-                                    <div>
-                                      <Label className="text-xs font-semibold">Address</Label>
-                                      <Input value={newShop.location || ''} onChange={(e) => setNewShop({ ...newShop, location: e.target.value })} placeholder="Address" />
-                                    </div>
-                                    <div>
-                                      <Label className="text-xs font-semibold">Location</Label>
-                                      <Input value={newShop.new_location || ''} onChange={(e) => setNewShop({ ...newShop, new_location: e.target.value })} placeholder="Location" />
-                                    </div>
-                                    <div>
-                                      <Label className="text-xs font-semibold">City</Label>
-                                      <Input value={newShop.city || ''} onChange={(e) => setNewShop({ ...newShop, city: e.target.value })} placeholder="City" />
-                                    </div>
-                                    <div>
-                                      <Label className="text-xs font-semibold">Contact Number</Label>
-                                      <Input value={newShop.contactNumber || ''} onChange={(e) => setNewShop({ ...newShop, contactNumber: e.target.value })} placeholder="Phone Number" />
-                                    </div>
-                                    <div>
-                                      <Label className="text-xs font-semibold">GST No</Label>
-                                      <Input value={newShop.gstNo || ''} onChange={(e) => setNewShop({ ...newShop, gstNo: e.target.value })} placeholder="GST No" />
-                                    </div>
-                                    <div>
-                                      <Label className="text-xs font-semibold">Terms and Conditions</Label>
-                                      <Input value={newShop.terms_and_conditions || ''} onChange={(e) => setNewShop({ ...newShop, terms_and_conditions: e.target.value })} placeholder="Terms and Conditions" />
-                                    </div>
-                                    <div>
-                                      <Label className="text-xs font-semibold">Vendor Category</Label>
-                                      <Select value={newShop.vendorCategory || ''} onValueChange={(v) => setNewShop({ ...newShop, vendorCategory: v })}>
-                                        <SelectTrigger>
-                                          <SelectValue placeholder="Select Vendor Category" />
-                                        </SelectTrigger>
-                                        <SelectContent className="max-h-60 overflow-y-auto">
-                                          {vendorCategories.map((vc: any) => (
-                                            <SelectItem key={vc.id} value={vc.name}>{vc.name}</SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                  </div>
-                                  <div className="flex gap-2 pt-2">
-                                    <Button size="sm" onClick={handleUpdateShop}>Save Changes</Button>
-                                    <Button size="sm" variant="ghost" onClick={() => { setEditingShopId(null); setNewShop({ name: '', location: '', city: '', phoneCountryCode: '+91', state: '', country: '', pincode: '', gstNo: '' }); }}>Cancel</Button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div>
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-start gap-3">
-                                      <button
-                                        onClick={() => setExpandedShops(prev => prev.includes(shop.id) ? prev.filter(id => id !== shop.id) : [...prev, shop.id])}
-                                        aria-label={expandedShops.includes(shop.id) ? 'Collapse materials' : 'Expand materials'}
-                                        className="p-1 mt-1"
-                                      >
-                                        {expandedShops.includes(shop.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                      </button>
+                        <div className="max-h-[800px] overflow-y-auto pr-2 border rounded-md">
+                          {filteredShops.length === 0 ? (
+                            <p className="text-muted-foreground">No shops available</p>
+                          ) : (
+                            filteredShops.map((shop: any) => (
+                              <div key={shop.id} className="p-3 border-b hover:bg-muted/30 transition-colors">
+                                {editingShopId === shop.id ? (
+                                  <div className="space-y-4 p-2 bg-muted/20 rounded-lg">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                       <div>
-                                        <div className="font-bold text-lg text-foreground">{shop.name}</div>
-                                        <div className="text-sm text-foreground/80">
-                                          {shop.location}, {shop.city}
-                                          {shop.new_location && <div className="text-xs text-muted-foreground mt-0.5 italic">Alt Location: {shop.new_location}</div>}
-                                          {shop.terms_and_conditions && <div className="text-xs text-blue-600 mt-0.5 line-clamp-1">T&C: {shop.terms_and_conditions}</div>}
-                                        </div>
-                                        <div className="text-xs text-muted-foreground mt-1 font-medium">
-                                          {(shop.phone_country_code || shop.phoneCountryCode || shop.phonecountrycode || '+91')}{" "}{(shop.contact_number || shop.contactNumber || shop.contactnumber || shop.phone || shop.mobile)} • {shop.gst_no || shop.gstNo || shop.gstno || 'No GST'}
-                                        </div>
+                                        <Label className="text-xs font-semibold">Shop Name</Label>
+                                        <Input value={newShop.name || ''} onChange={(e) => setNewShop({ ...newShop, name: e.target.value })} placeholder="Shop Name" />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs font-semibold">Address</Label>
+                                        <Input value={newShop.location || ''} onChange={(e) => setNewShop({ ...newShop, location: e.target.value })} placeholder="Address" />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs font-semibold">Location</Label>
+                                        <Input value={newShop.new_location || ''} onChange={(e) => setNewShop({ ...newShop, new_location: e.target.value })} placeholder="Location" />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs font-semibold">City</Label>
+                                        <Input value={newShop.city || ''} onChange={(e) => setNewShop({ ...newShop, city: e.target.value })} placeholder="City" />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs font-semibold">Contact Number</Label>
+                                        <Input value={newShop.contactNumber || ''} onChange={(e) => setNewShop({ ...newShop, contactNumber: e.target.value })} placeholder="Phone Number" />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs font-semibold">GST No</Label>
+                                        <Input value={newShop.gstNo || ''} onChange={(e) => setNewShop({ ...newShop, gstNo: e.target.value })} placeholder="GST No" />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs font-semibold">Terms and Conditions</Label>
+                                        <Input value={newShop.terms_and_conditions || ''} onChange={(e) => setNewShop({ ...newShop, terms_and_conditions: e.target.value })} placeholder="Terms and Conditions" />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs font-semibold">Vendor Category</Label>
+                                        <Select value={newShop.vendorCategory || ''} onValueChange={(v) => setNewShop({ ...newShop, vendorCategory: v })}>
+                                          <SelectTrigger>
+                                            <SelectValue placeholder="Select Vendor Category" />
+                                          </SelectTrigger>
+                                          <SelectContent className="max-h-60 overflow-y-auto">
+                                            {vendorCategories.map((vc: any) => (
+                                              <SelectItem key={vc.id} value={vc.name}>{vc.name}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                      {(canEditDelete || user?.role === "pre_sales") && (
-                                        <>
-                                          <Button size="sm" variant="outline" onClick={() => handleEditShop(shop)}>Edit</Button>
-                                          {canEditDelete && (
-                                            <>
-                                              <Button size="sm" variant="ghost" onClick={() => setLocalShops((prev: any[]) => prev.map((s: any) => s.id === shop.id ? { ...s, disabled: !s.disabled } : s))}>
-                                                {shop.disabled ? 'Enable' : 'Disable'}
-                                              </Button>
-                                              <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="text-destructive"
-                                                onClick={() => {
-                                                  setGenericDelete({ isOpen: true, id: shop.id, name: shop.name, type: 'shop' });
-                                                }}
-                                              >
-                                                <Trash2 className="h-4 w-4" />
-                                              </Button>
-                                            </>
-                                          )}
-                                        </>
-                                      )}
+                                    <div className="flex gap-2 pt-2">
+                                      <Button size="sm" onClick={handleUpdateShop}>Save Changes</Button>
+                                      <Button size="sm" variant="ghost" onClick={() => { setEditingShopId(null); setNewShop({ name: '', location: '', city: '', phoneCountryCode: '+91', state: '', country: '', pincode: '', gstNo: '' }); }}>Cancel</Button>
                                     </div>
                                   </div>
-
-                                  {expandedShops.includes(shop.id) && (
-                                    <div className="mt-2 pl-10">
-                                      {localMaterials.filter((m: any) => String(m.shopId) === String(shop.id)).length === 0 ? (
-                                        <div className="text-sm text-muted-foreground">No materials for this shop</div>
-                                      ) : (
-                                        localMaterials
-                                          .filter((m: any) => String(m.shopId) === String(shop.id))
-                                          .map((mat: any) => (
-                                            <div key={mat.id} className="py-1">
-                                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-                                                <div className="text-sm font-medium">{mat.name}</div>
-                                                <div className="text-sm">₹{Number(mat.rate || 0).toLocaleString()}</div>
-                                              </div>
-                                              <div className="text-[10px] sm:text-xs flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1">
-                                                <span className="font-bold text-slate-700 bg-slate-100 px-1 rounded uppercase tracking-tighter text-[9px]">{mat.code || 'No code'}</span>
-                                                <span className="text-slate-800 font-medium">Brand:</span><span className="text-blue-600 font-semibold">{mat.brandName || mat.brand || mat.brandname || '-'}</span>
-                                                <span className="text-slate-300">•</span>
-                                                <span className="text-slate-800 font-medium">Unit:</span><span className="text-blue-600 font-semibold">{mat.unit || '-'}</span>
-                                                <span className="text-slate-300">•</span>
-                                                <span className="text-slate-800 font-medium">Model:</span><span className="text-blue-600 font-semibold">{mat.modelNumber || mat.model || '-'}</span>
-                                              </div>
-                                            </div>
-                                          ))
-                                      )}
+                                ) : (
+                                  <div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-start gap-3">
+                                        <button
+                                          onClick={() => setExpandedShops(prev => prev.includes(shop.id) ? prev.filter(id => id !== shop.id) : [...prev, shop.id])}
+                                          aria-label={expandedShops.includes(shop.id) ? 'Collapse materials' : 'Expand materials'}
+                                          className="p-1 mt-1"
+                                        >
+                                          {expandedShops.includes(shop.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                        </button>
+                                        <div>
+                                          <div className="font-bold text-lg text-foreground">{shop.name}</div>
+                                          <div className="text-sm text-foreground/80">
+                                            {shop.location}, {shop.city}
+                                            {shop.new_location && <div className="text-xs text-muted-foreground mt-0.5 italic">Alt Location: {shop.new_location}</div>}
+                                            {shop.terms_and_conditions && <div className="text-xs text-blue-600 mt-0.5 line-clamp-1">T&C: {shop.terms_and_conditions}</div>}
+                                          </div>
+                                          <div className="text-xs text-muted-foreground mt-1 font-medium">
+                                            {(shop.phone_country_code || shop.phoneCountryCode || shop.phonecountrycode || '+91')}{" "}{(shop.contact_number || shop.contactNumber || shop.contactnumber || shop.phone || shop.mobile)} • {shop.gst_no || shop.gstNo || shop.gstno || 'No GST'}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        {(canEditDelete || user?.role === "pre_sales") && (
+                                          <>
+                                            <Button size="sm" variant="outline" onClick={() => handleEditShop(shop)}>Edit</Button>
+                                            {canEditDelete && (
+                                              <>
+                                                <Button size="sm" variant="ghost" onClick={() => setLocalShops((prev: any[]) => prev.map((s: any) => s.id === shop.id ? { ...s, disabled: !s.disabled } : s))}>
+                                                  {shop.disabled ? 'Enable' : 'Disable'}
+                                                </Button>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="icon"
+                                                  className="text-destructive"
+                                                  onClick={() => {
+                                                    setGenericDelete({ isOpen: true, id: shop.id, name: shop.name, type: 'shop' });
+                                                  }}
+                                                >
+                                                  <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                              </>
+                                            )}
+                                          </>
+                                        )}
+                                      </div>
                                     </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </CardContent>
-                  )}
-                </Card>
 
-                <Card>
-                  <CardHeader className="cursor-pointer select-none" onClick={() => setShowMaterialsList(!showMaterialsList)}>
-                    <div className="flex items-center justify-between">
+                                    {expandedShops.includes(shop.id) && (
+                                      <div className="mt-2 pl-10">
+                                        {localMaterials.filter((m: any) => String(m.shopId) === String(shop.id)).length === 0 ? (
+                                          <div className="text-sm text-muted-foreground">No materials for this shop</div>
+                                        ) : (
+                                          localMaterials
+                                            .filter((m: any) => String(m.shopId) === String(shop.id))
+                                            .map((mat: any) => (
+                                              <div key={mat.id} className="py-1">
+                                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                                                  <div className="text-sm font-medium">{mat.name}</div>
+                                                  <div className="text-sm">₹{Number(mat.rate || 0).toLocaleString()}</div>
+                                                </div>
+                                                <div className="text-[10px] sm:text-xs flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1">
+                                                  <span className="font-bold text-slate-700 bg-slate-100 px-1 rounded uppercase tracking-tighter text-[9px]">{mat.code || 'No code'}</span>
+                                                  <span className="text-slate-800 font-medium">Brand:</span><span className="text-blue-600 font-semibold">{mat.brandName || mat.brand || mat.brandname || '-'}</span>
+                                                  <span className="text-slate-300">•</span>
+                                                  <span className="text-slate-800 font-medium">Unit:</span><span className="text-blue-600 font-semibold">{mat.unit || '-'}</span>
+                                                  <span className="text-slate-300">•</span>
+                                                  <span className="text-slate-800 font-medium">Model:</span><span className="text-blue-600 font-semibold">{mat.modelNumber || mat.model || '-'}</span>
+                                                </div>
+                                              </div>
+                                            ))
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </Card>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div onClick={handleExportShops}
+                      className="flex items-center gap-2 px-4 py-3 rounded-xl border border-green-200 bg-green-50 cursor-pointer hover:bg-green-100 transition-colors">
+                      <FileDown className="h-4 w-4 text-green-700" />
                       <div>
-                        <CardTitle className="font-bold text-lg text-foreground flex items-center gap-2">
-                          All Materials {showMaterialsList ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                        </CardTitle>
-                        <CardDescription className="text-sm flex items-center justify-between">
-                          <span>Comprehensive material registry</span>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => { e.stopPropagation(); handleCheckDuplicates(); }}
-                              disabled={checkingDuplicates}
-                              className="h-7 text-xs bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-700 font-bold"
-                            >
-                              {checkingDuplicates ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <AlertTriangle className="h-3 w-3 mr-1" />}
-                              Check for Duplicates
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => { e.stopPropagation(); handleExportMaterials(); }}
-                              className="h-7 text-xs bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-700 font-bold"
-                            >
-                              <Layers className="h-3 w-3 mr-1" /> Download Materials Excel
-                            </Button>
-                          </div>
-                        </CardDescription>
+                        <p className="text-xs font-semibold text-green-700">
+                          Download Shops Excel
+                        </p>
+                        <p className="text-[11px] text-green-600">
+                          Export all shops data
+                        </p>
                       </div>
                     </div>
-                  </CardHeader>
-                  {showMaterialsList && (
-                    <CardContent className="p-0 animate-in fade-in slide-in-from-top-2 duration-300">
-                      <AllMaterialsSplitView
-                        materials={filteredMaterials.filter((m: any) => !m.is_project_pricing)}
-                        localShops={localShops}
-                        categories={categories}
-                        getSubCategoriesForCategory={getSubCategoriesForCategory}
-                        products={products}
-                        UNIT_OPTIONS={UNIT_OPTIONS}
-                        materialSearch={materialSearch}
-                        setMaterialSearch={setMaterialSearch}
-                        materialCategoryFilter={materialCategoryFilter}
-                        setMaterialCategoryFilter={setMaterialCategoryFilter}
-                        materialSubcategoryFilter={materialSubcategoryFilter}
-                        setMaterialSubcategoryFilter={setMaterialSubcategoryFilter}
-                        editingMaterialId={editingMaterialId}
-                        setEditingMaterialId={setEditingMaterialId}
-                        newMaterial={newMaterial}
-                        setNewMaterial={setNewMaterial}
-                        handleUpdateMaterial={handleUpdateMaterial}
-                        onToggleDisable={(mat) => setLocalMaterials((prev: any[]) => prev.map((m: any) => m.id === mat.id ? { ...m, disabled: !m.disabled } : m))}
-                        onDelete={(mat) => setGenericDelete({ isOpen: true, id: mat.id, name: mat.name, type: 'material' })}
-                        canEditDelete={canEditDelete}
-                        userRole={user?.role || ""}
-                      />
-                    </CardContent>
-                  )}
-                </Card>
+                    <div onClick={handleCheckDuplicates}
+                      className="flex items-center gap-2 px-4 py-3 rounded-xl border border-amber-200 bg-amber-50 cursor-pointer hover:bg-amber-100 transition-colors">
+                      <AlertTriangle className="h-4 w-4 text-amber-700" />
+                      <div>
+                        <p className="text-xs font-semibold text-amber-700">
+                          Check Duplicates
+                        </p>
+                        <p className="text-[11px] text-amber-600">
+                          Find duplicate shops
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <Card className="px-4 py-3 cursor-pointer select-none" onClick={() => setShowMaterialsList(!showMaterialsList)}>
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 rounded-xl bg-purple-50">
+                        <Layers className="h-5 w-5 text-purple-600" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold text-base">All Materials</p>
+                        <p className="text-xs text-muted-foreground">
+                          Comprehensive material registry
+                        </p>
+                      </div>
+                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-purple-100 text-purple-700">
+                        {materials.length}
+                      </span>
+                      <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", showMaterialsList && "rotate-90")} />
+                    </div>
+                    {showMaterialsList && (
+                      <div onClick={(e) => e.stopPropagation()} className="mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                        <AllMaterialsSplitView
+                          materials={filteredMaterials.filter((m: any) => !m.is_project_pricing)}
+                          localShops={localShops}
+                          categories={categories}
+                          getSubCategoriesForCategory={getSubCategoriesForCategory}
+                          products={products}
+                          UNIT_OPTIONS={UNIT_OPTIONS}
+                          materialSearch={materialSearch}
+                          setMaterialSearch={setMaterialSearch}
+                          materialCategoryFilter={materialCategoryFilter}
+                          setMaterialCategoryFilter={setMaterialCategoryFilter}
+                          materialSubcategoryFilter={materialSubcategoryFilter}
+                          setMaterialSubcategoryFilter={setMaterialSubcategoryFilter}
+                          editingMaterialId={editingMaterialId}
+                          setEditingMaterialId={setEditingMaterialId}
+                          newMaterial={newMaterial}
+                          setNewMaterial={setNewMaterial}
+                          handleUpdateMaterial={handleUpdateMaterial}
+                          onToggleDisable={(mat) => setLocalMaterials((prev: any[]) => prev.map((m: any) => m.id === mat.id ? { ...m, disabled: !m.disabled } : m))}
+                          onDelete={(mat) => setGenericDelete({ isOpen: true, id: mat.id, name: mat.name, type: 'material' })}
+                          canEditDelete={canEditDelete}
+                          userRole={user?.role || ""}
+                        />
+                      </div>
+                    )}
+                  </Card>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div onClick={handleExportMaterials}
+                      className="flex items-center gap-2 px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 cursor-pointer hover:bg-blue-100 transition-colors">
+                      <FileDown className="h-4 w-4 text-blue-700" />
+                      <div>
+                        <p className="text-xs font-semibold text-blue-700">
+                          Download Materials Excel
+                        </p>
+                        <p className="text-[11px] text-blue-600">
+                          Export all materials data
+                        </p>
+                      </div>
+                    </div>
+                    <div onClick={handleCheckDuplicates}
+                      className="flex items-center gap-2 px-4 py-3 rounded-xl border border-amber-200 bg-amber-50 cursor-pointer hover:bg-amber-100 transition-colors">
+                      <AlertTriangle className="h-4 w-4 text-amber-700" />
+                      <div>
+                        <p className="text-xs font-semibold text-amber-700">
+                          Check Duplicates
+                        </p>
+                        <p className="text-[11px] text-amber-600">
+                          Find duplicate materials
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -4067,201 +4313,358 @@ export default function AdminDashboard() {
           {/* === MATERIAL APPROVALS TAB === */}
           {(isAdminOrSoftwareTeam || user?.role === "purchase_team") && (
             <TabsContent value="material-approvals" className="space-y-4 mt-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Material Approval Requests</CardTitle>
-                  <CardDescription>
-                    Review and approve/reject new material submissions
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {materialRequests.filter((r: any) => r.status === "pending")
-                    .length === 0 ? (
-                    <p className="text-muted-foreground">
-                      No pending material approvals
-                    </p>
-                  ) : (
-                    materialRequests
-                      .filter((r: any) => r.status === "pending")
-                      .map((request: any) => (
-                        <Card key={request.id} className="border-border/50">
-                          <CardContent className="pt-6 space-y-4">
-                            <div className="flex items-center gap-3 mb-4">
-                              <div className="h-12 w-12 border rounded bg-gray-50 overflow-hidden flex items-center justify-center shrink-0">
-                                {request.material.image ? (
-                                  <img
-                                    src={parseImages(request.material.image)[0]}
-                                    alt=""
-                                    className="max-w-full max-h-full object-contain"
-                                  />
-                                ) : (
-                                  <Package className="h-6 w-6 text-muted-foreground" />
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <h3 className="text-lg font-bold flex items-center gap-2 flex-wrap">
-                                  {request.material.name}
-                                  {request.material.is_project_pricing && (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
-                                      ★ Project Pricing Material
-                                    </span>
-                                  )}
-                                </h3>
-                                <p className="text-sm text-muted-foreground">
-                                  Submitted by: {request.submittedBy} at{" "}
-                                  {new Date(
-                                    request.submittedAt
-                                  ).toLocaleDateString()}
-                                </p>
-                              </div>
-                            </div>
+              <Tabs defaultValue="material-requests" className="w-full">
+                <TabsList className="grid w-full grid-cols-2 mb-4">
+                  <TabsTrigger value="material-requests">
+                    Material Requests
+                    {materialRequests.filter((r: any) => r.status === "pending").length > 0 && (
+                      <Badge variant="secondary" className="ml-2">
+                        {materialRequests.filter((r: any) => r.status === "pending").length}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="supplier-proposal-materials">
+                    Supplier Proposal Materials
+                    {proposalMaterialSubmissions.length > 0 && (
+                      <Badge variant="secondary" className="ml-2">
+                        {proposalMaterialSubmissions.length}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                </TabsList>
 
-                            <div className="grid grid-cols-2 gap-3 text-sm mt-2">
-                              <div>
-                                <p className="font-semibold">Code</p>
-                                <p>{request.material.code || request.material.template_code || request.material.templateCode || '-'}</p>
-                              </div>
-                              <div>
-                                <p className="font-semibold">Rate</p>
-                                <p>₹{request.material.rate ?? request.material.price ?? '-'}</p>
-                              </div>
-                              <div>
-                                <p className="font-semibold">Unit</p>
-                                <p>{request.material.unit || request.material.uom || '-'}</p>
-                              </div>
-                              <div>
-                                <p className="font-semibold">Category</p>
-                                <p>{request.material.category || request.material.categoryName || request.material.category_name || request.material.vendorCategory || request.material.vendor_category || '-'}</p>
-                              </div>
-                              <div>
-                                <p className="font-semibold">Sub Category</p>
-                                <p>{request.material.subCategory || request.material.subcategory || request.material.sub_category || '-'}</p>
-                              </div>
-                              <div>
-                                <p className="font-semibold">Brand</p>
-                                <p>{request.material.brandName || request.material.brandname || request.material.brand || request.material.make || '-'}</p>
-                              </div>
-                              {(request.material.technicalSpecification || request.material.technicalspecification) && (
-                                <div className="col-span-2">
-                                  <p className="font-semibold">Technical Specification</p>
-                                  <p className="text-blue-600 italic text-xs">{request.material.technicalSpecification || request.material.technicalspecification}</p>
+                {/* Material Requests Tab */}
+                <TabsContent value="material-requests">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Material Approval Requests</CardTitle>
+                      <CardDescription>
+                        Review and approve/reject new material submissions
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {materialRequests.filter((r: any) => r.status === "pending")
+                        .length === 0 ? (
+                        <p className="text-muted-foreground">
+                          No pending material approvals
+                        </p>
+                      ) : (
+                        materialRequests
+                          .filter((r: any) => r.status === "pending")
+                          .map((request: any) => (
+                            <Card key={request.id} className="border-border/50">
+                              <CardContent className="pt-6 space-y-4">
+                                <div className="flex items-center gap-3 mb-4">
+                                  <div className="h-12 w-12 border rounded bg-gray-50 overflow-hidden flex items-center justify-center shrink-0">
+                                    {request.material.image ? (
+                                      <img
+                                        src={parseImages(request.material.image)[0]}
+                                        alt=""
+                                        className="max-w-full max-h-full object-contain"
+                                      />
+                                    ) : (
+                                      <Package className="h-6 w-6 text-muted-foreground" />
+                                    )}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <h3 className="text-lg font-bold flex items-center gap-2 flex-wrap">
+                                      {request.material.name}
+                                      {request.material.is_project_pricing && (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                                          ★ Project Pricing Material
+                                        </span>
+                                      )}
+                                    </h3>
+                                    <p className="text-sm text-muted-foreground">
+                                      Submitted by: {request.submittedBy} at{" "}
+                                      {new Date(
+                                        request.submittedAt
+                                      ).toLocaleDateString()}
+                                    </p>
+                                  </div>
                                 </div>
-                              )}
-                            </div>
 
-                            {/* Approve / Reject Buttons - Admin/Software Team/Purchase Team */}
-                            {canApproveReject && (
-                              <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleApproveMaterial(request.id)}
-                                  className="gap-2"
-                                  disabled={!request?.material?.id}
-                                >
-                                  <CheckCircle2 className="h-4 w-4" /> Approve
-                                </Button>
+                                <div className="grid grid-cols-2 gap-3 text-sm mt-2">
+                                  <div>
+                                    <p className="font-semibold">Code</p>
+                                    <p>{request.material.code || request.material.template_code || request.material.templateCode || '-'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold">Rate</p>
+                                    <p>₹{request.material.rate ?? request.material.price ?? '-'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold">Unit</p>
+                                    <p>{request.material.unit || request.material.uom || '-'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold">Category</p>
+                                    <p>{request.material.category || request.material.categoryName || request.material.category_name || request.material.vendorCategory || request.material.vendor_category || '-'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold">Sub Category</p>
+                                    <p>{request.material.subCategory || request.material.subcategory || request.material.sub_category || '-'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold">Brand</p>
+                                    <p>{request.material.brandName || request.material.brandname || request.material.brand || request.material.make || '-'}</p>
+                                  </div>
+                                  {(request.material.technicalSpecification || request.material.technicalspecification) && (
+                                    <div className="col-span-2">
+                                      <p className="font-semibold">Technical Specification</p>
+                                      <p className="text-blue-600 italic text-xs">{request.material.technicalSpecification || request.material.technicalspecification}</p>
+                                    </div>
+                                  )}
+                                </div>
 
-                                {rejectingId === request.id ? (
-                                  <div className="flex gap-2 flex-1">
-                                    <Input
-                                      placeholder="Reason..."
-                                      value={rejectReason}
-                                      onChange={(e) =>
-                                        setRejectReason(e.target.value)
-                                      }
-                                      className="text-sm"
-                                    />
+                                {/* Approve / Reject Buttons - Admin/Software Team/Purchase Team */}
+                                {canApproveReject && (
+                                  <div className="flex gap-2">
                                     <Button
                                       size="sm"
-                                      onClick={() =>
-                                        handleRejectMaterial(request.id)
+                                      onClick={() => handleApproveMaterial(request.id)}
+                                      className="gap-2"
+                                      disabled={!request?.material?.id}
+                                    >
+                                      <CheckCircle2 className="h-4 w-4" /> Approve
+                                    </Button>
+
+                                    {rejectingId === request.id ? (
+                                      <div className="flex gap-2 flex-1">
+                                        <Input
+                                          placeholder="Reason..."
+                                          value={rejectReason}
+                                          onChange={(e) =>
+                                            setRejectReason(e.target.value)
+                                          }
+                                          className="text-sm"
+                                        />
+                                        <Button
+                                          size="sm"
+                                          onClick={() =>
+                                            handleRejectMaterial(request.id)
+                                          }
+                                        >
+                                          Confirm
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => setRejectingId(null)}
+                                        >
+                                          Cancel
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => setRejectingId(request.id)}
+                                        className="gap-2"
+                                      >
+                                        <XCircle className="h-4 w-4" /> Reject
+                                      </Button>
+                                    )}
+                                  </div>
+                                )}
+                              </CardContent>
+                            </Card>
+                          ))
+                      )}
+                    </CardContent>
+
+                    {/* Processed Requests */}
+                    {materialRequests.filter((r: any) => r.status !== "pending").length >
+                      0 && (
+                        <Card>
+                          <CardHeader>
+                            <CardTitle className="text-base">
+                              Processed Requests
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-3">
+                            {materialRequests
+                              .filter((r: any) => r.status !== "pending")
+                              .map((request: any) => (
+                                <div
+                                  key={request.id}
+                                  className="flex justify-between items-start p-3 bg-muted/50 rounded"
+                                >
+                                  <div>
+                                    <p className="font-semibold">
+                                      {request.material.name}
+                                    </p>
+                                    <p className="text-sm text-muted-foreground">
+                                      {request.submittedBy}
+                                    </p>
+                                  </div>
+                                  <div className="text-right">
+                                    <Badge
+                                      variant={
+                                        request.status === "approved"
+                                          ? "default"
+                                          : "destructive"
                                       }
                                     >
-                                      Confirm
+                                      {request.status === "approved"
+                                        ? "Approved"
+                                        : request.status.charAt(0).toUpperCase() +
+                                        request.status.slice(1)}
+                                    </Badge>
+                                  </div>
+                                </div>
+                              ))}
+                          </CardContent>
+                        </Card>
+                      )}
+                  </Card>
+                </TabsContent>
+
+                {/* Supplier Proposal Materials Tab */}
+                <TabsContent value="supplier-proposal-materials">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Supplier Proposal Materials</CardTitle>
+                      <CardDescription>
+                        Materials submitted by suppliers through proposal submissions
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {loadingProposalMaterials ? (
+                        <div className="flex justify-center py-8">
+                          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                        </div>
+                      ) : proposalMaterialSubmissions.length === 0 ? (
+                        <p className="text-muted-foreground">
+                          No pending supplier proposal materials for approval
+                        </p>
+                      ) : (
+                        proposalMaterialSubmissions.map((submission: any) => (
+                          <Card key={submission.id} className="border-blue-200 border-l-4">
+                            <CardContent className="pt-6 space-y-4">
+                              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                {/* Material Info */}
+                                <div>
+                                  <p className="text-sm text-muted-foreground font-semibold">Material</p>
+                                  <p className="font-bold">{submission.template_name}</p>
+                                  <p className="text-xs text-muted-foreground">{submission.template_code}</p>
+                                </div>
+
+                                {/* Project Info */}
+                                <div>
+                                  <p className="text-sm text-muted-foreground font-semibold">Project</p>
+                                  <p className="font-semibold">{submission.project_name}</p>
+                                </div>
+
+                                {/* Supplier Info */}
+                                <div>
+                                  <p className="text-sm text-muted-foreground font-semibold">Supplier</p>
+                                  <p className="font-semibold">{submission.shop_name}</p>
+                                  <p className="text-xs text-muted-foreground">{submission.submitted_by_name || submission.submitted_by_email}</p>
+                                </div>
+
+                                {/* Rate and Unit */}
+                                <div>
+                                  <p className="text-sm text-muted-foreground font-semibold">Proposed Rate</p>
+                                  <p className="font-bold text-blue-600">
+                                    ₹{Number(submission.rate).toFixed(2)} / {submission.unit}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {new Date(submission.submitted_at).toLocaleDateString()}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {submission.template_category && (
+                                <div className="text-sm">
+                                  <p className="text-muted-foreground font-semibold">Category</p>
+                                  <p>{submission.template_category}</p>
+                                </div>
+                              )}
+
+                              {/* Rejection Reason Section (if rejecting) */}
+                              {rejectingProposalMaterialId === submission.id && (
+                                <div className="p-4 bg-red-50 border border-red-200 rounded">
+                                  <Label className="text-red-900 font-semibold">
+                                    Rejection Reason <span className="text-red-600">*</span>
+                                  </Label>
+                                  <Textarea
+                                    placeholder="Explain why this submission is being rejected"
+                                    value={rejectReason}
+                                    onChange={(e) => setRejectReason(e.target.value)}
+                                    rows={3}
+                                    className="mt-2"
+                                  />
+                                </div>
+                              )}
+
+                              {/* Action Buttons */}
+                              <div className="flex gap-2">
+                                {rejectingProposalMaterialId === submission.id ? (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleRejectProposalMaterial(submission.id)}
+                                      variant="destructive"
+                                      disabled={!rejectReason.trim()}
+                                      className="gap-2"
+                                    >
+                                      <XCircle className="h-4 w-4" />
+                                      Confirm Rejection
                                     </Button>
                                     <Button
                                       size="sm"
-                                      variant="ghost"
-                                      onClick={() => setRejectingId(null)}
+                                      onClick={() => {
+                                        setRejectingProposalMaterialId(null);
+                                        setRejectReason("");
+                                      }}
+                                      variant="outline"
                                     >
                                       Cancel
                                     </Button>
-                                  </div>
+                                  </>
                                 ) : (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => setRejectingId(request.id)}
-                                    className="gap-2"
-                                  >
-                                    <XCircle className="h-4 w-4" /> Reject
-                                  </Button>
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleApproveProposalMaterial(submission.id)}
+                                      className="gap-2 bg-green-600 hover:bg-green-700"
+                                    >
+                                      <CheckCircle2 className="h-4 w-4" />
+                                      Approve
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => setRejectingProposalMaterialId(submission.id)}
+                                      variant="outline"
+                                      className="gap-2"
+                                    >
+                                      <XCircle className="h-4 w-4" />
+                                      Reject
+                                    </Button>
+                                  </>
                                 )}
                               </div>
-                            )}
-                          </CardContent>
-                        </Card>
-                      ))
-                  )}
-                </CardContent>
-
-                {/* Processed Requests */}
-                {materialRequests.filter((r: any) => r.status !== "pending").length >
-                  0 && (
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-base">
-                          Processed Requests
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        {materialRequests
-                          .filter((r: any) => r.status !== "pending")
-                          .map((request: any) => (
-                            <div
-                              key={request.id}
-                              className="flex justify-between items-start p-3 bg-muted/50 rounded"
-                            >
-                              <div>
-                                <p className="font-semibold">
-                                  {request.material.name}
-                                </p>
-                                <p className="text-sm text-muted-foreground">
-                                  {request.submittedBy}
-                                </p>
-                              </div>
-                              <div className="text-right">
-                                <Badge
-                                  variant={
-                                    request.status === "approved"
-                                      ? "default"
-                                      : "destructive"
-                                  }
-                                >
-                                  {request.status === "approved"
-                                    ? "LA"
-                                    : request.status.charAt(0).toUpperCase() +
-                                    request.status.slice(1)}
-                                </Badge>
-                              </div>
-                            </div>
-                          ))}
-                      </CardContent>
-                    </Card>
-                  )}
-              </Card>
+                            </CardContent>
+                          </Card>
+                        ))
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
             </TabsContent>
           )}
 
           {/* === PROJECT PRICING MATERIALS TAB === */}
-          {isAdminOrSoftwareTeam && (
+          {(isAdminOrSoftwareTeam || user?.role === "pre_sales") && (
             <TabsContent value="project-pricing-materials" className="space-y-4 mt-4">
               <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <div>
                       <CardTitle className="flex items-center gap-2">
-                        <Button variant="ghost" size="icon" onClick={() => setActiveTab("overview")} className="mr-2 h-8 w-8 hover:bg-slate-100">
+                        <Button variant="ghost" size="icon" onClick={() => setActiveTab("dashboard")} className="mr-2 h-8 w-8 hover:bg-slate-100">
                           <ArrowLeft className="h-4 w-4" />
                         </Button>
                         Project Pricing Materials

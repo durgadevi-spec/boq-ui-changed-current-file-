@@ -277,7 +277,7 @@ const SketchPlanRow = React.memo(({
   includeSupply, setIncludeSupply, includeLabour, setIncludeLabour,
   openNotesIdx, columnVisibility
 }: any) => {
-  const [itemSearchTab, setItemSearchTab] = useState<"all" | "material" | "product">("all");
+  const [itemSearchTab, setItemSearchTab] = useState<"all" | "material" | "product" | "pp">("all");
   const [showQuickSelection, setShowQuickSelection] = useState(true);
   const dragControls = useDragControls();
   const isSupplier = userRole === "supplier";
@@ -499,6 +499,9 @@ const SketchPlanRow = React.memo(({
                                   <div className="flex items-center gap-2">
                                     <span className={cn("font-semibold text-xs text-slate-700", isProduct && "text-blue-700")}>{m.name}</span>
                                     <Badge variant={isProduct ? "default" : "outline"} className={cn("text-[8px] h-3.5 px-1 uppercase tracking-tighter scale-90", isProduct && "bg-blue-600")}>{m.type}</Badge>
+                                    {m.is_project_pricing && (
+                                      <Badge className="text-[7px] h-3.5 px-1 bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-100 scale-90">★ Project Pricing</Badge>
+                                    )}
                                     {m.rate && (
                                       <span className="ml-2 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 rounded">₹{m.rate}</span>
                                     )}
@@ -763,6 +766,15 @@ const SketchPlanRow = React.memo(({
                       >
                         Products
                       </button>
+                      <button
+                        onClick={() => setItemSearchTab("pp")}
+                        className={cn(
+                          "flex-1 py-1 text-[10px] font-bold uppercase tracking-wider transition-all border-b-2",
+                          itemSearchTab === "pp" ? "border-amber-600 text-amber-600 bg-amber-50/50" : "border-transparent text-slate-400 hover:bg-slate-50"
+                        )}
+                      >
+                        ★ PP
+                      </button>
                     </div>
 
                     <CommandList className="max-h-[280px]">
@@ -808,15 +820,17 @@ const SketchPlanRow = React.memo(({
                       {searching && <CommandEmpty>Loading...</CommandEmpty>}
                       {!searching && searchResults.length === 0 && <CommandEmpty>No items found.</CommandEmpty>}
                       {!searching && searchResults.length > 0 && (
-                        <CommandGroup heading={`${itemSearchTab === 'all' ? 'All Items' : itemSearchTab === 'material' ? 'Materials' : 'Products'} (${searchResults.filter((m: any) => {
+                        <CommandGroup heading={`${itemSearchTab === 'all' ? 'All Items' : itemSearchTab === 'material' ? 'Materials' : itemSearchTab === 'pp' ? 'Project Pricing' : 'Products'} (${searchResults.filter((m: any) => {
                           if (itemSearchTab === "material") return m.type === "Material";
                           if (itemSearchTab === "product") return m.type === "Product";
+                          if (itemSearchTab === "pp") return m.type === "Material" && m.is_project_pricing === true;
                           return m.type !== "Template"; // 'all' shows Materials and Products
                         }).length})`}>
                           {searchResults
                             .filter((m: any) => {
                               if (itemSearchTab === "material") return m.type === "Material";
                               if (itemSearchTab === "product") return m.type === "Product";
+                              if (itemSearchTab === "pp") return m.type === "Material" && m.is_project_pricing === true;
                               return m.type !== "Template";
                             })
                             .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""))
@@ -841,6 +855,9 @@ const SketchPlanRow = React.memo(({
                                         <div className="flex items-center gap-2 flex-wrap">
                                           <span className={cn("font-semibold text-sm", isSelected && "text-indigo-900")}>{m.name}</span>
                                           <Badge variant={isSelected ? "default" : "outline"} className={cn("text-[10px] scale-90", isSelected && "bg-indigo-600 hover:bg-indigo-600")}>{m.type}</Badge>
+                                          {m.is_project_pricing && (
+                                            <Badge className="text-[8px] scale-90 bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-100">★ Project Pricing</Badge>
+                                          )}
                                         </div>
                                         <div className="flex gap-2 text-[10px] text-slate-500">
                                           {m.code && <span>Code: {m.code}</span>}

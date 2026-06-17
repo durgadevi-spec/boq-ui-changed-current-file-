@@ -1,210 +1,177 @@
-import fs from "fs";
-import path from "path";
+import { query } from "./db/client";
+import { randomUUID } from "crypto";
 
 export interface ArchiveItem {
-  id: string; // uuid generated for this archive entry
-  module: string; // the specific module name (e.g. 'materials', 'projects', 'templates')
-  originId: string; // the original DB id
-  data: any; // the original JSON payload
-  status: "archived" | "trashed"; // status for its lifecycle
-  archivedAt: string; // ISO date string
-  trashedAt: string | null; // ISO date string, or null if not yet trashed
+  id: string;
+  module: string;
+  originId: string;
+  data: any;
+  status: "archived" | "trashed";
+  archivedAt: string | null;
+  trashedAt: string | null;
 }
 
 export class ArchiveService {
-  private filePath: string;
-  private items: ArchiveItem[] = [];
+  private archivedCache: Record<string, { timestamp: number; data: string[] }> = {};
+  private trashedCache: Record<string, { timestamp: number; data: string[] }> = {};
+  private readonly CACHE_TTL = 30000; // 30 seconds
 
-  constructor(filePath?: string) {
-    this.filePath =
-      filePath || path.join(process.cwd(), "server", "archive_data.json");
-    this.load();
-    this.startCleanupJob();
-  }
-
-  private load() {
-    try {
-      if (fs.existsSync(this.filePath)) {
-        const data = fs.readFileSync(this.filePath, "utf-8");
-        this.items = JSON.parse(data);
-      } else {
-        this.items = [];
-        this.save();
-      }
-    } catch (e) {
-      console.error("Failed to load archive data:", e);
-      this.items = [];
+  private clearCache(module?: string) {
+    if (module) {
+      delete this.archivedCache[module];
+      delete this.trashedCache[module];
+    } else {
+      this.archivedCache = {};
+      this.trashedCache = {};
     }
-  }
-
-  private save() {
-    try {
-      fs.writeFileSync(this.filePath, JSON.stringify(this.items, null, 2));
-    } catch (e) {
-      console.error("Failed to save archive data:", e);
-    }
-  }
-
-  /**
-   * Retrieves all items from the archive
-   */
-  public getAll(): ArchiveItem[] {
-    return this.items;
-  }
-
-  public getArchived(): ArchiveItem[] {
-    return this.items.filter((item) => item.status === "archived");
-  }
-
-  public getTrashed(): ArchiveItem[] {
-    return this.items.filter((item) => item.status === "trashed");
   }
 
   /**
    * Returns an array of origin IDs that are archived for a specific module
    */
-  public getArchivedItemIds(module: string): string[] {
-    return this.items
-      .filter((item) => item.module === module && item.status === "archived")
-      .map((item) => item.originId);
+  public async getArchivedItemIds(module: string): Promise<string[]> {
+    const now = Date.now();
+    if (this.archivedCache[module] && now - this.archivedCache[module].timestamp < this.CACHE_TTL) {
+      return this.archivedCache[module].data;
+    }
+    const result = await query(
+      `SELECT origin_id FROM archive_records WHERE module = $1 AND status = 'archived'`,
+      [module]
+    );
+    const data = result.rows.map((r: any) => r.origin_id);
+    this.archivedCache[module] = { timestamp: now, data };
+    return data;
   }
 
   /**
    * Returns an array of origin IDs that are trashed for a specific module
    */
-  public getTrashedItemIds(module: string): string[] {
-    return this.items
-      .filter((item) => item.module === module && item.status === "trashed")
-      .map((item) => item.originId);
+  public async getTrashedItemIds(module: string): Promise<string[]> {
+    const now = Date.now();
+    if (this.trashedCache[module] && now - this.trashedCache[module].timestamp < this.CACHE_TTL) {
+      return this.trashedCache[module].data;
+    }
+    const result = await query(
+      `SELECT origin_id FROM archive_records WHERE module = $1 AND status = 'trashed'`,
+      [module]
+    );
+    const data = result.rows.map((r: any) => r.origin_id);
+    this.trashedCache[module] = { timestamp: now, data };
+    return data;
+  }
+
+  public async getArchived(): Promise<ArchiveItem[]> {
+    const result = await query(
+      `SELECT * FROM archive_records WHERE status = 'archived' ORDER BY archived_at DESC`
+    );
+    return result.rows.map(this.mapRecordToItem);
+  }
+
+  public async getTrashed(): Promise<ArchiveItem[]> {
+    const result = await query(
+      `SELECT * FROM archive_records WHERE status = 'trashed' ORDER BY trashed_at DESC`
+    );
+    return result.rows.map(this.mapRecordToItem);
   }
 
   /**
    * Archives an item explicitly (replacing standard delete)
    */
-  public archiveItem(module: string, originId: string, data: any): ArchiveItem {
-    // If it already exists for some reason, don't duplicate
-    const existingIndex = this.items.findIndex(
-      (i) => i.module === module && i.originId === originId
+  public async archiveItem(moduleName: string, originId: string, data: any): Promise<ArchiveItem> {
+    // If it already exists, update it
+    const existing = await query(
+      `SELECT id FROM archive_records WHERE module = $1 AND origin_id = $2 LIMIT 1`,
+      [moduleName, originId]
     );
-    if (existingIndex !== -1) {
-      this.items[existingIndex].status = "archived";
-      this.items[existingIndex].archivedAt = new Date().toISOString();
-      this.items[existingIndex].trashedAt = null;
-      this.save();
-      return this.items[existingIndex];
+
+    if (existing.rows.length > 0) {
+      const updated = await query(
+        `UPDATE archive_records SET status = 'archived', archived_at = NOW(), trashed_at = NULL, data = $1
+         WHERE id = $2 RETURNING *`,
+        [JSON.stringify(data), existing.rows[0].id]
+      );
+      this.clearCache(moduleName);
+      return this.mapRecordToItem(updated.rows[0]);
     }
 
-    const newItem: ArchiveItem = {
-      id: crypto.randomUUID(),
-      module,
-      originId,
-      data,
-      status: "archived",
-      archivedAt: new Date().toISOString(),
-      trashedAt: null,
-    };
+    const id = randomUUID();
+    const inserted = await query(
+      `INSERT INTO archive_records (id, module, origin_id, data, status, archived_at, trashed_at)
+       VALUES ($1, $2, $3, $4, 'archived', NOW(), NULL) RETURNING *`,
+      [id, moduleName, originId, JSON.stringify(data)]
+    );
 
-    this.items.push(newItem);
-    this.save();
-    return newItem;
+    this.clearCache(moduleName);
+    return this.mapRecordToItem(inserted.rows[0]);
   }
 
   /**
-   * Moves an item from "Archive" to "Trash", starting the 30-day countdown
+   * Moves an item from "Archive" to "Trash"
    */
-  public trashArchiveItem(id: string): ArchiveItem | null {
-    const item = this.items.find((i) => i.id === id);
-    if (item) {
-      item.status = "trashed";
-      item.trashedAt = new Date().toISOString();
-      this.save();
-      return item;
-    }
-    return null;
+  public async trashArchiveItem(id: string): Promise<ArchiveItem | null> {
+    const updated = await query(
+      `UPDATE archive_records SET status = 'trashed', trashed_at = NOW()
+       WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    this.clearCache();
+    return updated.rows.length > 0 ? this.mapRecordToItem(updated.rows[0]) : null;
   }
 
   /**
-   * Restores an item back to its origin module (hides it from archive by removing the archive entry)
+   * Restores an item back to its origin module (removes the archive entry)
    */
-  public restoreArchiveItem(id: string): boolean {
-    const initialLength = this.items.length;
-    this.items = this.items.filter((i) => i.id !== id);
-    if (this.items.length !== initialLength) {
-      this.save();
-      return true;
-    }
-    return false;
+  public async restoreArchiveItem(id: string): Promise<boolean> {
+    const deleted = await query(
+      `DELETE FROM archive_records WHERE id = $1 RETURNING id`,
+      [id]
+    );
+    this.clearCache();
+    return deleted.rows.length > 0;
   }
 
   /**
    * Restores an item by its original database ID and module name
    */
-  public restoreByOriginId(module: string, originId: string): boolean {
-    const initialLength = this.items.length;
-    this.items = this.items.filter((i) => !(i.module === module && i.originId === originId));
-    if (this.items.length !== initialLength) {
-      this.save();
-      return true;
-    }
-    return false;
+  public async restoreByOriginId(moduleName: string, originId: string): Promise<boolean> {
+    const deleted = await query(
+      `DELETE FROM archive_records WHERE module = $1 AND origin_id = $2 RETURNING id`,
+      [moduleName, originId]
+    );
+    this.clearCache(moduleName);
+    return deleted.rows.length > 0;
   }
 
   /**
-   * Removes from the local dictionary so it can be truly deleted from Postgres,
-   * returning true so the caller actually performs the DB query.
+   * Permanently deletes an archive entry, returning the item so the caller
+   * can also cascade-delete from the actual DB tables.
    */
-  public permanentlyDelete(id: string): ArchiveItem | null {
-    const item = this.items.find((i) => i.id === id);
-    if (item) {
-      this.items = this.items.filter((i) => i.id !== id);
-      this.save();
-      return item; // Provide the item so callers can process DB string deletes if necessary.
-    }
-    return null;
+  public async permanentlyDelete(id: string): Promise<ArchiveItem | null> {
+    const deleted = await query(
+      `DELETE FROM archive_records WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    this.clearCache();
+    return deleted.rows.length > 0 ? this.mapRecordToItem(deleted.rows[0]) : null;
   }
 
-  /**
-   * Runs an background task periodically to clear 30-day old trashed items
-   */
-  private startCleanupJob() {
-    // Run once immediately, then every 24 hours (86,400,000 ms)
-    this.cleanupExpiredTrash();
-    setInterval(() => {
-      this.cleanupExpiredTrash();
-    }, 24 * 60 * 60 * 1000);
-  }
-
-  private cleanupExpiredTrash() {
-    const now = new Date().getTime();
-    const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
-
-    let modified = false;
-    this.items = this.items.filter((item) => {
-      if (item.status === "trashed" && item.trashedAt) {
-        const trashedTime = new Date(item.trashedAt).getTime();
-        if (now - trashedTime > thirtyDaysInMs) {
-          console.log(
-            `Archive cleanup: permanently deleting expired trash item ${item.id} (origin ${item.originId})`
-          );
-          // Note constraint: actual data in DB won't be deleted here automatically without DB interaction,
-          // but by removing it from our archive file while it hasn't been re-inserted,
-          // it implicitly surfaces again in the DB.
-          // TO PREVENT DB RESURFACING, we should ideally trigger the DB cascade delete.
-          // But "0 schema changes" means we can just emit an event or return it.
-          // Since we can't do async DB drops easily inside this sync cleanup without cross-dependencies,
-          // we will just assume keeping it 'trashed' OR giving it an "expired" status is better.
-          // Let's actually delete it from Postgres! To do this cleanly, the caller should handle it.
-
-          modified = true;
-          return false; // remove from archive Items forever
-        }
-      }
-      return true;
-    });
-
-    if (modified) {
-      this.save();
+  private mapRecordToItem(record: any): ArchiveItem {
+    let parsedData = {};
+    try {
+      if (record.data) parsedData = JSON.parse(record.data);
+    } catch (e) {
+      console.error("Failed to parse archive data for id", record.id);
     }
+
+    return {
+      id: record.id,
+      module: record.module,
+      originId: record.origin_id,
+      data: parsedData,
+      status: record.status as "archived" | "trashed",
+      archivedAt: record.archived_at ? new Date(record.archived_at).toISOString() : null,
+      trashedAt: record.trashed_at ? new Date(record.trashed_at).toISOString() : null,
+    };
   }
 }
 

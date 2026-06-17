@@ -573,6 +573,7 @@ export default function FinalizeBoq() {
   const [bomVersions, setBomVersions] = useState<BOQVersion[]>([]);
   const [boqVersions, setBoqVersions] = useState<BOQVersion[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [bomFinalizeLocked, setBomFinalizeLocked] = useState(false);
   const [selectedBomVersionId, setSelectedBomVersionId] = useState<string | null>(null);
   const [selectedBoqVersionId, setSelectedBoqVersionId] = useState<string | null>(null);
   const [showFinalizedPicker, setShowFinalizedPicker] = useState(false);
@@ -645,6 +646,10 @@ export default function FinalizeBoq() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
+  const latestCategoryOrderRef = useRef(categoryOrder);
+  useEffect(() => {
+    latestCategoryOrderRef.current = categoryOrder;
+  }, [categoryOrder]);
 
   const activeVersionId = selectedBoqVersionId || selectedBomVersionId;
   const activeVersion = [...bomVersions, ...boqVersions].find(v => v.id === activeVersionId);
@@ -711,7 +716,7 @@ export default function FinalizeBoq() {
     const parseCategoryOrder = (raw: any): string[] => {
       if (Array.isArray(raw)) return raw;
       if (typeof raw === 'string') {
-        try { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) return parsed; } catch {}
+        try { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) return parsed; } catch { }
       }
       return [];
     };
@@ -1690,6 +1695,39 @@ export default function FinalizeBoq() {
                 };
               });
               setGlobalColSettings(initialGlobal);
+
+              // Auto-apply this template to any items that are missing it
+              const missingColItems = items.filter(it => !restoredCols[it.id]);
+              if (missingColItems.length > 0) {
+                const templateCols = restoredCols[firstItemId];
+                const newRestoredCols = { ...restoredCols };
+                
+                missingColItems.forEach(it => {
+                  newRestoredCols[it.id] = [...templateCols];
+                  
+                  let td = it.table_data || {};
+                  if (typeof td === "string") try { td = JSON.parse(td); } catch { td = {}; }
+                  const step11 = Array.isArray(td.step11_items) ? td.step11_items : [];
+                  
+                  const defaultRowVals: any = {};
+                  step11.forEach((_: any, ri: number) => {
+                    defaultRowVals[ri] = {};
+                  });
+                  restoredVals[it.id] = defaultRowVals;
+                  
+                  td.finalize_columns = templateCols;
+                  td.finalize_column_values = defaultRowVals;
+                  
+                  // Auto-save this configuration back to the DB immediately
+                  apiFetch(`/api/boq-items/${it.id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ table_data: td })
+                  }).catch(e => console.error("Auto-apply template to new item failed", e));
+                });
+                
+                setCustomColumns(newRestoredCols);
+              }
             }
           }
           setCustomColumnValues(restoredVals);
@@ -1768,6 +1806,21 @@ export default function FinalizeBoq() {
   useEffect(() => {
     loadBoqItemsAndEdits(selectedBoqVersionId || selectedBomVersionId);
   }, [selectedBomVersionId, selectedBoqVersionId, loadBoqItemsAndEdits, refreshKey]);
+
+  useEffect(() => {
+    const activeVersionId = selectedBoqVersionId || selectedBomVersionId;
+    if (activeVersionId && !selectedBoqVersionId) {
+      // It's a BOM version, fetch local finalize lock
+      apiFetch("/api/global-settings")
+        .then(res => res.json())
+        .then(settings => {
+          setBomFinalizeLocked(settings[`finalize_lock_${activeVersionId}`] === true);
+        })
+        .catch(console.error);
+    } else {
+      setBomFinalizeLocked(false);
+    }
+  }, [selectedBomVersionId, selectedBoqVersionId]);
 
   // Sync categoryOrder state whenever availableCategories changes
   useEffect(() => {
@@ -2683,6 +2736,23 @@ export default function FinalizeBoq() {
 
   const handleSubmitVersion = async () => {
     if (!activeVersionId) return;
+
+    if (activeVersion?.type === 'bom') {
+      try {
+        await apiFetch(`/api/global-settings/finalize_lock_${activeVersionId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ value: true })
+        });
+        setBomFinalizeLocked(true);
+        toast({ title: "Success", description: "BOM version locked in Finalize BOQ" });
+      } catch (err) {
+        console.error("Failed to lock BOM version in Finalize BOQ:", err);
+        toast({ title: "Error", description: "Failed to lock BOM version", variant: "destructive" });
+      }
+      return;
+    }
+
     try {
       await apiFetch(`/api/boq-versions/${activeVersionId}`, {
         method: "PUT",
@@ -3042,8 +3112,8 @@ export default function FinalizeBoq() {
           if (colName === "S.No") rowValues[colName] = boqIdx + 1;
           else if (colName === "Product / Material") rowValues[colName] = productName;
           else if (colName === "Description / Location") rowValues[colName] = manualDesc;
-          else if (colName === "HSN") rowValues[colName] = tableData.hsn_code || (tableData.hsn_sac_type === 'hsn' ? tableData.hsn_sac_code : "") || "—";
-          else if (colName === "SAC") rowValues[colName] = tableData.sac_code || (tableData.hsn_sac_type === 'sac' ? tableData.hsn_sac_code : "") || "—";
+          else if (colName === "HSN") rowValues[colName] = tableData.hsn_code || (tableData.hsn_sac_type === 'hsn' ? tableData.hsn_sac_code : "") || ((!tableData.hsn_sac_type || String(tableData.hsn_sac_type).toLowerCase() === 'hsn') ? (tableData.tax_code_value || tableData.hsn_sac_code) : "") || "—";
+          else if (colName === "SAC") rowValues[colName] = tableData.sac_code || (tableData.hsn_sac_type === 'sac' ? tableData.hsn_sac_code : "") || ((String(tableData.hsn_sac_type).toLowerCase() === 'sac') ? (tableData.tax_code_value || tableData.hsn_sac_code) : "") || "—";
           else if (colName === "Rate / Unit") rowValues[colName] = roundOff ? Math.round(rateSqft) : Number(rateSqft.toFixed(2));
           else if (colName === "Unit") {
             const defaultUnit = isLumpSum ? "LS" : ((tableData.materialLines && tableData.targetRequiredQty !== undefined)
@@ -3374,8 +3444,8 @@ export default function FinalizeBoq() {
         if (selectedPdfExportCols.includes("S.No")) row.push((boqIdx + 1).toString());
         if (selectedPdfExportCols.includes("Product / Material")) row.push(productName);
         if (selectedPdfExportCols.includes("Description")) row.push(manualDesc);
-        if (selectedPdfExportCols.includes("HSN")) row.push(tableData.hsn_code || (tableData.hsn_sac_type === 'hsn' ? tableData.hsn_sac_code : "") || "—");
-        if (selectedPdfExportCols.includes("SAC")) row.push(tableData.sac_code || (tableData.hsn_sac_type === 'sac' ? tableData.hsn_sac_code : "") || "—");
+        if (selectedPdfExportCols.includes("HSN")) row.push(tableData.hsn_code || (tableData.hsn_sac_type === 'hsn' ? tableData.hsn_sac_code : "") || ((!tableData.hsn_sac_type || String(tableData.hsn_sac_type).toLowerCase() === 'hsn') ? (tableData.tax_code_value || tableData.hsn_sac_code) : "") || "—");
+        if (selectedPdfExportCols.includes("SAC")) row.push(tableData.sac_code || (tableData.hsn_sac_type === 'sac' ? tableData.hsn_sac_code : "") || ((String(tableData.hsn_sac_type).toLowerCase() === 'sac') ? (tableData.tax_code_value || tableData.hsn_sac_code) : "") || "—");
         if (selectedPdfExportCols.includes("Unit")) {
           const defaultUnit = isLumpSum ? "LS" : ((tableData.materialLines && tableData.targetRequiredQty !== undefined)
             ? (tableData.configBasis?.requiredUnitType || tableData.unit || "Sqft")
@@ -3669,7 +3739,11 @@ export default function FinalizeBoq() {
   };
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
-  const isVersionSubmitted = !!activeVersion && (activeVersion.is_locked || ["submitted", "pending_approval", "edit_requested"].includes(activeVersion.status));
+  const isVersionSubmitted = !!activeVersion && (
+    activeVersion.type === 'bom' 
+      ? bomFinalizeLocked 
+      : (activeVersion.is_locked || ["submitted", "pending_approval", "edit_requested"].includes(activeVersion.status))
+  );
 
   // Budget (read-only) should come from the generated BOQ total (sum of displayed item amounts)
   const calculateGeneratedBudget = () => {
@@ -3735,7 +3809,7 @@ export default function FinalizeBoq() {
   return (
     <Layout>
       <div className="space-y-3">
-        <h1 className="text-2xl font-semibold">Finalize {activeVersion?.type === 'boq' ? 'BOQ' : 'BOM'}</h1>
+        <h1 className="text-2xl font-semibold">Finalize BOQ</h1>
 
         {/* Project creation moved to dedicated Create Project page */}
 
@@ -4362,7 +4436,7 @@ export default function FinalizeBoq() {
           <div className="space-y-4">
             {/* Header + bulk actions */}
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-800">{activeVersion?.type === 'boq' ? 'BOQ' : 'BOM'} Items</h2>
+              <h2 className="text-xl font-bold text-gray-800">BOQ Items</h2>
               {selectedProductIds.size > 0 && (
                 <Button
                   variant="destructive"
@@ -4436,24 +4510,6 @@ export default function FinalizeBoq() {
                 <div className="border-t pt-3 overflow-x-auto">
                   <Reorder.Group as="div" axis="x" values={categoryOrder} onReorder={(newOrder) => {
                     setCategoryOrder(newOrder);
-                    
-                    // Make the API call asynchronously without blocking the UI
-                    if (activeVersionId && selectedProjectId && !isVersionSubmitted) {
-                      apiFetch(`/api/boq-versions/${activeVersionId}/category-order`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ categoryOrder: newOrder })
-                      }).then(resp => {
-                        if (resp.ok) {
-                          toast({ title: "Success", description: "Category order updated" });
-                        } else {
-                          toast({ title: "Error", description: "Failed to save category order", variant: "destructive" });
-                        }
-                      }).catch(err => {
-                        console.error("Failed to save category order:", err);
-                        toast({ title: "Error", description: "Failed to save category order", variant: "destructive" });
-                      });
-                    }
                   }} className="flex justify-start h-auto flex-nowrap gap-1 bg-slate-100/50 p-1 rounded">
                     <button
                       onClick={() => setCategoryFilter("all")}
@@ -4462,7 +4518,34 @@ export default function FinalizeBoq() {
                       All ({boqItems.length})
                     </button>
                     {categoryOrder.map((cat) => (
-                      <Reorder.Item key={cat} value={cat} as="div" drag={!isVersionSubmitted} dragElastic={0.2} dragMomentum={false} className={`flex items-center gap-1.5 text-[10px] font-bold px-4 py-2 uppercase tracking-wider rounded-md transition-all shrink-0 ${categoryFilter === cat ? "bg-white text-blue-600 shadow-sm" : "text-slate-600 hover:bg-slate-50"} ${!isVersionSubmitted ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`} onClick={() => setCategoryFilter(cat)}>
+                      <Reorder.Item
+                        key={cat}
+                        value={cat}
+                        as="div"
+                        drag={!isVersionSubmitted}
+                        dragElastic={0.2}
+                        dragMomentum={false}
+                        onDragEnd={() => {
+                          if (activeVersionId && selectedProjectId && !isVersionSubmitted) {
+                            apiFetch(`/api/boq-versions/${activeVersionId}/category-order`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ categoryOrder: latestCategoryOrderRef.current })
+                            }).then(resp => {
+                              if (resp.ok) {
+                                toast({ title: "Success", description: "Category order updated" });
+                              } else {
+                                toast({ title: "Error", description: "Failed to save category order", variant: "destructive" });
+                              }
+                            }).catch(err => {
+                              console.error("Failed to save category order:", err);
+                              toast({ title: "Error", description: "Failed to save category order", variant: "destructive" });
+                            });
+                          }
+                        }}
+                        className={`flex items-center gap-1.5 text-[10px] font-bold px-4 py-2 uppercase tracking-wider rounded-md transition-all shrink-0 ${categoryFilter === cat ? "bg-white text-blue-600 shadow-sm" : "text-slate-600 hover:bg-slate-50"} ${!isVersionSubmitted ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
+                        onClick={() => setCategoryFilter(cat)}
+                      >
                         {!isVersionSubmitted && <GripVertical className="h-3 w-3 text-slate-400" />}
                         <span>
                           {cat} ({boqItems.filter(i => {
@@ -4471,6 +4554,48 @@ export default function FinalizeBoq() {
                             return td.category === cat || td.category_name === cat;
                           }).length})
                         </span>
+                        {!isVersionSubmitted && (
+                          <div className="flex gap-0.5 ml-2 border-l pl-2 border-slate-200">
+                            <button onClick={(e) => { 
+                              e.stopPropagation(); 
+                              const prev = [...categoryOrder];
+                              const idx = prev.indexOf(cat);
+                              if (idx > 0) {
+                                const temp = prev[idx]; prev[idx] = prev[idx-1]; prev[idx-1] = temp;
+                                setCategoryOrder(prev);
+                                setTimeout(() => {
+                                  if (activeVersionId) {
+                                    apiFetch(`/api/boq-versions/${activeVersionId}/category-order`, {
+                                      method: "POST", headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ categoryOrder: prev })
+                                    });
+                                  }
+                                }, 50);
+                              }
+                            }} className="p-0.5 hover:bg-slate-200 rounded text-slate-500" title="Move Left">
+                              <ChevronLeft className="w-3 h-3" />
+                            </button>
+                            <button onClick={(e) => { 
+                              e.stopPropagation(); 
+                              const prev = [...categoryOrder];
+                              const idx = prev.indexOf(cat);
+                              if (idx < prev.length - 1) {
+                                const temp = prev[idx]; prev[idx] = prev[idx+1]; prev[idx+1] = temp;
+                                setCategoryOrder(prev);
+                                setTimeout(() => {
+                                  if (activeVersionId) {
+                                    apiFetch(`/api/boq-versions/${activeVersionId}/category-order`, {
+                                      method: "POST", headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ categoryOrder: prev })
+                                    });
+                                  }
+                                }, 50);
+                              }
+                            }} className="p-0.5 hover:bg-slate-200 rounded text-slate-500" title="Move Right">
+                              <ChevronRight className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
                       </Reorder.Item>
                     ))}
                   </Reorder.Group>
@@ -4482,7 +4607,7 @@ export default function FinalizeBoq() {
 
               <Card>
                 <CardContent className="text-gray-500 text-center py-10">
-                  No products found for this version. Go to Create BOM to add products.
+                  No products found for this version. Go to Create BOQ to add products.
                 </CardContent>
               </Card>
             ) : (
@@ -4494,7 +4619,7 @@ export default function FinalizeBoq() {
                 )}
                 {!isVersionSubmitted && (
                   <div className="flex items-center gap-3 p-4 bg-gray-50/80 border-b overflow-x-auto whitespace-nowrap scrollbar-hide">
-                    <span className="text-[12px] font-semibold uppercase tracking-widest text-gray-500 mr-2 flex-shrink-0">Unified BOM Actions:</span>
+                    <span className="text-[12px] font-semibold uppercase tracking-widest text-gray-500 mr-2 flex-shrink-0">Unified BOQ Actions:</span>
                     <Button
                       variant="outline"
                       size="sm"
@@ -5396,12 +5521,12 @@ export default function FinalizeBoq() {
                             )}
                             {!hiddenPredefinedCols.hsn && (
                               <td className="border-r px-2 py-1 text-center font-semibold text-gray-700 text-[10px] align-middle bg-gray-50/30 col-hsn">
-                                {tableData.hsn_code || (tableData.hsn_sac_type === 'hsn' ? tableData.hsn_sac_code : "") || "—"}
+                                {tableData.hsn_code || (tableData.hsn_sac_type === 'hsn' ? tableData.hsn_sac_code : "") || ((!tableData.hsn_sac_type || String(tableData.hsn_sac_type).toLowerCase() === 'hsn') ? (tableData.tax_code_value || tableData.hsn_sac_code) : "") || "—"}
                               </td>
                             )}
                             {!hiddenPredefinedCols.sac && (
                               <td className="border-r px-2 py-1 text-center font-semibold text-gray-700 text-[10px] align-middle bg-gray-50/30 col-sac">
-                                {tableData.sac_code || (tableData.hsn_sac_type === 'sac' ? tableData.hsn_sac_code : "") || "—"}
+                                {tableData.sac_code || (tableData.hsn_sac_type === 'sac' ? tableData.hsn_sac_code : "") || ((String(tableData.hsn_sac_type).toLowerCase() === 'sac') ? (tableData.tax_code_value || tableData.hsn_sac_code) : "") || "—"}
                               </td>
                             )}
                             {!hiddenPredefinedCols.unit && (
@@ -6172,17 +6297,32 @@ export default function FinalizeBoq() {
                       Lock Version
                     </Button>
                   )}
-                  
+
                   {isVersionSubmitted && user?.role === 'admin' && (
                     <Button
                       onClick={async () => {
                         if (!activeVersionId) return;
-                        if (!confirm("Are you sure you want to unlock this version? This will enable editing again.")) return;
+                        
+                        if (activeVersion?.type === 'bom') {
+                          try {
+                            await apiFetch(`/api/global-settings/finalize_lock_${activeVersionId}`, {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ value: false })
+                            });
+                            setBomFinalizeLocked(false);
+                            toast({ title: "Success", description: "BOM version unlocked in Finalize BOQ" });
+                          } catch (err) {
+                            console.error("Failed to unlock BOM version in Finalize BOQ:", err);
+                            toast({ title: "Error", description: "Failed to unlock BOM version", variant: "destructive" });
+                          }
+                          return;
+                        }
+
+                        if (!confirm("Are you sure you want to request an edit for this version? This will require admin approval.")) return;
                         try {
-                          await apiFetch(`/api/boq-versions/${activeVersionId}`, {
-                            method: "PUT",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ status: "draft", is_locked: false }),
+                          await apiFetch(`/api/boq-versions/${activeVersionId}/request-edit`, {
+                            method: "POST"
                           });
 
                           const [bomResp, boqResp] = await Promise.all([
@@ -6194,13 +6334,13 @@ export default function FinalizeBoq() {
 
                           toast({
                             title: "Success",
-                            description: "Version unlocked successfully",
+                            description: "Edit request submitted successfully",
                           });
                         } catch (err) {
-                          console.error("Failed to unlock version:", err);
+                          console.error("Failed to request edit:", err);
                           toast({
                             title: "Error",
-                            description: "Failed to unlock version",
+                            description: "Failed to request edit",
                             variant: "destructive",
                           });
                         }

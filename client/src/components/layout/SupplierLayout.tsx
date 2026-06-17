@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Truck,
   MapPin,
+  ShoppingBag,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
@@ -25,6 +26,7 @@ interface SupplierLayoutProps {
 
 const navItems = [
   { label: "Dashboard",        icon: LayoutDashboard, path: "/supplier/dashboard" },
+  { label: "My Materials",     icon: ShoppingBag,     path: "/supplier/my-materials" },
   { label: "Manage Materials", icon: Package,          path: "/supplier/materials" },
   { label: "Proposal",         icon: FileText,         path: "/proposal" },
   { label: "Sketch a Plan",    icon: Hammer,           path: "/sketch-plans" },

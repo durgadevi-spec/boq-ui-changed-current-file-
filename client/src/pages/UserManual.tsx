@@ -41,6 +41,7 @@ type ManualSection = {
 
 export default function UserManual() {
     const { user } = useData();
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [openSections, setOpenSections] = useState<Record<string, boolean>>({
         "Getting Started": true
     });
@@ -218,7 +219,7 @@ export default function UserManual() {
 
     return (
         <div className="flex bg-gray-50/50 min-h-screen">
-            <Sidebar />
+            <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
             <main className="flex-1 md:ml-64 p-8 pt-20 md:pt-8 overflow-y-auto">
                 <div className="max-w-5xl mx-auto space-y-8">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">

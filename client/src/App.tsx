@@ -12,6 +12,7 @@ import Signup from "@/pages/Signup";
 import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
 import PendingApproval from "@/pages/PendingApproval";
+import Landing from "./pages/Landing";
 
 import Dashboard from "@/pages/Dashboard";
 import SoftwareDashboard from "@/pages/SoftwareDashboard";
@@ -53,6 +54,7 @@ import CreateSketchPlan from "@/pages/CreateSketchPlan";
 import SketchTemplates from "@/pages/SketchTemplates";
 
 import SupplierMaterials from "@/pages/supplier/SupplierMaterials";
+import SupplierMyMaterials from "@/pages/supplier/SupplierMyMaterials";
 import SupplierShops from "@/pages/supplier/SupplierShops";
 import { SupplierSupport } from "@/pages/supplier/SupplierSupport";
 
@@ -75,7 +77,8 @@ function Router() {
   return (
     <Switch>
       {/* ================= PUBLIC ================= */}
-      <Route path="/" component={Login} />
+      <Route path="/" component={Landing} />
+      <Route path="/login" component={Login} />
       <Route path="/signup" component={Signup} />
       <Route path="/forgot-password" component={ForgotPassword} />
       <Route path="/reset-password" component={ResetPassword} />
@@ -153,6 +156,7 @@ function Router() {
       {/* ================= SUPPLIER ================= */}
       <Route path="/supplier/shops" component={SupplierShops} />
       <Route path="/supplier/materials" component={SupplierMaterials} />
+      <Route path="/supplier/my-materials" component={SupplierMyMaterials} />
       <Route path="/supplier/support" component={() => <SupplierSupport />} />
       <Route path="/supplier/dashboard" component={SupplierDashboard} />
 

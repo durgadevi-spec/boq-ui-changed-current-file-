@@ -412,3 +412,20 @@ export type BomComment = typeof bomComments.$inferSelect;
 export type InsertBomComment = z.infer<typeof insertBomCommentSchema>;
 export type SystemSettings = typeof systemSettings.$inferSelect;
 export type InsertSystemSettings = z.infer<typeof insertSystemSettingsSchema>;
+
+// --- ARCHIVE RECORDS ---
+
+export const archiveRecords = pgTable("archive_records", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  module: text("module").notNull(),
+  originId: text("origin_id").notNull(),
+  data: text("data"), // Store JSON as string
+  status: text("status").notNull(), // 'archived' or 'trashed'
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  trashedAt: timestamp("trashed_at", { withTimezone: true }),
+});
+
+export const insertArchiveRecordSchema = createInsertSchema(archiveRecords);
+export type ArchiveRecord = typeof archiveRecords.$inferSelect;
+export type InsertArchiveRecord = z.infer<typeof insertArchiveRecordSchema>;
+

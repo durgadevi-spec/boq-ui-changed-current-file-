@@ -93,6 +93,9 @@ export async function registerSketchRoutes(app: Express) {
   app.get("/api/sketch-plans", authMiddleware, async (req: Request, res: Response) => {
     try {
       const { parent_id } = req.query;
+      const userId = (req as any).user?.id;
+      const userRole = (req as any).user?.role;
+      
       let queryStr = `
         SELECT sp.*, p.name as project_name, spl.is_locked, spl.request_status
         FROM sketch_plans sp 
@@ -100,17 +103,57 @@ export async function registerSketchRoutes(app: Express) {
         LEFT JOIN sketch_plan_locks spl ON sp.id = spl.plan_id
       `;
       const queryParams: any[] = [];
+      let whereConditions: string[] = [];
 
-      if (parent_id) {
-        queryStr += ` WHERE sp.id = $1 OR sp.parent_plan_id = $1 `;
-        queryParams.push(parent_id);
+      // For suppliers, filter to only show plans with assigned items
+      if (userRole === 'supplier' && userId) {
+        // Get supplier's shops
+        const shopsRes = await query(
+          "SELECT id FROM shops WHERE owner_id = $1",
+          [userId]
+        );
+        const shopIds = shopsRes.rows.map((row: any) => row.id);
+        
+        if (shopIds.length > 0) {
+          // Add subquery to filter plans that have items assigned to this supplier's shops
+          queryStr = `
+            SELECT DISTINCT sp.*, p.name as project_name, spl.is_locked, spl.request_status
+            FROM sketch_plans sp 
+            LEFT JOIN boq_projects p ON sp.project_id = p.id 
+            LEFT JOIN sketch_plan_locks spl ON sp.id = spl.plan_id
+            WHERE sp.id IN (
+              SELECT DISTINCT plan_id FROM sketch_plan_items 
+              WHERE assigned_vendor_id = ANY($1)
+            )
+          `;
+          queryParams.push(shopIds);
+          
+          if (parent_id) {
+            whereConditions.push(`(sp.id = $${queryParams.length + 1} OR sp.parent_plan_id = $${queryParams.length + 1})`);
+            queryParams.push(parent_id);
+          }
+        } else {
+          // Supplier has no shops, return empty result
+          res.json({ plans: [] });
+          return;
+        }
+      } else {
+        // Non-suppliers see all plans (existing behavior)
+        if (parent_id) {
+          whereConditions.push(`(sp.id = $1 OR sp.parent_plan_id = $1)`);
+          queryParams.push(parent_id);
+        }
+      }
+
+      if (whereConditions.length > 0) {
+        queryStr += " AND " + whereConditions.join(" AND ");
       }
 
       queryStr += ` ORDER BY sp.project_id NULLS LAST, sp.created_at ASC`;
 
       const result = await query(queryStr, queryParams);
-      const archivedIds = archiveService.getArchivedItemIds('sketch_plans');
-      const trashedIds = archiveService.getTrashedItemIds('sketch_plans');
+      const archivedIds = await archiveService.getArchivedItemIds('sketch_plans');
+      const trashedIds = await archiveService.getTrashedItemIds('sketch_plans');
       const filtered = (result.rows || []).filter((r: any) => !archivedIds.includes(r.id) && !trashedIds.includes(r.id));
       res.json({ plans: filtered });
     } catch (err) {
@@ -727,9 +770,9 @@ export async function registerSketchRoutes(app: Express) {
       const planRes = await query("SELECT * FROM sketch_plans WHERE id = $1", [id]);
       if (planRes.rows.length === 0) return res.status(404).json({ message: "Plan not found" });
 
-      const archived = archiveService.archiveItem('sketch_plans', id, planRes.rows[0]);
+      const archived = await archiveService.archiveItem('sketch_plans', id, planRes.rows[0]);
       if (req.query.action === 'trash' && archived) {
-        archiveService.trashArchiveItem(archived.id);
+        await archiveService.trashArchiveItem(archived.id);
       }
       res.json({ message: "Sketch plan deleted successfully" });
     } catch (err) {

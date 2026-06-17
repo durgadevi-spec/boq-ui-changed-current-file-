@@ -194,15 +194,15 @@ export async function registerRoutes(
   app.get("/api/audit/usage-analytics", authMiddleware, requireRole("admin", "software_team"), async (req: Request, res: Response) => {
     try {
       const { fromDate, toDate } = req.query;
-      
+
       let dateFilter = "";
       const params: any[] = [];
-      
+
       if (fromDate) {
         params.push(fromDate);
         dateFilter += ` AND requested_at >= $${params.length}::timestamp`;
       }
-      
+
       if (toDate) {
         params.push(toDate);
         // Add 1 day to toDate to include the entire day if it's just a date string
@@ -238,13 +238,13 @@ export async function registerRoutes(
         GROUP BY username
         ORDER BY total_active_hours DESC
       `;
-      
+
       const result = await query(userStatsSql, params);
-      
+
       // Calculate overall system stats
       const totalEgress = result.rows.reduce((sum, row) => sum + Number(row.total_egress_mb || 0), 0);
       const totalActions = result.rows.reduce((sum, row) => sum + Number(row.total_actions || 0), 0);
-      
+
       res.json({
         userStats: result.rows,
         systemStats: {
@@ -252,7 +252,7 @@ export async function registerRoutes(
           totalActions,
         }
       });
-      
+
     } catch (err) {
       console.error("/api/audit/usage-analytics GET error", err);
       res.status(500).json({ message: "Failed to fetch usage analytics" });
@@ -342,29 +342,29 @@ export async function registerRoutes(
 
 
   // --- ARCHIVE & TRASH API ENDPOINTS ---
-  app.get('/api/archive', authMiddleware, (req, res) => {
-    res.json({ items: archiveService.getArchived() });
+  app.get('/api/archive', authMiddleware, async (req, res) => {
+    res.json({ items: await archiveService.getArchived() });
   });
 
-  app.get('/api/trash', authMiddleware, (req, res) => {
-    res.json({ items: archiveService.getTrashed() });
+  app.get('/api/trash', authMiddleware, async (req, res) => {
+    res.json({ items: await archiveService.getTrashed() });
   });
 
-  app.post('/api/archive/:id/trash', authMiddleware, (req, res) => {
-    const item = archiveService.trashArchiveItem(req.params.id);
+  app.post('/api/archive/:id/trash', authMiddleware, async (req, res) => {
+    const item = await archiveService.trashArchiveItem(req.params.id);
     if (item) res.json({ success: true, item });
     else res.status(404).json({ error: "Item not found in archive" });
   });
 
-  app.post('/api/archive/:id/restore', authMiddleware, (req, res) => {
-    const success = archiveService.restoreArchiveItem(req.params.id);
+  app.post('/api/archive/:id/restore', authMiddleware, async (req, res) => {
+    const success = await archiveService.restoreArchiveItem(req.params.id);
     if (success) res.json({ success: true });
     else res.status(404).json({ error: "Item not found in archive or trash" });
   });
 
   app.delete('/api/archive/:id/permanent', authMiddleware, async (req, res) => {
     try {
-      const item = archiveService.permanentlyDelete(req.params.id);
+      const item = await archiveService.permanentlyDelete(req.params.id);
       if (!item) return res.status(404).json({ error: "Item not found" });
 
       // Actually delete from DB now based on module
@@ -1148,7 +1148,7 @@ export async function registerRoutes(
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         project_id VARCHAR(100) NOT NULL REFERENCES boq_projects(id) ON DELETE CASCADE,
         project_name VARCHAR(255),
-        vendor_id VARCHAR(100) NOT NULL,
+        vendor_id UUID NOT NULL,
         vendor_name VARCHAR(255),
         version_number INTEGER DEFAULT 1,
         status VARCHAR(50) DEFAULT 'draft',
@@ -1163,6 +1163,7 @@ export async function registerRoutes(
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         proposal_id UUID NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
         material_id VARCHAR(255),
+        template_id UUID,
         item_name VARCHAR(255) NOT NULL,
         description TEXT,
         qty DECIMAL(10,2) NOT NULL,
@@ -1172,9 +1173,76 @@ export async function registerRoutes(
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    // Ensure template_id exists on legacy tables
+    await query(`ALTER TABLE proposal_items ADD COLUMN IF NOT EXISTS template_id UUID`);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS proposal_material_submissions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        proposal_id UUID NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+        template_id UUID NOT NULL REFERENCES material_templates(id) ON DELETE CASCADE,
+        shop_id UUID NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+        rate DECIMAL(15,2),
+        unit VARCHAR(50),
+        status VARCHAR(50) DEFAULT 'pending',
+        rejection_reason TEXT,
+        submitted_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(proposal_id, template_id, shop_id)
+      )
+    `);
+
     console.log("[db] Dedicated proposals tables verified/created");
   } catch (err: unknown) {
     console.warn("[db] Could not create proposals tables:", (err as any)?.message || err);
+  }
+
+  // Fix proposals.vendor_id type - convert VARCHAR to UUID
+  try {
+    // Check if column exists and is VARCHAR
+    const columnCheck = await query(`
+      SELECT data_type FROM information_schema.columns 
+      WHERE table_name = 'proposals' AND column_name = 'vendor_id'
+    `);
+
+    if (columnCheck.rows.length > 0 && columnCheck.rows[0].data_type === 'character varying') {
+      console.log("[db] Migrating proposals.vendor_id from VARCHAR to UUID...");
+
+      try {
+        // Step 1: Create new UUID column
+        await query(`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS vendor_id_uuid UUID`);
+
+        // Step 2: Migrate data - cast vendor_id to UUID
+        await query(`
+          UPDATE proposals 
+          SET vendor_id_uuid = vendor_id::uuid 
+          WHERE vendor_id_uuid IS NULL AND vendor_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        `);
+
+        // Step 3: Drop old constraint
+        try {
+          await query(`ALTER TABLE proposals DROP CONSTRAINT proposals_project_id_vendor_id_version_number_key`);
+        } catch {
+          // Constraint might not exist, ignore
+        }
+
+        // Step 4: Drop old column and rename new one
+        await query(`ALTER TABLE proposals DROP COLUMN vendor_id`);
+        await query(`ALTER TABLE proposals RENAME COLUMN vendor_id_uuid TO vendor_id`);
+
+        // Step 5: Re-add constraint
+        await query(`ALTER TABLE proposals ADD CONSTRAINT proposals_project_id_vendor_id_version_number_key UNIQUE(project_id, vendor_id, version_number)`);
+
+        console.log("[db] ✅ Successfully migrated proposals.vendor_id to UUID");
+      } catch (migrationErr) {
+        console.warn("[db] Migration step failed:", (migrationErr as any)?.message);
+        // Continue anyway - table might already be migrated
+      }
+    } else if (columnCheck.rows.length > 0 && columnCheck.rows[0].data_type === 'uuid') {
+      console.log("[db] ℹ️ proposals.vendor_id is already UUID type");
+    }
+  } catch (err: unknown) {
+    console.warn("[db] Could not check proposals.vendor_id type:", (err as any)?.message || err);
   }
 
   // Ensure purchase_orders table exists
@@ -1980,7 +2048,7 @@ export async function registerRoutes(
       if (storage.updateUserPassword) {
         const hashedPassword = await hashPassword(newPassword);
         await storage.updateUserPassword(user.id, hashedPassword);
-        
+
         // Send email notification
         await sendPasswordUpdatedEmail(email, user.fullName || user.username);
       }
@@ -2282,8 +2350,8 @@ export async function registerRoutes(
         "SELECT * FROM shops WHERE approved IS NOT FALSE ORDER BY name ASC",
       );
 
-      const archivedIds = archiveService.getArchivedItemIds('shops');
-      const trashedIds = archiveService.getTrashedItemIds('shops');
+      const archivedIds = await archiveService.getArchivedItemIds('shops');
+      const trashedIds = await archiveService.getTrashedItemIds('shops');
       const filtered = result.rows.filter(r => !archivedIds.includes(r.id) && !trashedIds.includes(r.id));
 
       res.json({ shops: filtered });
@@ -2446,10 +2514,10 @@ export async function registerRoutes(
       }
 
       // Filter out archived/trashed products and materials (same logic as /api/products)
-      const archivedProductIds = archiveService.getArchivedItemIds('products');
-      const trashedProductIds = archiveService.getTrashedItemIds('products');
-      const archivedMaterialIds = archiveService.getArchivedItemIds('materials');
-      const trashedMaterialIds = archiveService.getTrashedItemIds('materials');
+      const archivedProductIds = await archiveService.getArchivedItemIds('products');
+      const trashedProductIds = await archiveService.getTrashedItemIds('products');
+      const archivedMaterialIds = await archiveService.getArchivedItemIds('materials');
+      const trashedMaterialIds = await archiveService.getTrashedItemIds('materials');
 
       const filteredProducts = productsRows.filter(
         (r: any) => !archivedProductIds.includes(r.id) && !trashedProductIds.includes(r.id)
@@ -2469,23 +2537,34 @@ export async function registerRoutes(
   });
 
   // GET /api/materials - list materials
-  app.get("/api/materials", async (_req, res) => {
+  app.get("/api/materials", async (req, res) => {
     try {
+      const { shop_id } = req.query;
+
       // Only return materials that are approved for public listing
-      const result = await query(
-        `SELECT m.*, s.name as shop_name, 
+      let queryStr = `SELECT m.*, s.name as shop_name, 
                 mt.tax_code_type, mt.tax_code_value,
                 mt.hsn_code as template_hsn_code, mt.sac_code as template_sac_code,
                 m.brandname as "brandName", m.modelnumber as "modelNumber"
          FROM materials m 
          LEFT JOIN shops s ON m.shop_id = s.id 
          LEFT JOIN material_templates mt ON m.template_id = mt.id 
-         WHERE m.approved IS TRUE 
-         ORDER BY m.created_at DESC`,
-      );
+         WHERE m.approved IS TRUE`;
 
-      const archivedIds = archiveService.getArchivedItemIds('materials');
-      const trashedIds = archiveService.getTrashedItemIds('materials');
+      const params: any[] = [];
+
+      // Filter by shop if provided (for vendor-specific materials)
+      if (shop_id) {
+        queryStr += ` AND m.shop_id = $1`;
+        params.push(shop_id);
+      }
+
+      queryStr += ` ORDER BY m.created_at DESC`;
+
+      const result = await query(queryStr, params);
+
+      const archivedIds = await archiveService.getArchivedItemIds('materials');
+      const trashedIds = await archiveService.getTrashedItemIds('materials');
       const filtered = result.rows.filter(r => !archivedIds.includes(r.id) && !trashedIds.includes(r.id));
 
       res.json({ materials: filtered });
@@ -2785,9 +2864,9 @@ export async function registerRoutes(
           return res.status(404).json({ message: "Shop not found" });
         }
 
-        const archived = archiveService.archiveItem('shops', id, shopRes.rows[0]);
+        const archived = await archiveService.archiveItem('shops', id, shopRes.rows[0]);
         if (req.query.action === 'trash' && archived) {
-          archiveService.trashArchiveItem(archived.id);
+          await archiveService.trashArchiveItem(archived.id);
         }
 
         res.json({ message: "deleted" });
@@ -3015,9 +3094,9 @@ export async function registerRoutes(
         }
 
         // Archive the material instead of deleting
-        const archived = archiveService.archiveItem('materials', id, mat);
+        const archived = await archiveService.archiveItem('materials', id, mat);
         if (req.query.action === 'trash' && archived) {
-          archiveService.trashArchiveItem(archived.id);
+          await archiveService.trashArchiveItem(archived.id);
         }
 
         res.json({ message: "deleted" });
@@ -3910,8 +3989,8 @@ export async function registerRoutes(
           [category],
         );
 
-        const archivedIds = archiveService.getArchivedItemIds('subcategories');
-        const trashedIds = archiveService.getTrashedItemIds('subcategories');
+        const archivedIds = await archiveService.getArchivedItemIds('subcategories');
+        const trashedIds = await archiveService.getTrashedItemIds('subcategories');
         const subcategories = result.rows
           .filter(r => !archivedIds.includes(r.id) && !trashedIds.includes(r.id))
           .map((row) => row.name)
@@ -4209,9 +4288,9 @@ export async function registerRoutes(
           return res.status(404).json({ message: "Subcategory not found" });
         }
 
-        const archived = archiveService.archiveItem('subcategories', id, subResult.rows[0]);
+        const archived = await archiveService.archiveItem('subcategories', id, subResult.rows[0]);
         if (req.query.action === 'trash' && archived) {
-          archiveService.trashArchiveItem(archived.id);
+          await archiveService.trashArchiveItem(archived.id);
         }
 
         res.json({ message: "Subcategory archived", subcategory: subResult.rows[0] });
@@ -4237,8 +4316,8 @@ export async function registerRoutes(
         ORDER BY created_at DESC
       `);
 
-      const archivedNames = archiveService.getArchivedItemIds('categories');
-      const trashedNames = archiveService.getTrashedItemIds('categories');
+      const archivedNames = await archiveService.getArchivedItemIds('categories');
+      const trashedNames = await archiveService.getTrashedItemIds('categories');
       const filtered = result.rows.map((r) => r.name).filter(name => !archivedNames.includes(name) && !trashedNames.includes(name));
 
       res.json({ categories: filtered });
@@ -4265,9 +4344,9 @@ export async function registerRoutes(
           return res.status(404).json({ message: "Category not found" });
         }
 
-        const archived = archiveService.archiveItem('categories', name, getCat.rows[0]);
+        const archived = await archiveService.archiveItem('categories', name, getCat.rows[0]);
         if (req.query.action === 'trash' && archived) {
-          archiveService.trashArchiveItem(archived.id);
+          await archiveService.trashArchiveItem(archived.id);
         }
 
         res.json({ message: "Category archived", category: getCat.rows[0] });
@@ -4287,8 +4366,8 @@ export async function registerRoutes(
         ORDER BY category ASC, name ASC
       `);
 
-      const archivedIds = archiveService.getArchivedItemIds('subcategories');
-      const trashedIds = archiveService.getTrashedItemIds('subcategories');
+      const archivedIds = await archiveService.getArchivedItemIds('subcategories');
+      const trashedIds = await archiveService.getTrashedItemIds('subcategories');
       const filtered = result.rows.filter((r) => !archivedIds.includes(r.id) && !trashedIds.includes(r.id));
 
       res.json({ subcategories: filtered });
@@ -4462,8 +4541,8 @@ export async function registerRoutes(
 
       queryStr += ` ORDER BY p.id, p.created_at DESC`;
       const result = await query(queryStr);
-      const archivedIds = archiveService.getArchivedItemIds('products');
-      const trashedIds = archiveService.getTrashedItemIds('products');
+      const archivedIds = await archiveService.getArchivedItemIds('products');
+      const trashedIds = await archiveService.getTrashedItemIds('products');
       const filtered = result.rows.filter((r: any) => !archivedIds.includes(r.id) && !trashedIds.includes(r.id));
 
       res.json({ products: filtered });
@@ -4560,9 +4639,9 @@ export async function registerRoutes(
           return;
         }
 
-        const archived = archiveService.archiveItem('products', id, result.rows[0]);
+        const archived = await archiveService.archiveItem('products', id, result.rows[0]);
         if (req.query.action === 'trash' && archived) {
-          archiveService.trashArchiveItem(archived.id);
+          await archiveService.trashArchiveItem(archived.id);
         }
 
         res.json({ message: "Product archived", product: result.rows[0] });
@@ -4815,6 +4894,86 @@ export async function registerRoutes(
         res.status(500).json({ message: "failed to get submissions" });
       }
     },
+  );
+
+  // GET /api/supplier/my-materials - Get ALL materials (approved, pending, rejected) for this supplier's shops
+  // This combines: approved materials from `materials` table + all submissions from `material_submissions`
+  app.get(
+    "/api/supplier/my-materials",
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = (req as any).user?.id;
+        if (!userId) {
+          return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        // Get all shops owned by this supplier
+        const shopsResult = await query(
+          "SELECT id, name, location FROM shops WHERE owner_id = $1",
+          [userId]
+        );
+        const shops = shopsResult.rows;
+        const shopIds = shops.map((s: any) => s.id);
+
+        if (shopIds.length === 0) {
+          return res.json({ materials: [] });
+        }
+
+        // Fetch from `materials` table (approved materials for these shops)
+        const materialsResult = await query(
+          `SELECT m.id::text, mt.name, mt.code, m.rate, m.unit,
+                  COALESCE(m.category, mt.category) as category,
+                  COALESCE(m.subcategory, mt.subcategory) as subcategory,
+                  m.brandname, m.modelnumber, m.technicalspecification,
+                  m.dimensions, m.finishtype, m.metaltype,
+                  COALESCE(m.image, mt.image) as image,
+                  m.shop_id, s.name as shop_name,
+                  m.approved,
+                  'material' as source
+           FROM materials m
+           LEFT JOIN material_templates mt ON m.template_id = mt.id
+           LEFT JOIN shops s ON m.shop_id = s.id
+           WHERE m.shop_id = ANY($1)
+           ORDER BY m.created_at DESC`,
+          [shopIds]
+        );
+
+        // Fetch from `material_submissions` table (submitted but may not yet be in materials)
+        const submissionsResult = await query(
+          `SELECT ms.id::text,
+                  mt.name, mt.code,
+                  ms.rate, ms.unit,
+                  mt.category, mt.subcategory,
+                  ms.brandname, ms.modelnumber, ms.technicalspecification,
+                  ms.dimensions, ms.finishtype, ms.metaltype,
+                  mt.image,
+                  ms.shop_id, s.name as shop_name,
+                  ms.approved,
+                  'submission' as source
+           FROM material_submissions ms
+           JOIN material_templates mt ON ms.template_id = mt.id
+           LEFT JOIN shops s ON ms.shop_id = s.id
+           WHERE ms.shop_id = ANY($1)
+           ORDER BY ms.submitted_at DESC`,
+          [shopIds]
+        );
+
+        // Combine: materials first, then submissions that don't already have a matching material
+        const allMaterials = materialsResult.rows;
+        const submissions = submissionsResult.rows;
+
+        // Collect all items (prefer material records; add submissions not already represented)
+        const seen = new Set(allMaterials.map((m: any) => m.id));
+        const extra = submissions.filter((s: any) => !seen.has(s.id));
+        const combined = [...allMaterials, ...extra];
+
+        return res.json({ materials: combined, shops });
+      } catch (err: any) {
+        console.error("/api/supplier/my-materials error", err);
+        res.status(500).json({ message: "failed to load supplier materials" });
+      }
+    }
   );
 
   // GET /api/material-submissions-pending-approval - List pending material submissions (Admin/Software/Purchase)
@@ -5160,7 +5319,7 @@ export async function registerRoutes(
         const user = (req as any).user;
         const { all } = req.query;
         let queryStr = `
-          SELECT p.*, 
+          SELECT DISTINCT p.*, 
             v_bom.version_number as bom_version_number, v_bom.project_value as bom_version_price,
             v_boq.version_number as boq_version_number, v_boq.project_value as boq_version_price
           FROM boq_projects p
@@ -5192,16 +5351,41 @@ export async function registerRoutes(
         // Only allow privileged roles to bypass project restrictions; vendors/suppliers are filtered
         if (privilegedRoles.includes(user?.role)) {
           // Privileged roles see all projects
+        } else if (user?.role === 'supplier') {
+          // Vendors see projects from:
+          // 1. User project permissions (if assigned)
+          // 2. Sketch plans where their shop has assigned items
+          const shopRes = await query(
+            "SELECT id FROM shops WHERE owner_id = $1",
+            [user.id]
+          );
+          const shopIds = shopRes.rows.map((row: any) => row.id);
+
+          if (shopIds.length > 0) {
+            queryStr += ` WHERE p.id IN (
+              SELECT DISTINCT project_id FROM user_project_permissions WHERE user_id = $1
+              UNION
+              SELECT DISTINCT sp.project_id FROM sketch_plans sp
+              WHERE sp.id IN (
+                SELECT DISTINCT plan_id FROM sketch_plan_items 
+                WHERE assigned_vendor_id = ANY($2)
+              )
+            )`;
+            params.push(user.id, shopIds);
+          } else {
+            queryStr += ` WHERE p.id IN (SELECT project_id FROM user_project_permissions WHERE user_id = $1)`;
+            params.push(user.id);
+          }
         } else {
-          queryStr += ` WHERE id IN (SELECT project_id FROM user_project_permissions WHERE user_id = $1)`;
+          queryStr += ` WHERE p.id IN (SELECT project_id FROM user_project_permissions WHERE user_id = $1)`;
           params.push(user.id);
         }
 
-        queryStr += ` ORDER BY created_at DESC`;
+        queryStr += ` ORDER BY p.created_at DESC`;
         const result = await query(queryStr, params);
 
-        const archivedIds = archiveService.getArchivedItemIds('boq_projects');
-        const trashedIds = archiveService.getTrashedItemIds('boq_projects');
+        const archivedIds = await archiveService.getArchivedItemIds('boq_projects');
+        const trashedIds = await archiveService.getTrashedItemIds('boq_projects');
         const filtered = (result.rows || []).filter(
           (r: any) => !archivedIds.includes(r.id) && !trashedIds.includes(r.id)
         );
@@ -5233,8 +5417,8 @@ export async function registerRoutes(
         queryStr += ` ORDER BY name ASC`;
         const result = await query(queryStr, params);
 
-        const archivedIds = archiveService.getArchivedItemIds('boq_projects');
-        const trashedIds = archiveService.getTrashedItemIds('boq_projects');
+        const archivedIds = await archiveService.getArchivedItemIds('boq_projects');
+        const trashedIds = await archiveService.getTrashedItemIds('boq_projects');
         const filtered = (result.rows || []).filter(
           (r: any) => !archivedIds.includes(r.id) && !trashedIds.includes(r.id)
         );
@@ -5504,8 +5688,8 @@ export async function registerRoutes(
 
         const result = await query(q, params);
 
-        const archivedIds = archiveService.getArchivedItemIds('boq_versions');
-        const trashedIds = archiveService.getTrashedItemIds('boq_versions');
+        const archivedIds = await archiveService.getArchivedItemIds('boq_versions');
+        const trashedIds = await archiveService.getTrashedItemIds('boq_versions');
         const filtered = (result.rows || []).filter(
           (r: any) => !archivedIds.includes(r.id) && !trashedIds.includes(r.id)
         );
@@ -5587,20 +5771,30 @@ export async function registerRoutes(
           const itemsResult = await query(
             `SELECT * FROM boq_items 
              WHERE version_id = $1 
-             AND project_id = $2 
              AND user_added = true
              ORDER BY sort_order ASC, created_at ASC`,
-            [copy_from_version, project_id],
+            [copy_from_version],
           );
 
-          const archivedIds = archiveService.getArchivedItemIds('boq_items');
-          const trashedIds = archiveService.getTrashedItemIds('boq_items');
+          const archivedIds = await archiveService.getArchivedItemIds('boq_items');
+          const trashedIds = await archiveService.getTrashedItemIds('boq_items');
 
+          const existingCopySet = new Set();
           for (const item of itemsResult.rows) {
             // Skip archived or trashed items
             if (archivedIds.includes(item.id) || trashedIds.includes(item.id)) continue;
 
-            const newItemId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            const td = typeof item.table_data === 'string' ? JSON.parse(item.table_data) : item.table_data;
+            if (td) delete td.created_at;
+            const key = JSON.stringify(td);
+
+            if (existingCopySet.has(key)) {
+              console.log(`[copy_from_version] Skipping duplicate item during copy`);
+              continue;
+            }
+            existingCopySet.add(key);
+
+            const newItemId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${Math.random().toString(36).substr(2, 9)}`;
             await query(
               `INSERT INTO boq_items (id, project_id, estimator, table_data, version_id, sort_order, user_added, created_at)
                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
@@ -6671,9 +6865,9 @@ export async function registerRoutes(
         const projectId = versionData.project_id;
 
         // Archive the version instead of deleting
-        const archived = archiveService.archiveItem('boq_versions', versionId, versionData);
+        const archived = await archiveService.archiveItem('boq_versions', versionId, versionData);
         if (req.query.action === 'trash' && archived) {
-          archiveService.trashArchiveItem(archived.id);
+          await archiveService.trashArchiveItem(archived.id);
         }
 
         if (projectId) {
@@ -6718,8 +6912,8 @@ export async function registerRoutes(
         [targetVersionId],
       );
 
-      const archivedIds = archiveService.getArchivedItemIds('boq_items');
-      const trashedIds = archiveService.getTrashedItemIds('boq_items');
+      const archivedIds = await archiveService.getArchivedItemIds('boq_items');
+      const trashedIds = await archiveService.getTrashedItemIds('boq_items');
 
 
       const entriesToProcess = [];
@@ -7005,9 +7199,28 @@ export async function registerRoutes(
         );
         let currentSortOrder = (maxSortOrderResult.rows[0]?.max_sort_order || 0) + 1;
 
+        // Fetch existing items for deduplication
+        const existingItemsRes = await query(`SELECT table_data FROM boq_items WHERE version_id = $1`, [version_id]);
+        const existingSet = new Set();
+        for (const row of existingItemsRes.rows) {
+          const td = typeof row.table_data === 'string' ? JSON.parse(row.table_data) : row.table_data;
+          if (td) delete td.created_at;
+          existingSet.add(JSON.stringify(td));
+        }
+
         const results = [];
         for (const item of items) {
-          const itemId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          const td = { ...(item.table_data || {}) };
+          if (td) delete td.created_at;
+          const key = JSON.stringify(td);
+
+          if (existingSet.has(key)) {
+            console.log(`[batch] Skipping duplicate item: ${item.estimator}`);
+            continue;
+          }
+          existingSet.add(key);
+
+          const itemId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${Math.random().toString(36).substr(2, 9)}`;
           await query(
             `INSERT INTO boq_items (id, project_id, estimator, table_data, version_id, user_added, sort_order, created_at)
              VALUES ($1, $2, $3, $4, $5, true, $6, NOW())`,
@@ -7250,8 +7463,8 @@ export async function registerRoutes(
           [versionId],
         );
 
-        const archivedIds = archiveService.getArchivedItemIds('boq_items');
-        const trashedIds = archiveService.getTrashedItemIds('boq_items');
+        const archivedIds = await archiveService.getArchivedItemIds('boq_items');
+        const trashedIds = await archiveService.getTrashedItemIds('boq_items');
 
         const rawItems = result.rows
           .filter((row: any) => !archivedIds.includes(row.id) && !trashedIds.includes(row.id))
@@ -7603,9 +7816,9 @@ export async function registerRoutes(
         const projectId = itemData.project_id;
 
         // Archive instead of hard delete
-        const archived = archiveService.archiveItem('boq_items', itemId, itemData);
+        const archived = await archiveService.archiveItem('boq_items', itemId, itemData);
         if (req.query.action === 'trash' && archived) {
-          archiveService.trashArchiveItem(archived.id);
+          await archiveService.trashArchiveItem(archived.id);
         }
 
         // Recalculate project value
@@ -7627,8 +7840,8 @@ export async function registerRoutes(
   app.get("/api/boq-templates", authMiddleware, async (req: Request, res: Response) => {
     try {
       const result = await query("SELECT * FROM boq_templates ORDER BY name ASC");
-      const archivedIds = archiveService.getArchivedItemIds('boq_templates');
-      const trashedIds = archiveService.getTrashedItemIds('boq_templates');
+      const archivedIds = await archiveService.getArchivedItemIds('boq_templates');
+      const trashedIds = await archiveService.getTrashedItemIds('boq_templates');
       const filtered = result.rows.filter((r) => !archivedIds.includes(r.id) && !trashedIds.includes(r.id));
       res.json({ templates: filtered });
     } catch (err) {
@@ -7655,7 +7868,7 @@ export async function registerRoutes(
 
       // Ensure it's not hidden if it was previously deleted/archived
       if (upsertResult.rows[0]) {
-        archiveService.restoreByOriginId('boq_templates', upsertResult.rows[0].id);
+        await archiveService.restoreByOriginId('boq_templates', upsertResult.rows[0].id);
       }
 
       res.json({ message: "Template saved successfully" });
@@ -7672,9 +7885,9 @@ export async function registerRoutes(
       const getTpl = await query("SELECT * FROM boq_templates WHERE id = $1", [id]);
       if (getTpl.rows.length === 0) return res.status(404).json({ message: "Template not found" });
 
-      const archived = archiveService.archiveItem('boq_templates', id, getTpl.rows[0]);
+      const archived = await archiveService.archiveItem('boq_templates', id, getTpl.rows[0]);
       if (req.query.action === 'trash' && archived) {
-        archiveService.trashArchiveItem(archived.id);
+        await archiveService.trashArchiveItem(archived.id);
       }
       res.json({ message: "Template archived" });
     } catch (err) {
@@ -7691,8 +7904,8 @@ export async function registerRoutes(
   app.get("/api/bom-templates", authMiddleware, async (req: Request, res: Response) => {
     try {
       const result = await query("SELECT * FROM bom_templates ORDER BY name ASC");
-      const archivedIds = archiveService.getArchivedItemIds('bom_templates');
-      const trashedIds = archiveService.getTrashedItemIds('bom_templates');
+      const archivedIds = await archiveService.getArchivedItemIds('bom_templates');
+      const trashedIds = await archiveService.getTrashedItemIds('bom_templates');
       const filtered = result.rows.filter((r) => !archivedIds.includes(r.id) && !trashedIds.includes(r.id));
       res.json({ templates: filtered });
     } catch (err) {
@@ -7719,7 +7932,7 @@ export async function registerRoutes(
 
       // Ensure it's not hidden if it was previously deleted/archived
       if (upsertResult.rows[0]) {
-        archiveService.restoreByOriginId('bom_templates', upsertResult.rows[0].id);
+        await archiveService.restoreByOriginId('bom_templates', upsertResult.rows[0].id);
       }
 
       res.json({ message: "BOM Template saved successfully" });
@@ -7736,9 +7949,9 @@ export async function registerRoutes(
       const getTpl = await query("SELECT * FROM bom_templates WHERE id = $1", [id]);
       if (getTpl.rows.length === 0) return res.status(404).json({ message: "Template not found" });
 
-      const archived = archiveService.archiveItem('bom_templates', id, getTpl.rows[0]);
+      const archived = await archiveService.archiveItem('bom_templates', id, getTpl.rows[0]);
       if (req.query.action === 'trash' && archived) {
-        archiveService.trashArchiveItem(archived.id);
+        await archiveService.trashArchiveItem(archived.id);
       }
       res.json({ message: "BOM Template archived" });
     } catch (err) {
@@ -9738,13 +9951,41 @@ export async function registerRoutes(
 
           const poId = poResult.rows[0].id;
 
-          // Insert items
+          // Aggregate identical items for this PO
+          const aggregatedItems = new Map<string, any>();
           for (const item of items) {
-            const qty = parseFloat(item.qty || item.quantity || 0) || 0;
-            const supplyRate = parseFloat(item.supply_rate || item.supplyRate || item.rate || 0) || 0;
-            const installRate = parseFloat(item.install_rate || item.installRate || 0) || 0;
-            const rate = supplyRate + installRate;
-            const amount = Number((parseFloat(item.amount || 0) || (qty * rate) || 0).toFixed(2));
+            const itemName = (item.item || item.material_name || item.title || item.name || "Unknown Item").trim();
+            const materialId = item.material_id || item.materialId || item.id || null;
+            // Group by material ID if available, otherwise fallback to exact item name
+            const key = materialId ? String(materialId) : itemName.toLowerCase();
+
+            if (!aggregatedItems.has(key)) {
+              // Store first instance
+              const qty = parseFloat(item.qty || item.quantity || 0) || 0;
+              const supplyRate = parseFloat(item.supply_rate || item.supplyRate || item.rate || 0) || 0;
+              const installRate = parseFloat(item.install_rate || item.installRate || 0) || 0;
+              const rate = supplyRate + installRate;
+
+              aggregatedItems.set(key, {
+                ...item,
+                _agg_qty: qty,
+                _agg_rate: rate,
+                _agg_name: itemName,
+                _agg_mat_id: materialId
+              });
+            } else {
+              // Add to existing
+              const existing = aggregatedItems.get(key);
+              const qty = parseFloat(item.qty || item.quantity || 0) || 0;
+              existing._agg_qty += qty;
+            }
+          }
+
+          // Insert aggregated items
+          for (const item of aggregatedItems.values()) {
+            const qty = item._agg_qty;
+            const rate = item._agg_rate;
+            const amount = Number((qty * rate).toFixed(2));
             totalAmount += amount;
 
             await query(
@@ -9752,8 +9993,8 @@ export async function registerRoutes(
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
               [
                 poId,
-                item.material_id || item.materialId || item.id || null,
-                item.item || item.material_name || item.title || item.name || "Unknown Item",
+                item._agg_mat_id,
+                item._agg_name,
                 item.description || item.location || null,
                 item.unit || null,
                 qty,
@@ -9763,7 +10004,7 @@ export async function registerRoutes(
                 item.hsn_code || item.hsn_sac_code || null,
                 item.sac_code || null,
                 false // qty_modified starts false
-              ],
+              ]
             );
           }
 
@@ -11492,30 +11733,65 @@ ${list.rows.map((row: any) => `- ${row.name}`).join('\n')}`;
         );
         const newProposalId = proposalCreateRes.rows[0].id;
 
-        const materialsRes = await query("SELECT id, name, rate, unit, technicalspecification FROM materials", []);
-        const materialsById = Object.fromEntries(materialsRes.rows.map(m => [m.id?.toString(), m]));
-        const materialsByName = Object.fromEntries(materialsRes.rows.map(m => [m.name?.toLowerCase()?.trim() || "", m]));
-
+        // For vendor-specific rates, look up the material by (template_id, shop_id).
+        // If no record exists for this vendor, rate stays 0 (vendor must enter it).
+        // CRITICAL: Never copy another vendor's rate into the proposal.
         for (const item of items) {
-          let matchedMaterial = item.material_id ? materialsById[item.material_id.toString()] : null;
-          if (!matchedMaterial && item.item_name) {
-            matchedMaterial = materialsByName[item.item_name.toLowerCase().trim()];
+          let templateId = item.material_id ? item.material_id.toString() : null;
+          const qty = parseFloat(item.qty || item.quantity) || 0;
+          let rate = 0;
+          let matchedUnit = item.unit || null;
+
+          // Try lookup by template_id + shop_id (vendor-specific pricing)
+          if (templateId && vendorIdToUse) {
+            const vendorMat = await query(
+              `SELECT id, rate, unit FROM materials WHERE template_id::text = $1 AND shop_id::text = $2 LIMIT 1`,
+              [templateId, vendorIdToUse]
+            );
+            if (vendorMat.rows.length > 0) {
+              rate = parseFloat(vendorMat.rows[0].rate) || 0;
+              if (!matchedUnit) matchedUnit = vendorMat.rows[0].unit;
+            }
           }
 
-          // Robust parsing for dimensions and quantity
-          const qty = parseFloat(item.qty || item.quantity) || 0;
-          const rate = matchedMaterial ? parseFloat(matchedMaterial.rate) : 0;
+          // Fallback: if material_id is actually a material.id (legacy), look up template_id
+          if (rate === 0 && templateId && vendorIdToUse) {
+            const mat = await query(
+              `SELECT template_id, rate, unit FROM materials WHERE id::text = $1 LIMIT 1`,
+              [templateId]
+            );
+            if (mat.rows.length > 0 && mat.rows[0].template_id) {
+              const tplId = mat.rows[0].template_id.toString();
+              const vendorMat = await query(
+                `SELECT rate, unit FROM materials WHERE template_id::text = $1 AND shop_id::text = $2 LIMIT 1`,
+                [tplId, vendorIdToUse]
+              );
+              if (vendorMat.rows.length > 0) {
+                rate = parseFloat(vendorMat.rows[0].rate) || 0;
+                templateId = tplId; // Normalize to template_id
+                if (!matchedUnit) matchedUnit = vendorMat.rows[0].unit;
+              } else if (mat.rows[0].shop_id && mat.rows[0].shop_id.toString() === vendorIdToUse.toString()) {
+                // The material was directly the vendor's own material
+                rate = parseFloat(mat.rows[0].rate) || 0;
+                if (!matchedUnit) matchedUnit = mat.rows[0].unit;
+              }
+            }
+          }
+
+          // Final: rate stays 0 if no vendor-specific rate found.
+          // The vendor will fill it in on the Proposal page.
 
           await query(
             `INSERT INTO proposal_items (
-              proposal_id, material_id, item_name, qty, unit, rate, amount
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              proposal_id, material_id, template_id, item_name, qty, unit, rate, amount
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
             [
               newProposalId,
-              matchedMaterial?.id || item.material_id || null,
+              templateId,
+              templateId, // store both - material_id holds template_id for compatibility
               item.item_name || "Untitled Item",
               qty,
-              item.unit || matchedMaterial?.unit || "unit",
+              matchedUnit || item.unit || "unit",
               rate,
               qty * rate
             ]
@@ -11594,27 +11870,140 @@ ${list.rows.map((row: any) => `- ${row.name}`).join('\n')}`;
   // POST /api/proposals/:id/submit - Vendor submits proposal
   app.post("/api/proposals/:id/submit", authMiddleware, async (req: Request, res: Response) => {
     try {
-      // Can update item rates and quantities here from req.body.items if provided
+      const userId = (req as any).user?.id;
       const { items } = req.body;
 
-      await query("BEGIN");
-
-      if (items && Array.isArray(items)) {
-        for (const it of items) {
-          await query(
-            "UPDATE proposal_items SET rate = $1, amount = $2 WHERE id = $3",
-            [it.rate, it.amount, it.id]
-          );
-        }
-      }
-
-      const result = await query(
-        "UPDATE proposals SET status = 'submitted', updated_at = NOW() WHERE id = $1 RETURNING *",
+      // Get proposal to check vendor
+      const proposalResult = await query(
+        "SELECT vendor_id FROM proposals WHERE id = $1",
         [req.params.id]
       );
 
-      await query("COMMIT");
-      res.json(result.rows[0]);
+      if (proposalResult.rows.length === 0) {
+        return res.status(404).json({ message: "Proposal not found" });
+      }
+
+      const vendorId = proposalResult.rows[0].vendor_id;
+
+      await query("BEGIN");
+
+      try {
+        // 1. First apply any rate updates from the frontend
+        if (items && Array.isArray(items)) {
+          for (const it of items) {
+            if (it.rate !== undefined && it.rate !== null && it.rate >= 0) {
+              // Update proposal item with rate
+              await query(
+                "UPDATE proposal_items SET rate = $1, amount = $2 WHERE id = $3",
+                [it.rate, it.amount, it.id]
+              );
+            }
+          }
+        }
+
+        // 2. Fetch all items in the proposal to verify if any need approval
+        // This ensures items added directly (without edits) are also checked
+        const allItemsResult = await query(
+          "SELECT id, material_id, template_id, item_name, unit, rate FROM proposal_items WHERE proposal_id = $1",
+          [req.params.id]
+        );
+
+        for (const itemRow of allItemsResult.rows) {
+          const itemRate = parseFloat(itemRow.rate);
+          if (!isNaN(itemRate) && itemRate > 0) {
+            let resolvedTemplateId: string | null = null;
+            // Strategy 1: template_id directly exists in material_templates
+            if (itemRow.template_id) {
+              const check = await query(
+                "SELECT id FROM material_templates WHERE id::text = $1::text",
+                [itemRow.template_id]
+              );
+              if (check.rows.length > 0) {
+                resolvedTemplateId = check.rows[0].id;
+              }
+            }
+            // Strategy 2: template_id is actually a materials.id — resolve its real template_id
+            if (!resolvedTemplateId && itemRow.template_id) {
+              const m = await query(
+                "SELECT template_id FROM materials WHERE id::text = $1::text LIMIT 1",
+                [itemRow.template_id]
+              );
+              if (m.rows.length > 0 && m.rows[0].template_id) {
+                const t = await query(
+                  "SELECT id FROM material_templates WHERE id::text = $1::text",
+                  [m.rows[0].template_id]
+                );
+                if (t.rows.length > 0) resolvedTemplateId = t.rows[0].id;
+              }
+            }
+            // Strategy 3: material_id is directly a material_templates.id
+            if (!resolvedTemplateId && itemRow.material_id) {
+              const check = await query(
+                "SELECT id FROM material_templates WHERE id::text = $1::text",
+                [itemRow.material_id]
+              );
+              if (check.rows.length > 0) resolvedTemplateId = check.rows[0].id;
+            }
+            // Strategy 4: material_id is a materials.id — resolve its real template_id
+            if (!resolvedTemplateId && itemRow.material_id) {
+              const m = await query(
+                "SELECT template_id FROM materials WHERE id::text = $1::text LIMIT 1",
+                [itemRow.material_id]
+              );
+              if (m.rows.length > 0 && m.rows[0].template_id) {
+                const t = await query(
+                  "SELECT id FROM material_templates WHERE id::text = $1::text",
+                  [m.rows[0].template_id]
+                );
+                if (t.rows.length > 0) resolvedTemplateId = t.rows[0].id;
+              }
+            }
+            // If no strategy worked, skip this item
+            if (!resolvedTemplateId) {
+              console.warn(`Could not resolve template_id for item "${itemRow.item_name}". Skipping.`);
+              continue;
+            }
+            // Check if THIS vendor already owns this template in their shop
+            const existingMaterial = await query(
+              "SELECT id FROM materials WHERE template_id::text = $1::text AND shop_id::text = $2::text",
+              [resolvedTemplateId, vendorId]
+            );
+            if (existingMaterial.rows.length > 0) {
+              // Item belongs to vendor — skip, no approval needed
+              continue;
+            }
+            // Vendor does NOT own this material — UPSERT into proposal_material_submissions
+            const existingSubmission = await query(
+              "SELECT id FROM proposal_material_submissions \n               WHERE proposal_id = $1 AND template_id::text = $2::text AND shop_id::text = $3::text",
+              [req.params.id, resolvedTemplateId, vendorId]
+            );
+            if (existingSubmission.rows.length === 0) {
+              // INSERT new record
+              await query(
+                `INSERT INTO proposal_material_submissions \n                 (id, proposal_id, template_id, shop_id, rate, unit, status, submitted_at, updated_at)\n                 VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW(), NOW())`,
+                [randomUUID(), req.params.id, resolvedTemplateId, vendorId, itemRate, itemRow.unit]
+              );
+            } else {
+              // UPDATE existing record
+              await query(
+                `UPDATE proposal_material_submissions \n                 SET rate = $1, unit = $2, status = 'pending', updated_at = NOW() \n                 WHERE id = $3`,
+                [itemRate, itemRow.unit, existingSubmission.rows[0].id]
+              );
+            }
+          }
+        }
+
+        const result = await query(
+          "UPDATE proposals SET status = 'submitted', updated_at = NOW() WHERE id = $1 RETURNING *",
+          [req.params.id]
+        );
+
+        await query("COMMIT");
+        res.json(result.rows[0]);
+      } catch (innerErr) {
+        await query("ROLLBACK");
+        throw innerErr;
+      }
     } catch (err) {
       await query("ROLLBACK");
       console.error(err);
@@ -11882,6 +12271,179 @@ ${list.rows.map((row: any) => `- ${row.name}`).join('\n')}`;
       res.status(500).json({ message: "Failed to fetch historical rates" });
     }
   });
+
+  // ==================== PROPOSAL MATERIAL SUBMISSIONS ====================
+
+  // GET /api/proposal-material-submissions-pending-approval - List pending proposal material submissions
+  app.get(
+    "/api/proposal-material-submissions-pending-approval",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team"),
+    async (_req: Request, res: Response) => {
+      try {
+        const result = await query(`
+          SELECT 
+            pms.id,
+            pms.proposal_id,
+            pms.template_id,
+            pms.shop_id,
+            pms.rate,
+            pms.unit,
+            pms.status,
+            pms.submitted_at,
+            mt.name as template_name,
+            mt.code as template_code,
+            mt.category as template_category,
+            s.name as shop_name,
+            p.project_id,
+            bp.name as project_name,
+            u.email as submitted_by_email,
+            u.full_name as submitted_by_name
+          FROM proposal_material_submissions pms
+          LEFT JOIN material_templates mt ON pms.template_id = mt.id
+          LEFT JOIN shops s ON pms.shop_id = s.id
+          LEFT JOIN proposals p ON pms.proposal_id = p.id
+          LEFT JOIN boq_projects bp ON p.project_id = bp.id
+          LEFT JOIN public.users u ON s.owner_id::text = u.id
+          WHERE pms.status = 'pending'
+          ORDER BY pms.submitted_at DESC
+        `);
+
+        const submissions = result.rows.map((row: any) => ({
+          id: row.id,
+          status: "pending",
+          submission: row,
+        }));
+
+        res.json({ submissions });
+      } catch (err) {
+        console.error("GET /api/proposal-material-submissions-pending-approval error:", err);
+        res.status(500).json({ message: "Failed to fetch pending proposal material submissions" });
+      }
+    }
+  );
+
+  // POST /api/proposal-material-submissions/:id/approve - Approve proposal material submission
+  app.post(
+    "/api/proposal-material-submissions/:id/approve",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team"),
+    async (req: Request, res: Response) => {
+      try {
+        const { id } = req.params;
+
+        // Get the submission
+        const submissionResult = await query(
+          `SELECT * FROM proposal_material_submissions WHERE id = $1`,
+          [id]
+        );
+
+        if (submissionResult.rows.length === 0) {
+          return res.status(404).json({ message: "Submission not found" });
+        }
+
+        const submission = submissionResult.rows[0];
+
+        // Get template details
+        const templateResult = await query(
+          "SELECT * FROM material_templates WHERE id = $1",
+          [submission.template_id]
+        );
+
+        if (templateResult.rows.length === 0) {
+          return res.status(400).json({ message: "Template not found" });
+        }
+
+        const template = templateResult.rows[0];
+
+        await query("BEGIN");
+
+        try {
+          // Check if material already exists for this template + shop
+          const existingMaterial = await query(
+            "SELECT id FROM materials WHERE template_id = $1 AND shop_id = $2",
+            [submission.template_id, submission.shop_id]
+          );
+
+          if (existingMaterial.rows.length > 0) {
+            // Update existing material with new rate
+            await query(
+              "UPDATE materials SET rate = $1, unit = $2, approved = true WHERE template_id = $3 AND shop_id = $4",
+              [submission.rate, submission.unit, submission.template_id, submission.shop_id]
+            );
+          } else {
+            // Insert new material
+            const materialId = randomUUID();
+            await query(
+              `INSERT INTO materials (id, name, code, rate, shop_id, unit, category, hsn_code, sac_code, template_id, approved, is_project_pricing)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, false)`,
+              [
+                materialId,
+                template.name,
+                template.code,
+                submission.rate,
+                submission.shop_id,
+                submission.unit,
+                template.category,
+                template.hsn_code,
+                template.sac_code,
+                submission.template_id,
+              ]
+            );
+          }
+
+          // Update submission status
+          const updateResult = await query(
+            "UPDATE proposal_material_submissions SET status = 'approved', updated_at = NOW() WHERE id = $1 RETURNING *",
+            [id]
+          );
+
+          await query("COMMIT");
+
+          res.json({
+            message: "Material approved successfully",
+            submission: updateResult.rows[0],
+          });
+        } catch (innerErr) {
+          await query("ROLLBACK");
+          throw innerErr;
+        }
+      } catch (err: any) {
+        console.error("POST /api/proposal-material-submissions/:id/approve error:", err);
+        res.status(500).json({ message: "Failed to approve material submission" });
+      }
+    }
+  );
+
+  // POST /api/proposal-material-submissions/:id/reject - Reject proposal material submission
+  app.post(
+    "/api/proposal-material-submissions/:id/reject",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team"),
+    async (req: Request, res: Response) => {
+      try {
+        const { id } = req.params;
+        const { reason } = req.body;
+
+        const result = await query(
+          "UPDATE proposal_material_submissions SET status = 'rejected', rejection_reason = $1, updated_at = NOW() WHERE id = $2 RETURNING *",
+          [reason || "No reason specified", id]
+        );
+
+        if (result.rows.length === 0) {
+          return res.status(404).json({ message: "Submission not found" });
+        }
+
+        res.json({
+          message: "Material submission rejected",
+          submission: result.rows[0],
+        });
+      } catch (err: any) {
+        console.error("POST /api/proposal-material-submissions/:id/reject error:", err);
+        res.status(500).json({ message: "Failed to reject material submission" });
+      }
+    }
+  );
 
   return httpServer;
 }

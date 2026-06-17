@@ -123,7 +123,7 @@ export default function ManageProduct() {
             if (pRes.ok) { const d = await pRes.json(); setPreviousConfigs(d.configurations || []); }
             if (aRes.ok) {
                 const d = await aRes.json();
-                const pa = (d.approvals || []).filter((a: any) => a.product_id === productId);
+                const pa = (d.approvals || []).filter((a: any) => String(a.product_id) === String(productId));
                 setProductApprovals(pa);
                 setRejectedConfigs(pa.filter((a: any) => a.status === "rejected"));
                 setPendingConfigs(pa.filter((a: any) => a.status === "pending"));
@@ -1235,7 +1235,7 @@ export default function ManageProduct() {
                                                                                                     method: "POST",
                                                                                                     headers: { "Content-Type": "application/json" },
                                                                                                     body: JSON.stringify({
-                                                                                                        product_id: cd.product.product_id,
+                                                                                                        product_id: selectedProduct?.id || cd.product.product_id,
                                                                                                         config_name: cd.product.config_name
                                                                                                     })
                                                                                                 });
@@ -1664,6 +1664,55 @@ export default function ManageProduct() {
                         {/* Step 3 */}
                         {step === 3 && (
                             <div className="space-y-8">
+                                {/* Read-only banner with Request Edit button */}
+                                {isReadOnly && (
+                                    <div className="bg-amber-50 border-2 border-amber-200 p-5 rounded-xl flex flex-col sm:flex-row items-start sm:items-center gap-4 animate-in fade-in slide-in-from-top-4 duration-500 shadow-sm">
+                                        <div className="flex items-start gap-3 flex-1">
+                                            <Lock className="h-6 w-6 text-amber-600 shrink-0 mt-0.5" />
+                                            <div>
+                                                <h4 className="font-bold text-amber-800 uppercase text-xs tracking-wider mb-1">Configuration Locked</h4>
+                                                <p className="text-sm text-amber-700 font-medium">This configuration is approved and read-only. To make changes, you must request edit access. Once an admin approves your request, the configuration will become editable.</p>
+                                            </div>
+                                        </div>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={async () => {
+                                                if (!confirm(`Are you sure you want to request edit access for "${configName || 'this configuration'}"?`)) return;
+                                                try {
+                                                    const approvalRecord = productApprovals.find((a: any) => a.config_name === configName && (a.status === "approved"));
+                                                    let res;
+                                                    if (approvalRecord) {
+                                                        res = await apiFetch(`/api/product-approvals/${approvalRecord.id}/request-edit`, { method: "POST" });
+                                                    } else {
+                                                        res = await apiFetch(`/api/product-approvals/request-edit`, {
+                                                            method: "POST",
+                                                            headers: { "Content-Type": "application/json" },
+                                                            body: JSON.stringify({
+                                                                product_id: selectedProduct?.id,
+                                                                config_name: configName
+                                                            })
+                                                        });
+                                                    }
+                                                    if (res.ok) {
+                                                        toast({ title: "Edit Requested", description: `Your request to edit "${configName}" has been submitted. You'll be notified when it's approved.` });
+                                                        if (selectedProduct) fetchPreviousConfigs(selectedProduct.id);
+                                                    } else {
+                                                        const errData = await res.json().catch(() => ({}));
+                                                        toast({ title: "Error", description: errData.message || "Failed to submit edit request.", variant: "destructive" });
+                                                    }
+                                                } catch (err) {
+                                                    console.error(err);
+                                                    toast({ title: "Error", description: "Failed to submit edit request.", variant: "destructive" });
+                                                }
+                                            }}
+                                            className="h-10 text-amber-700 border-amber-300 hover:bg-amber-100 font-bold px-5 shadow-sm shrink-0 gap-2"
+                                        >
+                                            <Lock className="h-4 w-4" /> Request Edit
+                                        </Button>
+                                    </div>
+                                )}
+
                                 {rejectedConfigs.some(rc => rc.config_name === configName) && (
                                     <div className="bg-red-50 border-2 border-red-200 p-4 rounded-xl flex items-start gap-3 animate-in fade-in slide-in-from-top-4 duration-500">
                                         <XCircle className="h-6 w-6 text-red-600 shrink-0 mt-0.5" />
@@ -1995,9 +2044,49 @@ export default function ManageProduct() {
                                 </div>
                                 <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-8 mt-8 border-t border-black/10">
                                     <Button variant="outline" size="sm" onClick={() => setStep(step - 1)} className="w-full sm:w-auto px-6 h-10 font-bold uppercase tracking-wide" disabled={isSaving}><ArrowLeft className="mr-2 h-4 w-4" /> Back</Button>
-                                    <Button size="sm" onClick={handleSave} disabled={isSaving || isReadOnly} className="w-full sm:w-auto h-10 bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 uppercase tracking-wide transition-all shadow-md">
-                                        {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Finalizing...</> : "Add to Create BOQ"}
-                                    </Button>
+                                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                                        {isReadOnly && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={async () => {
+                                                    if (!confirm(`Request edit access for "${configName || 'this configuration'}"?`)) return;
+                                                    try {
+                                                        const approvalRecord = productApprovals.find((a: any) => a.config_name === configName && (a.status === "approved"));
+                                                        let res;
+                                                        if (approvalRecord) {
+                                                            res = await apiFetch(`/api/product-approvals/${approvalRecord.id}/request-edit`, { method: "POST" });
+                                                        } else {
+                                                            res = await apiFetch(`/api/product-approvals/request-edit`, {
+                                                                method: "POST",
+                                                                headers: { "Content-Type": "application/json" },
+                                                                body: JSON.stringify({
+                                                                    product_id: selectedProduct?.id,
+                                                                    config_name: configName
+                                                                })
+                                                            });
+                                                        }
+                                                        if (res.ok) {
+                                                            toast({ title: "Edit Requested", description: `Your request to edit "${configName}" has been submitted.` });
+                                                            if (selectedProduct) fetchPreviousConfigs(selectedProduct.id);
+                                                        } else {
+                                                            const errData = await res.json().catch(() => ({}));
+                                                            toast({ title: "Error", description: errData.message || "Failed to submit edit request.", variant: "destructive" });
+                                                        }
+                                                    } catch (err) {
+                                                        console.error(err);
+                                                        toast({ title: "Error", description: "Failed to submit edit request.", variant: "destructive" });
+                                                    }
+                                                }}
+                                                className="w-full sm:w-auto h-10 text-amber-700 border-amber-300 hover:bg-amber-100 font-bold px-6 uppercase tracking-wide transition-all shadow-sm gap-2"
+                                            >
+                                                <Lock className="h-4 w-4" /> Request Edit
+                                            </Button>
+                                        )}
+                                        <Button size="sm" onClick={handleSave} disabled={isSaving || isReadOnly} className="w-full sm:w-auto h-10 bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 uppercase tracking-wide transition-all shadow-md">
+                                            {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Finalizing...</> : "Add to Create BOQ"}
+                                        </Button>
+                                    </div>
                                 </div>
                             </div>
                         )}

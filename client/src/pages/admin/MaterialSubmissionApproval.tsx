@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Layout } from "@/components/layout/Layout";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Card,
   CardContent,
@@ -42,19 +42,14 @@ interface MaterialSubmission {
 
 export default function MaterialSubmissionApproval() {
   const { toast } = useToast();
-  const [submissions, setSubmissions] = useState<MaterialSubmission[]>([]);
-  const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    loadPendingSubmissions();
-  }, []);
-
-  const loadPendingSubmissions = async () => {
-    try {
-      setLoading(true);
+  const { data: submissions = [], isLoading: loading } = useQuery({
+    queryKey: ["pending-material-submissions"],
+    queryFn: async () => {
       const token = localStorage.getItem("authToken");
       const response = await fetch("/api/material-submissions-pending-approval", {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -65,18 +60,10 @@ export default function MaterialSubmissionApproval() {
       }
 
       const data = await response.json();
-      setSubmissions(data.submissions.map((s: any) => s.submission) || []);
-    } catch (error) {
-      console.error("Error loading submissions:", error);
-      toast({
-        title: "Error",
-        description: "Failed to load material submissions",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+      return data.submissions.map((s: any) => s.submission) || [];
+    },
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
 
   const handleApprove = async (submissionId: string) => {
     setApproving(submissionId);
@@ -102,7 +89,7 @@ export default function MaterialSubmissionApproval() {
       });
 
       // Reload submissions
-      loadPendingSubmissions();
+      queryClient.invalidateQueries({ queryKey: ["pending-material-submissions"] });
     } catch (error) {
       console.error("Error approving submission:", error);
       toast({
@@ -150,7 +137,7 @@ export default function MaterialSubmissionApproval() {
 
       setRejectReason("");
       // Reload submissions
-      loadPendingSubmissions();
+      queryClient.invalidateQueries({ queryKey: ["pending-material-submissions"] });
     } catch (error) {
       console.error("Error rejecting submission:", error);
       toast({
@@ -164,8 +151,7 @@ export default function MaterialSubmissionApproval() {
   };
 
   return (
-    <Layout>
-      <div className="container mx-auto py-8">
+    <div className="w-full p-6">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Material Submission Approvals</h1>
           <p className="text-gray-600">
@@ -188,7 +174,7 @@ export default function MaterialSubmissionApproval() {
           </Card>
         ) : (
           <div className="space-y-4">
-            {submissions.map((submission) => (
+            {submissions.map((submission: MaterialSubmission) => (
               <Card key={submission.id} className="border-l-4 border-l-yellow-500">
                 <CardContent className="pt-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -351,6 +337,5 @@ export default function MaterialSubmissionApproval() {
           </div>
         )}
       </div>
-    </Layout>
   );
 }

@@ -1,5 +1,6 @@
 import { ReactNode, useState } from "react";
 import { Sidebar } from "./Sidebar";
+import { Header } from "./Header";
 import { Chatbot } from "../ui/Chatbot";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +20,8 @@ export function Layout({ children }: LayoutProps) {
         "min-h-screen transition-all duration-300 ease-in-out print:pl-0",
         sidebarOpen ? "md:pl-64" : "pl-0"
       )}>
-        <div className="container mx-auto p-4 md:p-8 pt-16 md:pt-8 max-w-7xl">
+        <Header />
+        <div className="w-full p-4 md:p-8 pt-4">
           {children}
         </div>
       </main>
@@ -29,3 +31,4 @@ export function Layout({ children }: LayoutProps) {
     </div>
   );
 }
+

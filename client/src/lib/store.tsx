@@ -162,7 +162,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const refreshMaterials = async () => {
     try {
-      const dd = await getJSON('/materials');
+      const dd = await getJSON('/api/materials');
       if (dd?.materials) {
         setMaterials(dd.materials.map(normalizeMaterial));
       }
@@ -210,34 +210,34 @@ export function DataProvider({ children }: { children: ReactNode }) {
     let mounted = true;
     (async () => {
       try {
-        const s = await getJSON('/shops');
+        const s = await getJSON('/api/shops');
         if (mounted && s?.shops) {
           setShops(s.shops.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
         }
       } catch (e) { console.warn('load shops failed', e); }
       try {
-        const m = await getJSON('/materials');
+        const m = await getJSON('/api/materials');
         if (mounted && m?.materials) {
           const normalized = m.materials.map(normalizeMaterial);
           setMaterials(normalized.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
         }
       } catch (e) { console.warn('load materials failed', e); }
       try {
-        const p = await getJSON('/products');
+        const p = await getJSON('/api/products');
         if (mounted && p?.products) {
           setProducts(p.products.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
         }
       } catch (e) { console.warn('load products failed', e); }
       // load server-side pending approval lists into central state
       try {
-        const ps = await getJSON('/shops-pending-approval');
+        const ps = await getJSON('/api/shops-pending-approval');
         if (mounted && ps?.shops) setApprovalRequests(ps.shops);
       } catch (e) { console.warn('load pending shops failed', e); }
       // load server-side pending approval list (unified)
       await refreshPendingApprovals();
       // load support messages
       try {
-        const sm = await getJSON('/support-messages');
+        const sm = await getJSON('/api/support-messages');
         if (mounted && sm?.messages) setSupportMessages(sm.messages);
       } catch (e) { console.warn('load support messages failed', e); }
     })();
@@ -274,7 +274,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           const created = await submitShopForApproval(req.shop);
           if (created && created.id) {
             // refresh server pending list
-            try { const ps = await getJSON('/shops-pending-approval'); if (ps?.shops) setApprovalRequests(ps.shops); } catch (e) { console.warn('refresh pending shops failed', e); }
+            try { const ps = await getJSON('/api/shops-pending-approval'); if (ps?.shops) setApprovalRequests(ps.shops); } catch (e) { console.warn('refresh pending shops failed', e); }
             continue; // successful, don't keep
           }
         } catch (e) {
@@ -291,7 +291,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         try {
           const created = await submitMaterialForApproval(req.material);
           if (created && created.id) {
-            try { const pm = await getJSON('/materials-pending-approval'); if (pm?.materials) setMaterialApprovalRequests(pm.materials); } catch (e) { console.warn('refresh pending materials failed', e); }
+            try { const pm = await getJSON('/api/materials-pending-approval'); if (pm?.materials) setMaterialApprovalRequests(pm.materials); } catch (e) { console.warn('refresh pending materials failed', e); }
             continue;
           }
         } catch (e) {
@@ -387,7 +387,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
     // Re-sync from server to restore accurate state when delete failed
     console.log('[deleteShop] re-syncing from server');
-    try { const dd = await getJSON('/shops'); if (dd?.shops) setShops(dd.shops); } catch (e) { console.warn('refresh shops failed', e); }
+    try { const dd = await getJSON('/api/shops'); if (dd?.shops) setShops(dd.shops); } catch (e) { console.warn('refresh shops failed', e); }
   };
 
   const deleteMaterial = async (id: string, action?: 'archive' | 'trash') => {
@@ -406,12 +406,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       console.warn('[deleteMaterial] exception:', e);
     }
     console.log('[deleteMaterial] re-syncing from server');
-    try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials.map(normalizeMaterial)); } catch (e) { console.warn('refresh materials failed', e); }
+    try { const dd = await getJSON('/api/materials'); if (dd?.materials) setMaterials(dd.materials.map(normalizeMaterial)); } catch (e) { console.warn('refresh materials failed', e); }
   };
 
   const approveShop = async (id: string) => {
     const data = await postJSON(`/shops/${id}/approve`, {});
-    try { const dd = await getJSON('/shops'); if (dd?.shops) setShops(dd.shops); } catch (e) { console.warn('approveShop refresh failed', e); }
+    try { const dd = await getJSON('/api/shops'); if (dd?.shops) setShops(dd.shops); } catch (e) { console.warn('approveShop refresh failed', e); }
     return data?.shop;
   };
 
@@ -420,9 +420,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     // Remove from local approval requests immediately
     setApprovalRequests((prev) => prev.filter((r: any) => r.id !== id));
     // Also refresh shops from server
-    try { const dd = await getJSON('/shops'); if (dd?.shops) setShops(dd.shops); } catch (e) { console.warn('rejectShop refresh failed', e); }
+    try { const dd = await getJSON('/api/shops'); if (dd?.shops) setShops(dd.shops); } catch (e) { console.warn('rejectShop refresh failed', e); }
     // Refresh pending approvals list
-    try { const ps = await getJSON('/shops-pending-approval'); if (ps?.shops) setApprovalRequests(ps.shops); } catch (e) { console.warn('rejectShop pending refresh failed', e); }
+    try { const ps = await getJSON('/api/shops-pending-approval'); if (ps?.shops) setApprovalRequests(ps.shops); } catch (e) { console.warn('rejectShop pending refresh failed', e); }
     return data;
   };
 
@@ -440,7 +440,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       // Refresh EVERYTHING to ensure sync
       try {
         await refreshPendingApprovals(); // Clear from "pending" list
-        const dd = await getJSON('/materials');
+        const dd = await getJSON('/api/materials');
         if (dd?.materials) setMaterials(dd.materials.map(normalizeMaterial));
       } catch (e) { console.warn('approveMaterial refresh failed', e); }
       return res.json();
@@ -468,7 +468,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       // Refresh pending list to ensure it disappears locally
       try {
         await refreshPendingApprovals();
-        const dd = await getJSON('/materials');
+        const dd = await getJSON('/api/materials');
         if (dd?.materials) setMaterials(dd.materials.map(normalizeMaterial));
       } catch (e) { console.warn('rejectMaterial refresh failed', e); }
       return res.json();

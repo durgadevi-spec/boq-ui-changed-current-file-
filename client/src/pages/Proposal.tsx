@@ -35,12 +35,28 @@ export default function Proposal({ params }: { params?: { projectId?: string } }
   useEffect(() => {
     const qs = window.location.search;
     const urlParams = new URLSearchParams(qs);
-    const pid = params?.projectId || urlParams.get("project") || urlParams.get("projectId");
+    
+    // Extract projectId from path if available
+    let pid = params?.projectId;
+    
+    // If not in params, try to extract from URL path
+    if (!pid) {
+      const pathMatch = window.location.pathname.match(/\/proposal\/([^/?]+)/);
+      if (pathMatch && pathMatch[1]) {
+        pid = pathMatch[1];
+      }
+    }
+    
+    // Also check query string as fallback
+    if (!pid) {
+      pid = urlParams.get("project") || urlParams.get("projectId");
+    }
+    
     const vid = urlParams.get("versionId") || urlParams.get("proposalId");
     
     if (pid && !selectedProjectId) setSelectedProjectId(pid);
     if (vid && !selectedProposalId) setSelectedProposalId(vid);
-  }, [params?.projectId]);
+  }, [params?.projectId, selectedProjectId, selectedProposalId]);
 
   // Fetch Projects
   const { data: rawProjects = [], isLoading: loadingProjects } = useQuery({
@@ -346,20 +362,30 @@ export default function Proposal({ params }: { params?: { projectId?: string } }
                         <td className="px-4 py-3">
                           <div className="relative">
                             <span className="absolute left-2 top-1.5 text-slate-400">₹</span>
-                            <input 
+                            <input
                               type="number"
                               value={getVal(item.id, "rate", item.rate || 0)}
                               onChange={e => handleEdit(item.id, "rate", Number(e.target.value))}
                               disabled={isLocked}
-                              className={`w-full pl-6 pr-2 py-1 text-right border rounded font-medium focus:ring-1 transition-all ${getVal(item.id, "rate", item.rate) == 0 ? 'bg-red-50 border-red-300 text-red-700' : 'bg-transparent'}`}
+                              placeholder="Enter your rate"
+                              className={`w-full pl-6 pr-2 py-1 text-right border rounded font-medium focus:ring-1 transition-all ${
+                                getVal(item.id, "rate", item.rate) == 0
+                                  ? 'bg-amber-50 border-amber-300 text-amber-800 placeholder:text-amber-500'
+                                  : 'bg-transparent'
+                              }`}
                             />
-                             {getVal(item.id, "rate", item.rate) == 0 && !isLocked && (
-                              <span className="absolute -left-1 -top-1 flex h-2 w-2">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                            {getVal(item.id, "rate", item.rate) == 0 && !isLocked && (
+                              <span className="absolute -right-1 -top-1 flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
                               </span>
                             )}
                           </div>
+                          {getVal(item.id, "rate", item.rate) == 0 && !isLocked && (
+                            <div className="text-[10px] text-amber-700 mt-1 font-medium">
+                              ⚠️ Enter your rate — must be approved
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-right font-bold text-slate-700 bg-slate-50/50">
                           ₹{(getVal(item.id, "amount", item.amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -407,7 +433,8 @@ export default function Proposal({ params }: { params?: { projectId?: string } }
       <MaterialPicker 
         open={showMaterialPicker} 
         onOpenChange={setShowMaterialPicker} 
-        onSelectTemplate={handleSelectMaterial} 
+        onSelectTemplate={handleSelectMaterial}
+        vendorShopId={selectedProposal?.vendor_id}
       />
       {selectedProduct && (
         <Step11Preview 

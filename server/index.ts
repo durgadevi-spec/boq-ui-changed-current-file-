@@ -73,6 +73,14 @@ app.use((req, res, next) => {
   // Register ALL API routes
   await registerRoutes(httpServer, app);
 
+  // Vite (dev) or static (prod)
+  if (process.env.NODE_ENV === "production") {
+    serveStatic(app);
+  } else {
+    const { setupVite } = await import("./vite");
+    await setupVite(httpServer, app);
+  }
+
   // ✅ SPA FALLBACK — THIS IS THE FIX FOR 404
   // Allows React/Wouter to handle routing
   app.get("*", (req, res, next) => {
@@ -97,14 +105,6 @@ app.use((req, res, next) => {
     res.status(status).json({ message });
     throw err;
   });
-
-  // Vite (dev) or static (prod)
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
-  } else {
-    const { setupVite } = await import("./vite");
-    await setupVite(httpServer, app);
-  }
 
   // Server listen
   const port = parseInt(process.env.PORT || "5000", 10);

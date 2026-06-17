@@ -15,6 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import apiFetch from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { fuzzySearch } from "@/lib/utils";
@@ -34,6 +36,7 @@ type Material = {
   hsn_code?: string;
   sac_code?: string;
   rate?: number;
+  is_project_pricing?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -63,6 +66,7 @@ export default function MaterialPicker({
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [subcategoryFilter, setSubcategoryFilter] = useState("all");
+  const [pricingTab, setPricingTab] = useState("all");
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
@@ -185,6 +189,11 @@ export default function MaterialPicker({
 
     let base = materials;
 
+    // Pricing tab filter
+    if (pricingTab === "project_pricing") {
+      base = base.filter(m => m.is_project_pricing);
+    }
+
     // Category filter
     if (categoryFilter !== "all") {
       base = base.filter(m => (m.category || "") === categoryFilter);
@@ -243,7 +252,25 @@ export default function MaterialPicker({
 
         <div className="flex flex-col flex-1 min-h-0">
           {/* Controls Row */}
-          <div className="p-6 py-4 bg-slate-50/50 border-b space-y-3">
+          <div className="p-6 py-4 bg-slate-50/50 border-b space-y-4">
+            <div className="flex items-center justify-between">
+              <Tabs value={pricingTab} onValueChange={setPricingTab} className="w-fit">
+                <TabsList className="bg-slate-200/50">
+                  <TabsTrigger value="all" className="text-xs font-bold data-[state=active]:bg-white data-[state=active]:text-blue-600">
+                    All Materials
+                  </TabsTrigger>
+                  <TabsTrigger value="project_pricing" className="text-xs font-bold data-[state=active]:bg-white data-[state=active]:text-amber-600">
+                    Project Pricing
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+              {filteredMaterials.length > 0 && (
+                <div className="text-xs text-slate-500 font-medium">
+                  Showing <span className="text-blue-600 font-bold">{filteredMaterials.length}</span> of <span className="text-slate-700 font-bold">{materials.length}</span> materials
+                </div>
+              )}
+            </div>
+
             <div className="flex gap-3 items-center">
               <div className="flex-1 min-w-0">
                 <Input
@@ -288,11 +315,6 @@ export default function MaterialPicker({
               </Select>
             </div>
 
-            {filteredMaterials.length > 0 && (
-              <div className="text-xs text-slate-500 font-medium">
-                Showing <span className="text-blue-600 font-bold">{filteredMaterials.length}</span> of <span className="text-slate-700 font-bold">{materials.length}</span> materials
-              </div>
-            )}
           </div>
 
           {/* Material List */}
@@ -342,11 +364,18 @@ export default function MaterialPicker({
                         <div className="font-bold text-slate-800 text-sm group-hover:text-blue-700 transition-colors truncate">
                           {material.name}
                         </div>
-                        {material.code && (
-                          <div className="text-[9px] font-mono bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded shrink-0">
-                            {material.code}
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {material.is_project_pricing && (
+                            <Badge className="bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200 text-[9px] px-1.5 py-0 h-4 font-bold whitespace-nowrap">
+                              ★ Project Pricing
+                            </Badge>
+                          )}
+                          {material.code && (
+                            <div className="text-[9px] font-mono bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
+                              {material.code}
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">

@@ -807,26 +807,75 @@ export default function GeneratePo() {
       if (!res.ok) { toast({ title: "Error", description: `Failed to load items (${res.status})`, variant: "destructive" }); return; }
       const data = await safeJson(res as unknown as Response);
       const items: BOMItem[] = data.items || [];
-      // Backfill HSN/SAC
+      // Backfill HSN/SAC and Missing Shop Names
       try {
-        const pr = await apiFetch("/api/products");
-        if (pr.ok) {
-          const pd = await pr.json();
-          const byId: Record<string, any> = Object.fromEntries((pd.products || []).map((p: any) => [p.id, p]));
-          items.forEach(item => {
-            const td = parseTableData(item.table_data);
-            if (td.product_id && !td.hsn_code && !td.sac_code) {
-              const prod = byId[td.product_id];
-              if (prod) {
-                if (prod.hsn_code) td.hsn_code = prod.hsn_code;
-                if (prod.sac_code) td.sac_code = prod.sac_code;
-                if (prod.tax_code_value) { td.hsn_sac_code = prod.tax_code_value; td.hsn_sac_type = prod.tax_code_type || null; }
-                item.table_data = td;
+        const [pr, matRes] = await Promise.all([
+          apiFetch("/api/products").catch(() => ({ ok: false, json: () => ({}) })),
+          apiFetch("/api/materials").catch(() => ({ ok: false, json: () => ({}) }))
+        ]);
+
+        let byId: Record<string, any> = {};
+        if (pr && "ok" in pr && pr.ok) {
+          const pd = await (pr as any).json();
+          byId = Object.fromEntries((pd.products || []).map((p: any) => [p.id, p]));
+        }
+
+        let matById: Record<string, string> = {};
+        if (matRes && "ok" in matRes && matRes.ok) {
+          const matData = await (matRes as any).json();
+          matById = Object.fromEntries(
+            (matData.materials || []).filter((m: any) => !!m.shop_name).map((m: any) => [m.id, m.shop_name])
+          );
+        }
+
+        items.forEach(item => {
+          const td = parseTableData(item.table_data);
+          let updated = false;
+
+          // Backfill Product HSN/SAC
+          if (td.product_id && !td.hsn_code && !td.sac_code) {
+            const prod = byId[td.product_id];
+            if (prod) {
+              if (prod.hsn_code) { td.hsn_code = prod.hsn_code; updated = true; }
+              if (prod.sac_code) { td.sac_code = prod.sac_code; updated = true; }
+              if (prod.tax_code_value) {
+                td.hsn_sac_code = prod.tax_code_value;
+                td.hsn_sac_type = prod.tax_code_type || null;
+                updated = true;
               }
             }
-          });
-        }
-      } catch { /* ignore */ }
+          }
+
+          // Backfill Material Shop Names
+          const fixLines = (lines: any[]) => {
+            if (Array.isArray(lines)) {
+              lines.forEach(l => {
+                const matId = l.material_id || l.materialId || l.id;
+                if ((!l.shop_name || l.shop_name === "-") && matId && matById[matId]) {
+                  l.shop_name = matById[matId];
+                  l.shopName = matById[matId];
+                  updated = true;
+                }
+              });
+            }
+          };
+
+          fixLines(td.step11_items);
+          fixLines(td.materialLines);
+          fixLines(td.items);
+          fixLines(td.rows);
+
+          if (updated) {
+            item.table_data = td;
+            apiFetch(`/api/boq-items/${encodeURIComponent(item.id)}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ table_data: td })
+            }).catch(e => console.error("Auto-save backfill failed", e));
+          }
+        });
+      } catch (err) { console.error("Failed to backfill data", err); }
+
       setBoqItems(items);
     } catch { toast({ title: "Error", description: "Failed to load BOQ items", variant: "destructive" }); }
   }, [selectedVersionId]);
@@ -1008,6 +1057,10 @@ export default function GeneratePo() {
       if (!selectedProjectId || !selectedVersionId) { toast({ title: "Error", description: "Select a project and version first", variant: "destructive" }); return; }
       try {
         const { unit, rate, shopName, hsnSacType, hsnSacCode } = await resolveMaterialFields(template);
+        if (!shopName || !shopName.trim()) {
+          toast({ title: "Cannot Add Item", description: `"${template.name}" has no shop assigned. Please assign a shop to this material first.`, variant: "destructive" });
+          return;
+        }
         const materialItem = {
           title: template.name,
           description: template.technicalspecification || template.technicalSpecification || template.name,
@@ -1054,6 +1107,10 @@ export default function GeneratePo() {
         const tableData = parseTableData(existing.table_data);
         const currentStep11 = Array.isArray(tableData.step11_items) ? tableData.step11_items : [];
         const { unit, rate, shopName, hsnSacType, hsnSacCode } = await resolveMaterialFields(template);
+        if (!shopName || !shopName.trim()) {
+          toast({ title: "Cannot Add Item", description: `"${template.name}" has no shop assigned. Please assign a shop to this material first.`, variant: "destructive" });
+          return;
+        }
         const newItem: Step11Item = {
           title: template.name,
           description: template.technicalspecification || template.technicalSpecification || template.name,
