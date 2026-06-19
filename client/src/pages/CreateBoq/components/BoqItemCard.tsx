@@ -79,6 +79,24 @@ export const BoqItemCard = React.memo(function BoqItemCard({ boqItem, boqIdx, is
   const [localTarget, setLocalTarget] = useState(tableData.targetRequiredQty || 0);
   const [showDescTooltip, setShowDescTooltip] = useState(false);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
+  const performDelete = async (action: "archive" | "trash", reason?: string) => {
+    try {
+      const url = reason 
+        ? `/api/boq-items/${boqItem.id}?reason=${encodeURIComponent(reason)}` 
+        : `/api/boq-items/${boqItem.id}`;
+        
+      const res = await apiFetch(url, { method: "DELETE" });
+      if (res.ok) {
+        setBoqItems(prev => prev.filter(i => i.id !== boqItem.id));
+        toast({ title: "Product Deleted", description: "The product has been deleted permanently." });
+        loadBoqItemsAndEdits();
+      }
+    } catch (err) {
+      console.error("Failed to delete product", err);
+    }
+  };
 
   useEffect(() => {
     setLocalTarget(tableData.targetRequiredQty || 0);
@@ -363,17 +381,7 @@ export const BoqItemCard = React.memo(function BoqItemCard({ boqItem, boqIdx, is
             <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" disabled={isVersionSubmitted} onClick={() => onSaveAsTemplate?.(boqItem)}>Save as Template</Button>
             {!isBifProd && (
               <Button variant="destructive" size="sm" className="h-6 text-[10px] px-2" disabled={isVersionSubmitted}
-                onClick={async () => {
-                  if (!confirm("Delete this product and all its items?")) return;
-                  try {
-                    const res = await apiFetch(`/api/boq-items/${boqItem.id}`, { method: "DELETE" });
-                    if (res.ok) {
-                      setBoqItems(prev => prev.filter(i => i.id !== boqItem.id));
-                      toast({ title: "Product Deleted", description: "The product has been deleted permanently." });
-                      loadBoqItemsAndEdits();
-                    }
-                  } catch (err) { console.error("Failed to delete product", err); }
-                }}>Delete</Button>
+                onClick={() => setDeleteConfirmOpen(true)}>Delete</Button>
             )}
           </div>
         ) : (
@@ -463,10 +471,7 @@ export const BoqItemCard = React.memo(function BoqItemCard({ boqItem, boqIdx, is
                     size="sm"
                     className="h-7 w-7 p-0 bg-red-500 hover:bg-red-600 shadow-sm"
                     disabled={isVersionSubmitted}
-                    onClick={async () => {
-                      if (!confirm("Delete this product and all its items?")) return;
-                      try { await apiFetch(`/api/boq-items/${boqItem.id}`, { method: "DELETE" }); loadBoqItemsAndEdits(); } catch { /* */ }
-                    }}
+                    onClick={() => setDeleteConfirmOpen(true)}
                     title="Delete Product"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -682,6 +687,14 @@ export const BoqItemCard = React.memo(function BoqItemCard({ boqItem, boqIdx, is
         </>
       )}
 
+      <DeleteConfirmationDialog
+        isOpen={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        onConfirm={performDelete}
+        title="Delete this product?"
+        permanentDelete={true}
+        requireJustification={!!(boqItem as any).copied_from_item_id}
+      />
     </div>
   );
 }, (prevProps, nextProps) => {

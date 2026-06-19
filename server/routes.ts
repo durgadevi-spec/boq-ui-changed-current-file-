@@ -1379,6 +1379,11 @@ export async function registerRoutes(
         created_at TIMESTAMPTZ DEFAULT now()
       )
     `);
+    await query(`ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS source_version_id VARCHAR(100)`);
+    await query(`ALTER TABLE boq_items ADD COLUMN IF NOT EXISTS copied_from_item_id VARCHAR(100)`);
+    await query(`ALTER TABLE boq_history ADD COLUMN IF NOT EXISTS source_version_id VARCHAR(100)`);
+    await query(`ALTER TABLE boq_history ADD COLUMN IF NOT EXISTS item_id VARCHAR(100)`);
+    await query(`ALTER TABLE boq_history ADD COLUMN IF NOT EXISTS item_name TEXT`);
     console.log("[db] boq_history table verified/created");
   } catch (err: unknown) {
     console.warn(
@@ -5771,9 +5776,9 @@ export async function registerRoutes(
         }
 
         await query(
-          `INSERT INTO boq_versions (id, project_id, project_name, project_client, project_location, project_client_address, project_gst_no, project_value, version_number, status, type, column_config, category_order, is_locked, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, FALSE, NOW(), NOW())`,
-          [versionId, project_id, projectName, projectClient, projectLocation, projectClientAddress, projectGstNo, projectVal, nextVersion, "draft", type, initialColumnConfig, initialCategoryOrder ? JSON.stringify(initialCategoryOrder) : null],
+          `INSERT INTO boq_versions (id, project_id, project_name, project_client, project_location, project_client_address, project_gst_no, project_value, version_number, status, type, column_config, category_order, is_locked, source_version_id, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, FALSE, $14, NOW(), NOW())`,
+          [versionId, project_id, projectName, projectClient, projectLocation, projectClientAddress, projectGstNo, projectVal, nextVersion, "draft", type, initialColumnConfig, initialCategoryOrder ? JSON.stringify(initialCategoryOrder) : null, copy_from_version || null],
         );
 
 
@@ -5809,8 +5814,8 @@ export async function registerRoutes(
 
             const newItemId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${Math.random().toString(36).substr(2, 9)}`;
             await query(
-              `INSERT INTO boq_items (id, project_id, estimator, table_data, version_id, sort_order, user_added, computed_value, created_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+              `INSERT INTO boq_items (id, project_id, estimator, table_data, version_id, sort_order, user_added, computed_value, copied_from_item_id, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
               [
                 newItemId,
                 project_id,
@@ -5820,6 +5825,7 @@ export async function registerRoutes(
                 item.sort_order,
                 item.user_added ?? true,
                 item.computed_value ?? 0,
+                item.id,
               ],
             );
           }
@@ -7130,6 +7136,15 @@ export async function registerRoutes(
         // Recalculate project value
         await recalculateProjectValue(project_id, version_id);
 
+        if (version_id) {
+          const userObj = (req.user as any) || {};
+          const itemName = table_data.product_name || table_data.category_name || "Unknown Item";
+          await query(
+            `INSERT INTO boq_history (version_id, user_id, user_full_name, action, item_id, item_name) VALUES ($1, $2, $3, $4, $5, $6)`,
+            [version_id, userObj.id || 'system', userObj.fullName || userObj.username || 'System', 'ADDED', itemId, itemName]
+          );
+        }
+
         // Confirm row persisted by selecting it back
         try {
           const check = await query(
@@ -7233,11 +7248,24 @@ export async function registerRoutes(
               computeItemValue(item.table_data),
             ],
           );
-          results.push({ id: itemId });
+          results.push({ id: itemId, itemName: item.table_data?.product_name || item.table_data?.category_name || "Unknown Item" });
         }
 
         // Recalculate project value once after all items are added
         await recalculateProjectValue(project_id, version_id);
+
+        if (version_id && results.length > 0) {
+          const userObj = (req.user as any) || {};
+          const userId = userObj.id || 'system';
+          const userFull = userObj.fullName || userObj.username || 'System';
+          
+          for (const resItem of results) {
+            await query(
+              `INSERT INTO boq_history (version_id, user_id, user_full_name, action, item_id, item_name) VALUES ($1, $2, $3, $4, $5, $6)`,
+              [version_id, userId, userFull, 'ADDED', resItem.id, resItem.itemName]
+            );
+          }
+        }
 
         res.status(201).json({ message: "Batch items saved successfully", count: items.length });
       } catch (err) {
@@ -7456,7 +7484,7 @@ export async function registerRoutes(
         const { versionId } = req.params;
 
         const result = await query(
-          `SELECT id, project_id, version_id, estimator, table_data, created_at 
+          `SELECT id, project_id, version_id, estimator, table_data, copied_from_item_id, created_at 
          FROM boq_items 
          WHERE version_id = $1 AND user_added = true 
          ORDER BY sort_order ASC, created_at ASC`, // Added sort_order
@@ -7477,6 +7505,7 @@ export async function registerRoutes(
               typeof row.table_data === "string"
                 ? JSON.parse(row.table_data)
                 : row.table_data,
+            copied_from_item_id: row.copied_from_item_id,
             created_at: row.created_at,
           }));
 
@@ -7824,6 +7853,24 @@ export async function registerRoutes(
         // Recalculate project value
         if (projectId) {
           await recalculateProjectValue(projectId, itemData.version_id);
+        }
+
+        // Track deletion in history if it was a copied item
+        if (itemData.copied_from_item_id && itemData.version_id) {
+          const userObj = (req.user as any) || {};
+          const userId = userObj.id || 'system';
+          const userFull = userObj.fullName || userObj.username || 'System';
+          
+          let td = itemData.table_data || {};
+          if (typeof td === 'string') {
+            try { td = JSON.parse(td); } catch { td = {}; }
+          }
+          const itemName = td.product_name || td.category_name || "Unknown Item";
+          
+          await query(
+            `INSERT INTO boq_history (version_id, user_id, user_full_name, action, reason, item_id, item_name) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [itemData.version_id, userId, userFull, 'DELETED', req.query.reason || 'No justification provided', itemId, itemName]
+          );
         }
 
         res.json({ message: "BOQ item archived" });

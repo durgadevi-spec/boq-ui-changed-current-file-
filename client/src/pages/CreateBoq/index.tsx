@@ -977,8 +977,9 @@ export default function CreateBom() {
         }
       } catch (e) { console.warn("Backfill error", e); }
       setBoqItems(items);
+      loadHistory();
     } catch { toast({ title: "Error", description: "Failed to load BOQ items", variant: "destructive" }); }
-  }, [selectedVersionId, toast]);
+  }, [selectedVersionId, toast, loadHistory]);
 
   // ─── Refresh Categories ──────────────────────────────────────────────────────
   const handleRefreshCategories = useCallback(async () => {

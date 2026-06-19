@@ -92,6 +92,7 @@ import {
 import { BoqAnalysisDialog } from "@/components/BoqAnalysisDialog";
 import { RateSuggestionPopover } from "@/components/RateSuggestionPopover";
 import { VersionCompareModal } from "@/components/VersionCompareModal";
+import { VersionHistoryModal } from "@/components/ui/VersionHistoryModal";
 
 /** Helper to generate Excel-style column names (A, B, C... Z, AA, AB...) */
 const getExcelColumnName = (n: number) => {
@@ -567,18 +568,18 @@ const measureText = (text: string, font: string) => {
   return width;
 };
 
-const CategoryReorderItem = ({ 
-  cat, 
-  isVersionSubmitted, 
-  activeVersionId, 
-  selectedProjectId, 
-  latestCategoryOrderRef, 
-  toast, 
-  categoryFilter, 
-  setCategoryFilter, 
-  boqItems, 
-  categoryOrder, 
-  setCategoryOrder 
+const CategoryReorderItem = ({
+  cat,
+  isVersionSubmitted,
+  activeVersionId,
+  selectedProjectId,
+  latestCategoryOrderRef,
+  toast,
+  categoryFilter,
+  setCategoryFilter,
+  boqItems,
+  categoryOrder,
+  setCategoryOrder
 }: any) => {
   const controls = useDragControls();
   return (
@@ -610,12 +611,12 @@ const CategoryReorderItem = ({
       onClick={() => setCategoryFilter(cat)}
     >
       {!isVersionSubmitted && (
-        <GripVertical 
-          className="h-3 w-3 text-slate-400 cursor-grab active:cursor-grabbing shrink-0" 
+        <GripVertical
+          className="h-3 w-3 text-slate-400 cursor-grab active:cursor-grabbing shrink-0"
           onPointerDown={(e) => {
             e.stopPropagation();
             controls.start(e);
-          }} 
+          }}
         />
       )}
       <span>
@@ -747,6 +748,8 @@ export default function FinalizeBoq() {
   }, [projects, projectStatusFilter, projectSearchTerm]);
   const [boqSearchTerm, setBoqSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [historyModalVersionId, setHistoryModalVersionId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
@@ -4074,6 +4077,19 @@ export default function FinalizeBoq() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="h-9 w-9 text-slate-400 hover:text-blue-500 border border-slate-200 hover:bg-blue-50 bg-white shadow-sm shrink-0"
+                        title="View Version History"
+                        disabled={!selectedBomVersionId}
+                        onClick={() => {
+                          setHistoryModalVersionId(selectedBomVersionId);
+                          setIsHistoryModalOpen(true);
+                        }}
+                      >
+                        <History className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="h-9 w-9 text-slate-400 hover:text-green-600 border border-slate-200 hover:bg-green-50 bg-white shadow-sm shrink-0"
                         title="Refresh BOM data — use this after a version has been edited and re-approved in Generate BOM"
                         disabled={!selectedBomVersionId && !selectedBoqVersionId}
@@ -4159,6 +4175,19 @@ export default function FinalizeBoq() {
                         }}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-slate-400 hover:text-blue-500 border border-slate-200 hover:bg-blue-50 bg-white shadow-sm shrink-0"
+                        title="View Version History"
+                        disabled={!selectedBoqVersionId}
+                        onClick={() => {
+                          setHistoryModalVersionId(selectedBoqVersionId);
+                          setIsHistoryModalOpen(true);
+                        }}
+                      >
+                        <History className="h-3.5 w-3.5" />
                       </Button>
                     </div>
                   </div>
@@ -5392,7 +5421,7 @@ export default function FinalizeBoq() {
                       values={paginatedBoqItems}
                       onReorder={async (newPaginatedItems) => {
                         if (boqSearchTerm || categoryFilter !== "all") return;
-                        
+
                         const startIndex = (currentPage - 1) * pageSize;
                         const newBoqItems = [...boqItems];
                         newBoqItems.splice(startIndex, newPaginatedItems.length, ...newPaginatedItems);
@@ -6525,6 +6554,12 @@ export default function FinalizeBoq() {
         projectId={selectedProjectId!}
         currentVersionId={activeVersionId || null}
         projects={projects}
+      />
+
+      <VersionHistoryModal
+        isOpen={isHistoryModalOpen}
+        onOpenChange={setIsHistoryModalOpen}
+        versionId={historyModalVersionId}
       />
 
       {/* Load Override Rates History Dialog */}
