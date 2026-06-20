@@ -101,7 +101,11 @@ export default function ManageProduct() {
     const [showAllProducts, setShowAllProducts] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [loadedConfig, setLoadedConfig] = useState<any | null>(null);
-    const isReadOnly = loadedConfig?.status === "approved";
+    const [isSubmitted, setIsSubmitted] = useState(false);
+    const [dateSort, setDateSort] = useState<"newest" | "oldest">("newest");
+    const [statusFilter, setStatusFilter] = useState<string>("All");
+
+    const isReadOnly = loadedConfig?.status === "approved" || loadedConfig?.status === "pending" || isSubmitted;
     const { toast } = useToast();
 
     const searchParams = useMemo(() => new URLSearchParams(location.split('?')[1] || ""), [location]);
@@ -114,6 +118,7 @@ export default function ManageProduct() {
         setRequiredUnitType("Sqft"); setBaseRequiredQty(100); setWastagePctDefault(5);
         setDimA(undefined); setDimB(undefined); setDimC(undefined); setProductDescription("");
         setLoadedConfig(null);
+        setIsSubmitted(false);
     };
 
     const fetchPreviousConfigs = async (productId: string) => {
@@ -243,8 +248,32 @@ export default function ManageProduct() {
 
     const filteredProducts = useMemo(() => {
         if (!productsData) return [];
-        return productsData.filter(p => fuzzySearch(productSearch, p.name || ""));
-    }, [productsData, productSearch]);
+        let list = productsData.filter(p => fuzzySearch(productSearch, p.name || ""));
+
+        if (statusFilter !== "All") {
+            list = list.filter(p => {
+                const hasPendingApproval = (allApprovals as any[] || []).some(a => a.product_id === p.id && a.status === "pending");
+                const isRejected = (allApprovals as any[] || []).some(a => a.product_id === p.id && a.status === "rejected");
+                const isAppr = p.is_approved || (allApprovals as any[] || []).some(a => a.product_id === p.id && a.status === "approved");
+                const isDraft = !isAppr && !hasPendingApproval && !isRejected;
+
+                if (statusFilter === "Draft") return isDraft;
+                if (statusFilter === "Pending Approval") return hasPendingApproval && !isAppr;
+                if (statusFilter === "Revision Pending") return hasPendingApproval && isAppr;
+                if (statusFilter === "Approved") return isAppr && !hasPendingApproval;
+                if (statusFilter === "Rejected") return isRejected;
+                return true;
+            });
+        }
+
+        list.sort((a, b) => {
+            const dateA = new Date(a.created_at || 0).getTime();
+            const dateB = new Date(b.created_at || 0).getTime();
+            return dateSort === "newest" ? dateB - dateA : dateA - dateB;
+        });
+
+        return list;
+    }, [productsData, productSearch, statusFilter, dateSort, allApprovals]);
 
     const approvedProducts = useMemo(() => {
         return filteredProducts.filter(p => p.is_approved);
@@ -390,6 +419,7 @@ export default function ManageProduct() {
             const res = await apiFetch("/api/product-approvals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildPayload()) });
             if (!res.ok) throw new Error("Failed to submit");
             toast({ title: "Submitted for Approval", description: `"${selectedProduct.name}" submitted for approval.` });
+            setIsSubmitted(true);
         } catch (e: any) { toast({ title: "Error", description: e.message || "Failed to submit", variant: "destructive" }); }
         finally { setIsSaving(false); }
     };
@@ -430,6 +460,7 @@ export default function ManageProduct() {
         setSelectedMaterials(mapped); setConfigMaterials(mapped);
         setIgnoredMismatches(new Set());
         setLoadedConfig(config);
+        setIsSubmitted(false);
         toast({ title: "Configuration Loaded", description: src });
     };
 
@@ -889,9 +920,29 @@ export default function ManageProduct() {
                             <div className="space-y-8">
                                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                                     <h2 className="text-2xl font-bold">1. Select Base Product</h2>
-                                    <div className="relative w-full md:w-80">
-                                        <Search className="absolute left-3 top-2.5 h-5 w-5 text-muted-foreground" />
-                                        <Input placeholder="Search by name..." className="pl-10 h-10" value={productSearch} onChange={e => setProductSearch(e.target.value)} />
+                                    <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+                                        <div className="relative w-full md:w-64">
+                                            <Search className="absolute left-3 top-2.5 h-5 w-5 text-muted-foreground" />
+                                            <Input placeholder="Search by name..." className="pl-10 h-10" value={productSearch} onChange={e => setProductSearch(e.target.value)} />
+                                        </div>
+                                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                                            <SelectTrigger className="w-full md:w-44 h-10"><SelectValue placeholder="Status" /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="All">All Statuses</SelectItem>
+                                                <SelectItem value="Draft">Draft</SelectItem>
+                                                <SelectItem value="Pending Approval">Pending Approval</SelectItem>
+                                                <SelectItem value="Revision Pending">Revision Pending</SelectItem>
+                                                <SelectItem value="Approved">Approved</SelectItem>
+                                                <SelectItem value="Rejected">Rejected</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <Select value={dateSort} onValueChange={(val: any) => setDateSort(val)}>
+                                            <SelectTrigger className="w-full md:w-44 h-10"><SelectValue placeholder="Sort by Date" /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="newest">Newest to Oldest</SelectItem>
+                                                <SelectItem value="oldest">Oldest to Newest</SelectItem>
+                                            </SelectContent>
+                                        </Select>
                                     </div>
                                 </div>
 
@@ -1671,7 +1722,11 @@ export default function ManageProduct() {
                                             <Lock className="h-6 w-6 text-amber-600 shrink-0 mt-0.5" />
                                             <div>
                                                 <h4 className="font-bold text-amber-800 uppercase text-xs tracking-wider mb-1">Configuration Locked</h4>
-                                                <p className="text-sm text-amber-700 font-medium">This configuration is approved and read-only. To make changes, you must request edit access. Once an admin approves your request, the configuration will become editable.</p>
+                                                <p className="text-sm text-amber-700 font-medium">
+                                                    {loadedConfig?.status === "approved" 
+                                                        ? "This configuration has been approved and can no longer be edited. To make changes, you must request edit access." 
+                                                        : "This configuration has been submitted and is pending approval. It can no longer be edited."}
+                                                </p>
                                             </div>
                                         </div>
                                         <Button
@@ -1906,7 +1961,22 @@ export default function ManageProduct() {
                                                                 </TooltipProvider>
                                                             </TableCell>
                                                             <TableCell className="text-[10px] whitespace-nowrap overflow-hidden text-ellipsis max-w-[100px]">{m.shop_name || "N/A"}</TableCell>
-                                                            <TableCell><Input value={m.location} onChange={e => updateConfig(m.id!, "location", e.target.value)} disabled={isReadOnly} className="h-8 border-muted text-[10px] px-2" /></TableCell>
+                                                            <TableCell>
+                                                                <TooltipProvider delayDuration={300}>
+                                                                    <Tooltip>
+                                                                        <TooltipTrigger asChild>
+                                                                            <div className="w-full">
+                                                                                <Input value={m.location} onChange={e => updateConfig(m.id!, "location", e.target.value)} disabled={isReadOnly} className="h-8 border-muted text-[10px] px-2 truncate" />
+                                                                            </div>
+                                                                        </TooltipTrigger>
+                                                                        {m.location && (
+                                                                            <TooltipContent className="max-w-xs break-words whitespace-normal text-xs p-3">
+                                                                                {m.location}
+                                                                            </TooltipContent>
+                                                                        )}
+                                                                    </Tooltip>
+                                                                </TooltipProvider>
+                                                            </TableCell>
                                                             <TableCell className="text-[10px] font-medium">{m.unit}</TableCell>
                                                             <TableCell><div className="flex justify-center"><Input type="number" value={m.baseQty} onChange={e => updateConfig(m.id!, "baseQty", Number(e.target.value))} disabled={isReadOnly} className="h-8 border-muted text-[11px] px-2 font-bold w-20 text-center" /></div></TableCell>
                                                             <TableCell className="text-[10px] font-bold">₹{(m.supplyRate + m.installRate).toLocaleString()}</TableCell>
@@ -2025,7 +2095,18 @@ export default function ManageProduct() {
                                                 <td className="border-r border-black p-3 text-center font-bold">1</td>
                                                 <td className="border-r border-black p-3 font-black text-xs uppercase">{selectedProduct?.name}</td>
                                                 <td className="border-r border-black p-3 text-center italic">Main Area</td>
-                                                <td className="border-r border-black p-3 text-[10px] text-muted-foreground leading-tight">Consolidated configuration for {selectedProduct?.name}</td>
+                                                <td className="border-r border-black p-3 text-[10px] text-muted-foreground leading-tight truncate max-w-[200px]">
+                                                    <TooltipProvider delayDuration={300}>
+                                                        <Tooltip>
+                                                            <TooltipTrigger className="truncate w-full text-left cursor-default">
+                                                                {productDescription || `Consolidated configuration for ${selectedProduct?.name}`}
+                                                            </TooltipTrigger>
+                                                            <TooltipContent className="max-w-xs break-words whitespace-normal text-xs p-3">
+                                                                {productDescription || `Consolidated configuration for ${selectedProduct?.name}`}
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </TooltipProvider>
+                                                </td>
                                                 <td className="border-r border-black p-3 text-center font-bold text-xs">{requiredUnitType}</td>
                                                 <td className="border-r border-black p-3 text-center font-black">{baseRequiredQty}</td>
                                                 <td className="border-r border-black p-3 text-right font-bold">₹{boqResults.totalSupply.toLocaleString()}</td>
