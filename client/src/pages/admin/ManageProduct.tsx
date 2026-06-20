@@ -598,8 +598,8 @@ export default function ManageProduct() {
                     rate,
                     supplyRate: sm.supplyRate ?? rate,
                     installRate: sm.installRate ?? 0,
-                    location: sm.location || sm.technicalspecification || m.name || "",
-                    description: sm.description || sm.technicalspecification || m.name || "",
+                    location: sm.location || sm.technicalspecification || sm.description || m.description || m.name || "",
+                    description: sm.description || sm.technicalspecification || m.description || m.name || "",
                     applyWastage: (sm.applyWastage === true || sm.apply_wastage === true || sm.applyWastage === undefined),
                     applyRounding: (sm.applyRounding === true || sm.apply_rounding === true || sm.applyRounding === undefined),
                     freezeAndEdit: (sm.freezeAndEdit === true || sm.freeze_and_edit === true),
@@ -1723,8 +1723,8 @@ export default function ManageProduct() {
                                             <div>
                                                 <h4 className="font-bold text-amber-800 uppercase text-xs tracking-wider mb-1">Configuration Locked</h4>
                                                 <p className="text-sm text-amber-700 font-medium">
-                                                    {loadedConfig?.status === "approved" 
-                                                        ? "This configuration has been approved and can no longer be edited. To make changes, you must request edit access." 
+                                                    {loadedConfig?.status === "approved"
+                                                        ? "This configuration has been approved and can no longer be edited. To make changes, you must request edit access."
                                                         : "This configuration has been submitted and is pending approval. It can no longer be edited."}
                                                 </p>
                                             </div>

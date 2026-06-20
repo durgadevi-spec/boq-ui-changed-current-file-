@@ -637,6 +637,7 @@ export default function GeneratePo() {
   const [previewVendors, setPreviewVendors] = useState<any[]>([]);
   const [isLoadingVendors, setIsLoadingVendors] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [projectSearchTerm, setProjectSearchTerm] = useState("");
   // Budget warning/modals removed for Generate BOM page per request
   const editedFieldsRef = useRef(editedFields);
   const [location, setLocation] = useLocation();
@@ -1692,8 +1693,21 @@ export default function GeneratePo() {
                       <SelectTrigger className="w-full bg-slate-50 border-slate-200 h-9 px-3">
                         <SelectValue placeholder={projects.length === 0 ? "No projects" : "Select project"} />
                       </SelectTrigger>
-                      <SelectContent className="max-h-60 overflow-auto">
-                        {projects.map((p: Project) => <SelectItem value={p.id} key={p.id}>{p.name}</SelectItem>)}
+                      <SelectContent className="max-h-[300px] overflow-y-auto">
+                        <div className="p-2 sticky top-0 bg-white z-10 border-b">
+                          <Input 
+                            placeholder="Search project..." 
+                            value={projectSearchTerm}
+                            onChange={(e) => setProjectSearchTerm(e.target.value)}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            className="h-8 text-xs"
+                          />
+                        </div>
+                        {projects
+                          .slice()
+                          .sort((a, b) => a.name.localeCompare(b.name))
+                          .filter(p => p.name.toLowerCase().includes(projectSearchTerm.toLowerCase()))
+                          .map((p: Project) => <SelectItem value={p.id} key={p.id}>{p.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1727,30 +1741,13 @@ export default function GeneratePo() {
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-9 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-red-600 gap-2 font-semibold"
-                              title="Delete Version"
-                              onClick={handleDeleteVersion}
-                              disabled={!selectedVersionId}
+                              className="h-9 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-blue-600 gap-2 font-semibold"
+                              title="View History"
+                              onClick={() => setShowHistoryModal(true)}
+                              disabled={!selectedVersionId || history.length === 0}
                             >
-                              <XCircle className="h-4 w-4" />
-                              <span>Delete</span>
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-9 px-3 bg-white border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-emerald-600 gap-2 font-semibold"
-                              title="New Version"
-                              onClick={() => {
-                                if (versions.length > 0) {
-                                  const last = versions[0];
-                                  handleCreateNewVersion(confirm(`Copy items from V${last.version_number}?`));
-                                } else {
-                                  handleCreateNewVersion(false);
-                                }
-                              }}
-                            >
-                              <Clock className="h-4 w-4" />
-                              <span>New Version</span>
+                              <History className="h-4 w-4" />
+                              <span>History</span>
                             </Button>
                           </>
                         )}
@@ -1759,12 +1756,7 @@ export default function GeneratePo() {
                   )}
 
                   <div className="flex gap-2 h-9 ml-auto">
-                    {!isPurchaseTeam && (
-                      <>
-                        <Button onClick={() => setShowProductPicker(true)} className="bg-primary text-white h-full px-5 text-xs font-bold shadow-sm" disabled={isVersionSubmitted || !selectedVersionId}>+ Add Product</Button>
-                        <Button onClick={() => setShowMaterialPicker(true)} variant="outline" className="border-slate-200 h-full px-5 text-xs font-bold shadow-sm bg-white" disabled={isVersionSubmitted || !selectedVersionId}>+ Add Item</Button>
-                      </>
-                    )}
+                    {/* Add buttons removed per request */}
                   </div>
                 </div>
 
@@ -2016,14 +2008,7 @@ export default function GeneratePo() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* Floating Action Menu - Hide for purchase team */}
-      {!isPurchaseTeam && (
-        <div className="fixed bottom-8 right-8 flex flex-col gap-4 z-50">
-          <Button size="icon" className="h-14 w-14 rounded-full bg-slate-900 shadow-2xl hover:bg-slate-800 transform transition-transform hover:scale-110" onClick={() => setShowProductPicker(true)}>
-            <Plus className="h-6 w-6 text-white" />
-          </Button>
-        </div>
-      )}
+      {/* Floating Add Product button removed per request */}
       {/* Budget warning dialogs removed for Generate BOM page */}
     </>
   );

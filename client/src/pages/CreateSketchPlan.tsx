@@ -1572,6 +1572,7 @@ export default function CreateSketchPlan() {
 
   // New state
   const [projectOpen, setProjectOpen] = useState(false);
+  const [projectSearchTerm, setProjectSearchTerm] = useState("");
   const [previewImage, setPreviewImage] = useState<{ url: string, name: string } | null>(null);
   const [sketchInitialData, setSketchInitialData] = useState<string | undefined>(undefined);
   const lastSketchItemIdxRef = useRef<number | null>(null); // To track which image we are "continously" auto-saving
@@ -5167,9 +5168,18 @@ export default function CreateSketchPlan() {
                 <SelectTrigger className="w-full h-11">
                   <SelectValue placeholder="Select a project" />
                 </SelectTrigger>
-                <SelectContent className="z-[160]">
+                <SelectContent className="z-[160] max-h-[300px]">
+                  <div className="p-2 sticky top-0 bg-white z-10 border-b">
+                    <Input 
+                      placeholder="Search project..." 
+                      value={projectSearchTerm}
+                      onChange={(e) => setProjectSearchTerm(e.target.value)}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      className="h-8 text-xs"
+                    />
+                  </div>
                   <SelectItem value="none">Select a project...</SelectItem>
-                  {projects.map((p) => (
+                  {projects.filter(p => p.name.toLowerCase().includes(projectSearchTerm.toLowerCase())).map((p) => (
                     <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -5186,7 +5196,7 @@ export default function CreateSketchPlan() {
                 <SelectTrigger className="w-full h-11">
                   {loadingVersions ? "Loading versions..." : <SelectValue placeholder="Select version" />}
                 </SelectTrigger>
-                <SelectContent className="z-[160]">
+                <SelectContent className="z-[160] max-h-[300px]">
                   <SelectItem value="new">+ Create New BOM Version</SelectItem>
                   {targetVersions.map((v) => (
                     <SelectItem key={v.id} value={v.id}>

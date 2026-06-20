@@ -21,7 +21,7 @@ export async function convertSketchToBoqItems(sketchId: string) {
 
   // 2. Pre-fetch materials for rate/HSN lookup on manual/unmatched items
   const materialsResult = await query(
-    "SELECT id, name, rate, unit, hsn_code, sac_code, tax_code_type, tax_code_value FROM materials"
+    "SELECT m.id, m.name, m.rate, m.unit, m.hsn_code, m.sac_code, m.tax_code_type, m.tax_code_value, m.shop_id, s.name AS shop_name FROM materials m LEFT JOIN shops s ON m.shop_id = s.id"
   );
   const materialsByIdMap = new Map<string, any>();
   const materialsByNameMap = new Map<string, any>();
@@ -118,7 +118,8 @@ export async function convertSketchToBoqItems(sketchId: string) {
             wastagePct: line.wastage_pct != null ? Number(line.wastage_pct) : undefined,
             supplyRate: supplyRate,
             installRate: Number(line.install_rate || 0),
-            shop_name: line.shop_name,
+            shop_id: (liveMat ? liveMat.shop_id : null) || line.shop_id,
+            shop_name: (liveMat ? liveMat.shop_name : null) || line.shop_name,
             applyWastage: line.apply_wastage !== false,
             applyRounding: line.apply_rounding !== undefined ? !!line.apply_rounding : (line.applyRounding !== undefined ? !!line.applyRounding : true),
             freeze_and_edit: !!(line.freeze_and_edit || line.freezeAndEdit),
@@ -182,7 +183,9 @@ export async function convertSketchToBoqItems(sketchId: string) {
             applyRounding: true, // Default true for legacy
             freeze_and_edit: false,
             location: sketchCategory,
-            category: sketchCategory
+            category: sketchCategory,
+            shop_id: liveMat ? liveMat.shop_id : null,
+            shop_name: liveMat ? liveMat.shop_name : null
           };
         });
         boqItems.push(tableData);
@@ -226,7 +229,9 @@ export async function convertSketchToBoqItems(sketchId: string) {
       amount: sketchQty * rate,
       material_id: sketchMaterialId,
       manual: true,
-      category: sketchCategory
+      category: sketchCategory,
+      shop_id: (matchedMat ? matchedMat.shop_id : null) || sItem.assigned_vendor_id,
+      shop_name: (matchedMat ? matchedMat.shop_name : null) || sItem.vendor_name
     }];
 
     boqItems.push(tableData);
