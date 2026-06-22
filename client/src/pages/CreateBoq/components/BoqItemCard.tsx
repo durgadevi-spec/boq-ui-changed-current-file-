@@ -118,7 +118,7 @@ export const BoqItemCard = React.memo(function BoqItemCard({ boqItem, boqIdx, is
   const [localItems, setLocalItems] = useState<any[]>([]);
   const [reorderInit, setReorderInit] = useState(false);
 
-  const calculationTarget = (!localTarget || Number(localTarget) <= 0) ? 1 : Number(localTarget);
+  const calculationTarget = (localTarget === undefined || localTarget === null || localTarget === "" || isNaN(Number(localTarget))) ? 1 : Math.max(0, Number(localTarget));
 
 
   let displayLines: any[] = step11Items;
@@ -140,8 +140,8 @@ export const BoqItemCard = React.memo(function BoqItemCard({ boqItem, boqIdx, is
       const rate = Number(getEditedValue(itemKey, "rate", sRate + iRate)) || (sRate + iRate);
 
       const isLumpSumLine = (line.unit || "").toLowerCase() === "ls";
-      const reqQty = isFrozen ? line.roundOffQty : (isLumpSumLine ? 1 : Number((qty * calculationTarget).toFixed(2)));
-      const roundOff = isFrozen ? line.roundOffQty : (isLumpSumLine ? 1 : (line.applyRounding !== false ? Math.ceil(reqQty) : reqQty));
+      const reqQty = calculationTarget === 0 ? 0 : (isFrozen ? line.roundOffQty : (isLumpSumLine ? 1 : Number((qty * calculationTarget).toFixed(2))));
+      const roundOff = calculationTarget === 0 ? 0 : (isFrozen ? line.roundOffQty : (isLumpSumLine ? 1 : (line.applyRounding !== false ? Math.ceil(reqQty) : reqQty)));
 
       return {
         title: line.name, description: line.name, unit: line.unit, shop_name: line.shop_name,
@@ -168,7 +168,7 @@ export const BoqItemCard = React.memo(function BoqItemCard({ boqItem, boqIdx, is
 
       // --- FIX: Manual items should NOT be scaled by calculationTarget ---
       const isLumpSumLine = (it.unit || "").toLowerCase() === "ls";
-      const reqQty = isLumpSumLine ? 1 : qty;
+      const reqQty = calculationTarget === 0 ? 0 : (isLumpSumLine ? 1 : qty);
       const roundOff = reqQty; // No rounding for manual items usually, or just keep as is
       const amount = Number((reqQty * rate).toFixed(2));
       return { ...it, manual: true, itemKey, _s11Idx: s11Idx, qtyPerSqf: isLumpSumLine ? 1 : qty, requiredQty: reqQty, roundOff, amount, supply_rate: sRate, install_rate: iRate };
@@ -187,8 +187,8 @@ export const BoqItemCard = React.memo(function BoqItemCard({ boqItem, boqIdx, is
       // But based on user feedback, manual additions should not scale.
       const isManual = it.manual || !tableData.materialLines;
       const isLumpSumLine = (it.unit || "").toLowerCase() === "ls";
-      const scaledQty = isManual ? (isLumpSumLine ? 1 : baseQty) : (isLumpSumLine ? 1 : Number((baseQty * calculationTarget).toFixed(2)));
-      const roundOff = (it.applyRounding !== false && !isManual && !isLumpSumLine) ? Math.ceil(scaledQty) : scaledQty;
+      const scaledQty = calculationTarget === 0 ? 0 : (isManual ? (isLumpSumLine ? 1 : baseQty) : (isLumpSumLine ? 1 : Number((baseQty * calculationTarget).toFixed(2))));
+      const roundOff = calculationTarget === 0 ? 0 : ((it.applyRounding !== false && !isManual && !isLumpSumLine) ? Math.ceil(scaledQty) : scaledQty);
       const amount = Number((roundOff * rate).toFixed(2));
       return { ...it, itemKey, _s11Idx: s11Idx, qtyPerSqf: isLumpSumLine ? 1 : baseQty, qty: scaledQty, roundOff, rateSqft: rate, amount, manual: isManual };
     });

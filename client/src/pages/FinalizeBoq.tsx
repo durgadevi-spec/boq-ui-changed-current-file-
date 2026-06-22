@@ -5323,36 +5323,32 @@ export default function FinalizeBoq() {
                                 value={globalOverrideValue}
                                 disabled={isVersionSubmitted}
                                 onChange={(e) => {
-                                  setGlobalOverrideValue(e.target.value);
-                                  if (e.target.value) {
-                                    const newVal = e.target.value;
-                                    setOverrideRates(prev => {
-                                      const updated = { ...prev };
-                                      boqItems.forEach(item => {
-                                        updated[item.id] = newVal;
-                                      });
-                                      return updated;
+                                  const newVal = e.target.value;
+                                  setGlobalOverrideValue(newVal);
+                                  setOverrideRates(prev => {
+                                    const updated = { ...prev };
+                                    boqItems.forEach(item => {
+                                      updated[item.id] = newVal;
                                     });
-                                  }
+                                    return updated;
+                                  });
                                 }}
                                 onBlur={async (e) => {
                                   const newVal = e.target.value;
-                                  if (newVal) {
-                                    setGlobalOverrideValue(newVal);
-                                    setOverrideRates(prev => {
-                                      const updated = { ...prev };
-                                      boqItems.forEach(item => {
-                                        updated[item.id] = newVal;
-                                      });
-                                      return updated;
+                                  setGlobalOverrideValue(newVal);
+                                  setOverrideRates(prev => {
+                                    const updated = { ...prev };
+                                    boqItems.forEach(item => {
+                                      updated[item.id] = newVal;
                                     });
-                                    // Persist to database for all items
-                                    await Promise.all(
-                                      boqItems.map(item =>
-                                        saveItemLayout(item.id, undefined, undefined, undefined, undefined, newVal, undefined, undefined, globalOverrideType)
-                                      )
-                                    );
-                                  }
+                                    return updated;
+                                  });
+                                  // Persist to database for all items
+                                  await Promise.all(
+                                    boqItems.map(item =>
+                                      saveItemLayout(item.id, undefined, undefined, undefined, undefined, newVal === "" ? null : newVal, undefined, undefined, globalOverrideType)
+                                    )
+                                  );
                                 }}
                                 placeholder="0.00"
                                 className="w-16 border border-gray-300 rounded px-1 py-0.5 text-[9px] font-semibold bg-white text-gray-700 outline-none text-center"
@@ -5695,7 +5691,7 @@ export default function FinalizeBoq() {
                                       const val = e.target.value;
                                       setOverrideRates(prev => ({ ...prev, [boqItem.id]: val }));
                                       setOverrideTypes(prev => ({ ...prev, [boqItem.id]: globalOverrideType }));
-                                      await saveItemLayout(boqItem.id, undefined, undefined, undefined, undefined, val, undefined, undefined, globalOverrideType);
+                                      await saveItemLayout(boqItem.id, undefined, undefined, undefined, undefined, val === "" ? null : val, undefined, undefined, globalOverrideType);
                                     }}
                                     className={`w-full border-none rounded p-0.5 text-[10px] focus:ring-1 ring-gray-300 outline-none bg-gray-50 text-center font-semibold h-6 ${getIsModified(boqItem.id, "rate", overrideRates[boqItem.id] ?? "") ? "text-blue-600 font-bold" : ""}`}
                                     placeholder="0.00"

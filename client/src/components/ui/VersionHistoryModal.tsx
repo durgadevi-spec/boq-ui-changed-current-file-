@@ -42,8 +42,24 @@ export function VersionHistoryModal({ isOpen, onOpenChange, versionId }: Version
     }
   };
 
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<Set<string | number>>(new Set());
+
   const handleDownloadPdf = () => {
     if (!history || history.length === 0) return;
+    
+    // Filter history based on selection if any items are selected, otherwise you might want to prompt or download all.
+    // The user explicitly wants to download *selected* items.
+    const itemsToDownload = selectedHistoryIds.size > 0 
+      ? history.filter((entry, idx) => selectedHistoryIds.has(entry.id || idx))
+      : history; // fallback to all if none selected, or maybe just return early? Let's fallback to all if they didn't select, or better yet, download only selected, but if none selected, disable button.
+      
+    if (selectedHistoryIds.size === 0) {
+        // If they want to download, they should select at least one, or we can just download all by default. 
+        // Let's assume downloading all is fine if none are selected. Wait, "so that wich all need that only i can select and download also select all option".
+        // Better: require selection. We will disable the download button if `selectedHistoryIds.size === 0`.
+        return;
+    }
+
     const doc = new jsPDF();
     doc.setFontSize(16);
     doc.text("Version History Log", 14, 20);
@@ -51,7 +67,7 @@ export function VersionHistoryModal({ isOpen, onOpenChange, versionId }: Version
     autoTable(doc, {
       startY: 30,
       head: [["Date", "User", "Action", "Item Name", "Reason"]],
-      body: history.map(entry => [
+      body: itemsToDownload.map(entry => [
         format(new Date(entry.created_at), 'MMM d, yyyy h:mm a'),
         entry.user_full_name || 'System User',
         entry.action,
@@ -82,13 +98,31 @@ export function VersionHistoryModal({ isOpen, onOpenChange, versionId }: Version
             variant="outline"
             size="sm"
             onClick={handleDownloadPdf}
-            disabled={loading || history.length === 0}
+            disabled={loading || history.length === 0 || selectedHistoryIds.size === 0}
             className="flex items-center gap-2 text-blue-600 border-blue-200 hover:bg-blue-50"
           >
             <Download className="h-4 w-4" />
-            Download PDF
+            Download Selected ({selectedHistoryIds.size})
           </Button>
         </DialogHeader>
+        
+        {!loading && history.length > 0 && (
+          <div className="flex items-center gap-2 px-3 py-2 mt-2 bg-slate-50 border border-slate-200 rounded-lg">
+            <input 
+              type="checkbox" 
+              className="w-4 h-4 cursor-pointer accent-blue-600 rounded"
+              checked={selectedHistoryIds.size === history.length && history.length > 0}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  setSelectedHistoryIds(new Set(history.map((entry, idx) => entry.id || idx)));
+                } else {
+                  setSelectedHistoryIds(new Set());
+                }
+              }}
+            />
+            <span className="text-sm font-semibold text-slate-700">Select All</span>
+          </div>
+        )}
         
         <div className="py-4 max-h-[60vh] overflow-y-auto space-y-4 pr-2">
           {loading ? (
@@ -98,7 +132,18 @@ export function VersionHistoryModal({ isOpen, onOpenChange, versionId }: Version
           ) : (
             history.map((entry, idx) => (
               <div key={entry.id || idx} className="flex gap-4 p-3 rounded-lg border border-slate-100 bg-slate-50">
-                <div className="shrink-0 mt-1">
+                <div className="shrink-0 mt-1 flex flex-col items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    className="w-4 h-4 cursor-pointer accent-blue-600 rounded"
+                    checked={selectedHistoryIds.has(entry.id || idx)}
+                    onChange={(e) => {
+                      const next = new Set(selectedHistoryIds);
+                      if (e.target.checked) next.add(entry.id || idx);
+                      else next.delete(entry.id || idx);
+                      setSelectedHistoryIds(next);
+                    }}
+                  />
                   {entry.action === 'ADDED' ? (
                     <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600">
                       <Plus className="h-4 w-4" />

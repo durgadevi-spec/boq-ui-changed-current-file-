@@ -707,9 +707,9 @@ const SketchPlanRow = React.memo(({
                                     </div>
                                     <Textarea
                                       value={item.item_description || ''}
-                                      onChange={(e) => updateItem(idx, 'item_description', e.target.value)}
-                                      placeholder="No description available. Click to add one."
-                                      className="text-sm min-h-[80px] resize-none"
+                                      readOnly
+                                      placeholder="No description available."
+                                      className="text-sm min-h-[80px] resize-none bg-slate-50 cursor-not-allowed focus-visible:ring-0 text-slate-600"
                                     />
                                     <p className="text-[10px] text-slate-400">This description will be carried over to the General BOM.</p>
                                   </div>
@@ -1468,10 +1468,14 @@ export default function CreateSketchPlan() {
         const l = parseFloat(length) || 0;
         const w = parseFloat(width) || 0;
         const h = parseFloat(height) || 0;
-        if (l > 0 || w > 0 || h > 0) {
-          const dimsArr = [l, w, h].filter(v => v > 0);
-          const autoQty = dimsArr.reduce((acc, v) => acc * v, 1);
-          qty = dimension_unit === "mm" ? Math.round(autoQty).toString() : autoQty.toFixed(2);
+        if (l !== 0 || w !== 0 || h !== 0) {
+          const dimsArr = [l, w, h].filter(v => v !== 0 && !isNaN(v));
+          if (dimsArr.length > 0) {
+            const autoQty = dimsArr.reduce((acc, v) => acc * v, 1);
+            qty = dimension_unit === "mm" ? Math.round(autoQty).toString() : autoQty.toFixed(2);
+          } else {
+            qty = "0";
+          }
         } else {
           qty = "1";
         }
@@ -1517,7 +1521,7 @@ export default function CreateSketchPlan() {
   const [isPdfDialogOpen, setIsPdfDialogOpen] = useState(false);
   const [includePlanPhotosInExport, setIncludePlanPhotosInExport] = useState(true);
   const [includeSubNotesInExport, setIncludeSubNotesInExport] = useState(true);
-  const [selectedPdfCols, setSelectedPdfCols] = useState<string[]>(["#", "Category", "Item", "Notes", "L", "W", "H", "Qty", "Unit", "Pre Photos", "Post Photos"]
+  const [selectedPdfCols, setSelectedPdfCols] = useState<string[]>(["#", "Category", "Item", "Description", "Notes", "L", "W", "H", "Qty", "Unit", "Pre Photos", "Post Photos"]
   );
   const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
   const [recipientEmail, setRecipientEmail] = useState("");
@@ -2487,9 +2491,11 @@ export default function CreateSketchPlan() {
           const l = parseFloat(d.length) || 0;
           const w = parseFloat(d.width) || 0;
           const h = parseFloat(d.height) || 0;
-          if (l > 0 || w > 0 || h > 0) {
-            const p = [l, w, h].filter(v => v > 0);
-            totalQty += p.reduce((acc, v) => acc * v, 1);
+          if (l !== 0 || w !== 0 || h !== 0) {
+            const p = [l, w, h].filter(v => v !== 0 && !isNaN(v));
+            if (p.length > 0) {
+              totalQty += p.reduce((acc, v) => acc * v, 1);
+            }
           }
         });
         item.qty = item.dimension_unit === "mm" ? Math.round(totalQty).toString() : totalQty.toFixed(2);
@@ -2521,13 +2527,15 @@ export default function CreateSketchPlan() {
           const l = parseFloat(d.length) || 0;
           const w = parseFloat(d.width) || 0;
           const h = parseFloat(d.height) || 0;
-          if (l > 0 || w > 0 || h > 0) {
-            const p = [l, w, h].filter(v => v > 0);
-            totalQty += p.reduce((acc, v) => acc * v, 1);
+          if (l !== 0 || w !== 0 || h !== 0) {
+            const p = [l, w, h].filter(v => v !== 0 && !isNaN(v));
+            if (p.length > 0) {
+              totalQty += p.reduce((acc, v) => acc * v, 1);
+            }
           }
         });
 
-        if (totalQty > 0) {
+        if (totalQty !== 0) {
           item.qty = item.dimension_unit === "mm" ? Math.round(totalQty).toString() : totalQty.toFixed(2);
         } else {
           item.qty = "0";
@@ -2563,12 +2571,14 @@ export default function CreateSketchPlan() {
             const l = parseFloat(d.length) || 0;
             const w = parseFloat(d.width) || 0;
             const h = parseFloat(d.height) || 0;
-            if (l > 0 || w > 0 || h > 0) {
-              const p = [l, w, h].filter(v => v > 0);
-              totalQty += p.reduce((acc, v) => acc * v, 1);
+            if (l !== 0 || w !== 0 || h !== 0) {
+              const p = [l, w, h].filter(v => v !== 0 && !isNaN(v));
+              if (p.length > 0) {
+                totalQty += p.reduce((acc, v) => acc * v, 1);
+              }
             }
           });
-          if (totalQty > 0) {
+          if (totalQty !== 0) {
             next[idx].qty = value === "mm" ? Math.round(totalQty).toString() : totalQty.toFixed(2);
           } else if (value === "mm") {
             const currentQty = parseFloat(next[idx].qty) || 0;
@@ -2578,12 +2588,16 @@ export default function CreateSketchPlan() {
           const l = parseFloat(next[idx].length) || 0;
           const w = parseFloat(next[idx].width) || 0;
           const h = parseFloat(next[idx].height) || 0;
-          if (l > 0 || w > 0 || h > 0) {
-            const dimsArr = [l, w, h].filter(v => v > 0);
-            const autoQty = dimsArr.reduce((acc, v) => acc * v, 1);
-            next[idx].qty = next[idx].dimension_unit === "mm"
-              ? Math.round(autoQty).toString()
-              : autoQty.toFixed(2);
+          if (l !== 0 || w !== 0 || h !== 0) {
+            const dimsArr = [l, w, h].filter(v => v !== 0 && !isNaN(v));
+            if (dimsArr.length > 0) {
+              const autoQty = dimsArr.reduce((acc, v) => acc * v, 1);
+              next[idx].qty = next[idx].dimension_unit === "mm"
+                ? Math.round(autoQty).toString()
+                : autoQty.toFixed(2);
+            } else {
+              next[idx].qty = "0";
+            }
           } else if (next[idx].dimension_unit === "mm") {
             const currentQty = parseFloat(next[idx].qty) || 0;
             next[idx].qty = Math.round(currentQty).toString();
@@ -3086,6 +3100,8 @@ export default function CreateSketchPlan() {
               row.push(dIdx === 0 ? item.category || "" : "");
             } else if (h === "Item") {
               row.push(dIdx === 0 ? item.item_name : "");
+            } else if (h === "Description") {
+              row.push(dIdx === 0 ? (item.item_description || "") : "");
             } else if (h === "Notes") {
               const noteText = dIdx === 0 ? item.description : (dim.note || "");
               row.push(dIdx === 0 ? noteText : `     -  ${noteText}`);
@@ -3274,6 +3290,7 @@ export default function CreateSketchPlan() {
           if (selectedPdfCols.includes("#")) row["S.No"] = dIdx === 0 ? sortedAllItems.findIndex(it => it.id === item.id) + 1 : "";
           row["Category"] = dIdx === 0 ? item.category || "" : "";
           if (selectedPdfCols.includes("Item")) row["Item Name"] = dIdx === 0 ? item.item_name : "";
+          if (selectedPdfCols.includes("Description")) row["Description"] = dIdx === 0 ? (item.item_description || "") : "";
           if (selectedPdfCols.includes("Notes")) row["Notes"] = dIdx === 0 ? item.description : (dim.note || "");
           if (selectedPdfCols.includes("L")) row["L"] = dim.length || "";
           if (selectedPdfCols.includes("W")) row["W"] = dim.width || "";
@@ -4652,7 +4669,7 @@ export default function CreateSketchPlan() {
                   <div>
                     <Label className="text-[10px] uppercase font-bold text-slate-500 mb-3 block">Column Selection</Label>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                      {["#", "Item", "Notes", "L", "W", "H", "Qty", "Unit", "Pre Photos", "Post Photos"].map((col) => (
+                      {["#", "Item", "Description", "Notes", "L", "W", "H", "Qty", "Unit", "Pre Photos", "Post Photos"].map((col) => (
                         <div key={col} className="flex items-center space-x-2 bg-slate-50 p-2 rounded border border-slate-100">
                           <Checkbox
                             id={`col-${col}`}
