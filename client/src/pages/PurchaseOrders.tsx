@@ -455,12 +455,24 @@ export default function PurchaseOrders() {
                         <h1 className="text-3xl font-bold tracking-tight">Annexures</h1>
                         <p className="text-muted-foreground">Manage and track your procurement orders.</p>
                     </div>
-                    {selectedProjectId !== "" && (
-                        <Button variant="ghost" size="sm" onClick={handleBackToProjects} className="h-9">
-                            <ChevronRight className="h-4 w-4 rotate-180" />
-                            Back to Projects
-                        </Button>
-                    )}
+                    <div className="flex gap-2">
+                        {user?.role === 'admin' && (
+                            <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => setLocation("/admin/rate-reduction-history")} 
+                                className="h-9"
+                            >
+                                Rate Reduction History
+                            </Button>
+                        )}
+                        {selectedProjectId !== "" && (
+                            <Button variant="ghost" size="sm" onClick={handleBackToProjects} className="h-9">
+                                <ChevronRight className="h-4 w-4 rotate-180" />
+                                Back to Projects
+                            </Button>
+                        )}
+                    </div>
                 </div>
 
                 {showProjectList && (

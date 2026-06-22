@@ -229,6 +229,28 @@ export const purchaseOrderItems = pgTable("purchase_order_items", {
   createdAt: timestamp("created_at", { withTimezone: true }).default(sql`now()`),
 });
 
+export const poRateChangeHistory = pgTable("po_rate_change_history", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  poId: uuid("po_id").notNull().references(() => purchaseOrders.id, { onDelete: 'cascade' }),
+  poItemId: uuid("po_item_id").notNull(),
+  poNumber: text("po_number"),
+  projectName: text("project_name"),
+  vendorName: text("vendor_name"),
+  itemName: text("item_name"),
+  originalRate: decimal("original_rate", { precision: 15, scale: 2 }).notNull(),
+  reducedRate: decimal("reduced_rate", { precision: 15, scale: 2 }).notNull(),
+  reductionAmount: decimal("reduction_amount", { precision: 15, scale: 2 }),
+  reason: text("reason").notNull(),
+  status: text("status").notNull().default("pending"), // pending, approved, rejected
+  changedBy: text("changed_by"),
+  changedByName: text("changed_by_name"),
+  changedAt: timestamp("changed_at", { withTimezone: true }).default(sql`now()`),
+  approvedBy: text("approved_by"),
+  approvedByName: text("approved_by_name"),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  adminComments: text("admin_comments"),
+});
+
 export const poRequests = pgTable("po_requests", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   projectId: text("project_id").notNull(),

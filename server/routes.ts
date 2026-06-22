@@ -10430,8 +10430,13 @@ export async function registerRoutes(
         if (original) {
           const oldQty = parseFloat(original.qty);
           const newQty = parseFloat(item.qty);
-          if (oldQty !== newQty) {
-            changeSummary += `- ${item.item || item.item_name}: Qty changed from ${oldQty} to ${newQty}\n`;
+          const oldRate = parseFloat(original.rate);
+          const newRate = parseFloat(item.rate);
+          let changes = [];
+          if (oldQty !== newQty) changes.push(`Qty changed from ${oldQty} to ${newQty}`);
+          if (oldRate !== newRate) changes.push(`Rate changed from ${oldRate} to ${newRate}`);
+          if (changes.length > 0) {
+            changeSummary += `- ${item.item || item.item_name}: ${changes.join(', ')}\n`;
           }
         } else {
           changeSummary += `- Added new item: ${item.item || item.item_name} (Qty: ${item.qty})\n`;
@@ -10486,11 +10491,31 @@ export async function registerRoutes(
           qtyModified = parseFloat(item.qty) !== originalQty;
         }
 
-        await query(
+        const itemRes = await query(
           `INSERT INTO purchase_order_items (po_id, material_id, item, description, unit, qty, original_qty, rate, amount, hsn_code, sac_code, qty_modified) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
           [newPo.id, item.material_id || item.id || null, item.item || item.item_name, item.description || null, item.unit || null, item.qty, originalQty, item.rate, item.amount, item.hsn_code || null, item.sac_code || null, qtyModified]
         );
+
+        if (originalItem && parseFloat(originalItem.rate) !== parseFloat(item.rate)) {
+            await query(
+                `INSERT INTO po_rate_change_history (po_id, po_number, po_item_id, item_name, vendor_name, original_rate, reduced_rate, reason, status, changed_by, changed_by_name)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                [
+                    newPo.id,
+                    newPoNumber,
+                    itemRes.rows[0].id,
+                    item.item || item.item_name,
+                    finalVendorName,
+                    parseFloat(originalItem.rate),
+                    parseFloat(item.rate),
+                    reason || "Revised during PO Revise Flow",
+                    "approved", 
+                    user.id,
+                    user.fullName || user.username
+                ]
+            );
+        }
       }
 
       // 5.5 Handle deleted items (Defer them)
@@ -10528,6 +10553,137 @@ export async function registerRoutes(
     } catch (err) {
       console.error("POST /api/purchase-orders/:id/revise error:", err);
       res.status(500).json({ message: "Failed to revise PO" });
+    }
+  });
+
+  // GET /api/purchase-orders/rate-reductions - Fetch all rate reduction requests for admin history
+  app.get("/api/purchase-orders/rate-reductions", authMiddleware, requireRole('admin'), async (req: Request, res: Response) => {
+    try {
+      const result = await query(
+        `SELECT h.*, po.project_name, po.status as po_status 
+         FROM po_rate_change_history h 
+         LEFT JOIN purchase_orders po ON h.po_id = po.id 
+         ORDER BY h.changed_at DESC`
+      );
+      res.json({ rateReductions: result.rows });
+    } catch (err) {
+      console.error("GET /api/purchase-orders/rate-reductions error:", err);
+      res.status(500).json({ message: "Failed to fetch rate reduction history" });
+    }
+  });
+
+  // POST /api/purchase-orders/:id/rate-reductions - Submit a new rate reduction request
+  app.post("/api/purchase-orders/:id/rate-reductions", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { rateReductions } = req.body;
+      const user = (req as any).user;
+
+      if (!rateReductions || !rateReductions.length) {
+        return res.status(400).json({ message: "No rate reductions provided" });
+      }
+
+      // 1. Get PO details
+      const poRes = await query(`SELECT po_number, project_name, vendor_name FROM purchase_orders WHERE id = $1`, [id]);
+      if (poRes.rows.length === 0) {
+        return res.status(404).json({ message: "Purchase order not found" });
+      }
+      const po = poRes.rows[0];
+
+      // 2. Insert reduction requests
+      for (const reduction of rateReductions) {
+        await query(
+          `INSERT INTO po_rate_change_history 
+           (po_id, po_item_id, po_number, project_name, vendor_name, item_name, original_rate, reduced_rate, reduction_amount, reason, status, changed_by, changed_by_name)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          [
+            id,
+            reduction.poItemId,
+            po.po_number,
+            po.project_name,
+            po.vendor_name,
+            reduction.itemName,
+            reduction.originalRate,
+            reduction.reducedRate,
+            reduction.originalRate - reduction.reducedRate,
+            reduction.reason,
+            'pending',
+            user.id,
+            user.fullName || user.username
+          ]
+        );
+      }
+
+      res.status(201).json({ message: "Rate reduction request submitted successfully" });
+    } catch (err) {
+      console.error("POST /api/purchase-orders/:id/rate-reductions error:", err);
+      res.status(500).json({ message: "Failed to submit rate reduction request" });
+    }
+  });
+
+  // POST /api/purchase-orders/rate-reductions/:id/approve - Approve or reject a rate reduction
+  app.post("/api/purchase-orders/rate-reductions/:id/approve", authMiddleware, requireRole('admin'), async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { approve, comment } = req.body;
+      const user = (req as any).user;
+
+      const status = approve ? 'approved' : 'rejected';
+
+      // 1. Get the request
+      const reqRes = await query(`SELECT * FROM po_rate_change_history WHERE id = $1`, [id]);
+      if (reqRes.rows.length === 0) {
+        return res.status(404).json({ message: "Rate reduction request not found" });
+      }
+      const request = reqRes.rows[0];
+
+      if (request.status !== 'pending') {
+         return res.status(400).json({ message: `Request is already ${request.status}` });
+      }
+
+      await query('BEGIN');
+
+      try {
+        // 2. Update the request status
+        await query(
+          `UPDATE po_rate_change_history 
+           SET status = $1, admin_comments = $2, approved_by = $3, approved_by_name = $4, approved_at = NOW() 
+           WHERE id = $5`,
+          [status, comment || null, user.id, user.fullName || user.username, id]
+        );
+
+        // 3. If approved, update the PO item rate and PO total amount
+        if (approve) {
+          // Update item
+          await query(
+            `UPDATE purchase_order_items 
+             SET rate = $1, amount = qty * $1 
+             WHERE id = $2`,
+            [request.reduced_rate, request.po_item_id]
+          );
+
+          // Recalculate PO total
+          const poTotalRes = await query(
+            `SELECT SUM(amount) as new_total FROM purchase_order_items WHERE po_id = $1`,
+            [request.po_id]
+          );
+          const newTotal = poTotalRes.rows[0].new_total || 0;
+
+          await query(
+            `UPDATE purchase_orders SET subtotal = $1, total = $1 WHERE id = $2`,
+            [newTotal, request.po_id]
+          );
+        }
+
+        await query('COMMIT');
+        res.json({ message: `Rate reduction ${status} successfully` });
+      } catch (err) {
+        await query('ROLLBACK');
+        throw err;
+      }
+    } catch (err) {
+      console.error("POST /api/purchase-orders/rate-reductions/:id/approve error:", err);
+      res.status(500).json({ message: "Failed to process rate reduction approval" });
     }
   });
 
@@ -10725,12 +10881,19 @@ export async function registerRoutes(
         }
       }
 
+      // Fetch rate reduction requests
+      const rateReductionsRes = await query(
+        `SELECT * FROM po_rate_change_history WHERE po_id = $1 ORDER BY changed_at DESC`,
+        [id]
+      );
+
       res.json({
         purchaseOrder: currentPo,
         items: itemsResult.rows,
         relatedPos: relatedPosResult.rows,
         parentItems: parentItems,
-        bomItems: bomItems
+        bomItems: bomItems,
+        rateReductions: rateReductionsRes.rows
       });
     } catch (err) {
       console.error("GET /api/purchase-orders/:id error:", err);

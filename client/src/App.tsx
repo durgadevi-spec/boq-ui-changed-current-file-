@@ -36,6 +36,7 @@ import Archive from "@/pages/admin/Archive";
 import Trash from "@/pages/admin/Trash";
 import SpyDashboard from "@/pages/admin/SpyDashboard";
 import BoqApprovals from "@/pages/admin/BoqApprovals";
+import RateReductionHistory from "@/pages/admin/RateReductionHistory";
 import GeneratePO from "@/pages/GeneratePO";
 
 
@@ -140,6 +141,7 @@ function Router() {
       <Route path="/admin/archive" component={Archive} />
       <Route path="/admin/trash" component={Trash} />
       <Route path="/admin/spy" component={SpyDashboard} />
+      <Route path="/admin/rate-reduction-history" component={RateReductionHistory} />
       <Route path="/generate-po" component={GeneratePO} />
 
       {/* ✅ Supplier Approval (MAIN) */}

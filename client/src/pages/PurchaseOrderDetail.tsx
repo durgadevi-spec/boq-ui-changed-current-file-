@@ -41,6 +41,7 @@ import {
     Building2,
     Truck,
     User,
+    TrendingDown
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import apiFetch from "@/lib/api";
@@ -81,6 +82,7 @@ interface PurchaseOrder {
     dc_date?: string | null;
     items?: PurchaseOrderItem[];
     version_number?: string;
+    rateReductions?: any[];
 }
 
 interface PurchaseOrderItem {
@@ -340,6 +342,8 @@ export default function PurchaseOrderDetail() {
     const [comment, setComment] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+
+
     // Revise Mode States
     const [isReviseMode, setIsReviseMode] = useState(false);
     const [editedItems, setEditedItems] = useState<PurchaseOrderItem[]>([]);
@@ -441,6 +445,17 @@ export default function PurchaseOrderDetail() {
         } finally {
             setIsSubmitting(false);
         }
+    };
+
+    const handleRateChange = (itemId: string, newRate: string) => {
+        setEditedItems(prev => prev.map(i => {
+            if (i.id === itemId) {
+                const rateVal = parseFloat(newRate) || 0;
+                const qtyVal = parseFloat(i.qty) || 0;
+                return { ...i, rate: newRate, amount: (qtyVal * rateVal).toString() };
+            }
+            return i;
+        }));
     };
 
     const handleReviseClick = () => {
@@ -687,18 +702,8 @@ export default function PurchaseOrderDetail() {
             return;
         }
 
-        const hasIncrease = editedItems.some(edited => {
-            const original = items.find(i => i.id === edited.id);
-            if (!original) return false;
-            return parseFloat(edited.qty) > parseFloat(original.qty);
-        });
-
-        if (hasIncrease) {
-            setShowReviseDialog(true);
-            setReviseReason("");
-        } else {
-            submitRevision("");
-        }
+        setShowReviseDialog(true);
+        setReviseReason("");
     };
 
     const submitRevision = async (reason: string) => {
@@ -905,11 +910,14 @@ export default function PurchaseOrderDetail() {
                             <Printer className="h-4 w-4 mr-2" /> Print PO
                         </Button>
 
+                        {po?.rateReductions?.some(r => r.status === 'pending') && (
+                            <Badge variant="outline" className="bg-orange-50 text-orange-600 border-orange-200 ml-2">Rate Reduction Pending</Badge>
+                        )}
                         <Button
                             variant="outline"
                             className="bg-slate-800 text-white hover:bg-slate-900 border-slate-800"
                             onClick={handleDownloadPdfOpenDialog}
-                            disabled={(user?.role === 'purchase_team' && po?.status !== 'approved') || isDownloading || isGeneratingPdf}
+                            disabled={(user?.role !== 'admin' && !['approved', 'ordered', 'delivered'].includes(po?.status?.toLowerCase() || '')) || isDownloading || isGeneratingPdf}
                         >
                             {(isDownloading || isGeneratingPdf) ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
                             {(isDownloading || isGeneratingPdf) ? "Generating..." : "Download PDF"}
@@ -961,6 +969,8 @@ export default function PurchaseOrderDetail() {
                                 </Button>
                             </>
                         )}
+
+
                     </div>
                 </div>
 
@@ -1314,7 +1324,29 @@ export default function PurchaseOrderDetail() {
                                                     </TableCell>
 
                                                     <TableCell className="text-right text-[11px] py-1">
-                                                        {parseFloat(item.rate).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                                        {isReviseMode ? (
+                                                            <Input
+                                                                type="number"
+                                                                value={item.rate}
+                                                                onChange={(e) => {
+                                                                    const newVal = parseFloat(e.target.value) || 0;
+                                                                    const originalRate = parseFloat(initialItems.find(i => i.id === item.id)?.rate || '0');
+                                                                    if (newVal > originalRate) {
+                                                                        // Block increase: reset to original
+                                                                        handleRateChange(item.id, originalRate.toString());
+                                                                    } else {
+                                                                        handleRateChange(item.id, e.target.value);
+                                                                    }
+                                                                }}
+                                                                className={`w-20 text-right ml-auto h-6 text-[10px] p-0.5 border-2 ${parseFloat(item.rate) < parseFloat(initialItems.find(i=>i.id === item.id)?.rate || '0') ? 'border-green-500 bg-green-50' : 'border-slate-200'}`}
+                                                                min="0"
+                                                                max={parseFloat(initialItems.find(i => i.id === item.id)?.rate || '0')}
+                                                                step="0.01"
+                                                                title={`Max: ${parseFloat(initialItems.find(i => i.id === item.id)?.rate || '0').toLocaleString('en-IN', { minimumFractionDigits: 2 })} (Original Rate)`}
+                                                            />
+                                                        ) : (
+                                                            parseFloat(item.rate).toLocaleString('en-IN', { minimumFractionDigits: 2 })
+                                                        )}
                                                     </TableCell>
 
                                                     <TableCell className="text-right text-[11px] font-semibold py-1 pr-4 text-slate-700">
@@ -1741,6 +1773,7 @@ export default function PurchaseOrderDetail() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
             {/* Delete Existing Revision Dialog */}
             <Dialog open={showDeleteExistingDialog} onOpenChange={setShowDeleteExistingDialog}>
                 <DialogContent className="sm:max-w-[425px]">
