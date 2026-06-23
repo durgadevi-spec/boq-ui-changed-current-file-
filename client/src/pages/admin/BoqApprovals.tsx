@@ -48,7 +48,7 @@ export default function BoqApprovals() {
                 const data = await res.json();
                 // Show: all BOQ type versions + BOM versions that Finance has submitted for BOQ approval
                 const list = (data.approvals || []).filter((a: any) =>
-                    a.type === 'boq' && ['submitted', 'pending_approval', 'edit_requested'].includes(a.status)
+                    (a.type === 'boq' || a.is_boq_submission === true) && ['submitted', 'pending_approval', 'edit_requested'].includes(a.status)
                 );
                 setApprovals(list);
             }

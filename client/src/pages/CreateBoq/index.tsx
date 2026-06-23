@@ -1549,7 +1549,7 @@ export default function CreateBom() {
     } else {
       // Non-engine product
       step11Items.forEach((it: any, s11Idx: number) => {
-        const itemKey = it.itemKey || `${bi.id}-${s11Idx}`;
+        const itemKey = it.itemKey || `${bi.id}-manual-${s11Idx}`;
         const baseQty = Number(getEditedValue(itemKey, "qty", it.qtyPerSqf ?? it.qty ?? 0)) || 0;
         const u = getEditedValue(itemKey, "unit", it.unit || "nos");
         const isLumpSum = u.toLowerCase() === "ls";
@@ -1664,7 +1664,7 @@ export default function CreateBom() {
     } else {
       if (Array.isArray(td.step11_items)) {
         td.step11_items = td.step11_items.map((it: any, s11Idx: number) => {
-          const itemKey = it.itemKey || `${boqItem.id}-${s11Idx}`;
+          const itemKey = it.itemKey || `${boqItem.id}-manual-${s11Idx}`;
           const qty = Number(getEditedValue(itemKey, "qty", it.qty ?? 0));
           const sRate = Number(getEditedValue(itemKey, "supply_rate", it.supply_rate ?? 0));
           const iRate = Number(getEditedValue(itemKey, "install_rate", it.install_rate ?? 0));

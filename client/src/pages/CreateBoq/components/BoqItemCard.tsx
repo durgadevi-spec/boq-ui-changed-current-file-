@@ -187,8 +187,8 @@ export const BoqItemCard = React.memo(function BoqItemCard({ boqItem, boqIdx, is
       // But based on user feedback, manual additions should not scale.
       const isManual = it.manual || !tableData.materialLines;
       const isLumpSumLine = (it.unit || "").toLowerCase() === "ls";
-      const scaledQty = calculationTarget === 0 ? 0 : (isManual ? (isLumpSumLine ? 1 : baseQty) : (isLumpSumLine ? 1 : Number((baseQty * calculationTarget).toFixed(2))));
-      const roundOff = calculationTarget === 0 ? 0 : ((it.applyRounding !== false && !isManual && !isLumpSumLine) ? Math.ceil(scaledQty) : scaledQty);
+      const scaledQty = isManual ? (isLumpSumLine ? 1 : baseQty) : (calculationTarget === 0 ? 0 : (isLumpSumLine ? 1 : Number((baseQty * calculationTarget).toFixed(2))));
+      const roundOff = isManual ? scaledQty : (calculationTarget === 0 ? 0 : ((it.applyRounding !== false && !isLumpSumLine) ? Math.ceil(scaledQty) : scaledQty));
       const amount = Number((roundOff * rate).toFixed(2));
       return { ...it, itemKey, _s11Idx: s11Idx, qtyPerSqf: isLumpSumLine ? 1 : baseQty, qty: scaledQty, roundOff, rateSqft: rate, amount, manual: isManual };
     });
@@ -271,7 +271,7 @@ export const BoqItemCard = React.memo(function BoqItemCard({ boqItem, boqIdx, is
 
   // Use normalized standard rate if enabled
   const useStandardRate = !!tableData.use_standard_rate;
-  const ratePerUnit = useStandardRate ? standardRate : (calculationTarget > 0 ? totalAmount / calculationTarget : 0);
+  const ratePerUnit = useStandardRate ? standardRate : (calculationTarget > 0 ? totalAmount / calculationTarget : (isEngineBased ? 0 : totalAmount));
 
   // Final grand total reflects the standard rate if used
   const grandTotalValue = useStandardRate ? (standardRate * calculationTarget) : totalAmount;
