@@ -154,8 +154,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     vendorCategory: mat.vendor_category || mat.vendorCategory || "",
     taxCodeType: mat.tax_code_type || mat.taxCodeType || null,
     taxCodeValue: mat.tax_code_value || mat.taxCodeValue || "",
-    hsnCode: mat.hsn_code || mat.hsnCode || "",
-    sacCode: mat.sac_code || mat.sacCode || "",
+    hsnCode: mat.hsn_code || mat.hsnCode || mat.template_hsn_code || "",
+    sacCode: mat.sac_code || mat.sacCode || mat.template_sac_code || "",
     created_at: mat.created_at || mat.submitted_at || null,
     is_project_pricing: mat.is_project_pricing || false,
   } as Material);

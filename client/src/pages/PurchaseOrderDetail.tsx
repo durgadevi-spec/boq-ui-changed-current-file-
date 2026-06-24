@@ -101,6 +101,7 @@ interface PurchaseOrderItem {
     budget_qty?: number;
     received_qty?: number;
     tax_rate?: number; // Added for per-item tax selection
+    technical_specification?: string;
 }
 
 export default function PurchaseOrderDetail() {
@@ -206,65 +207,100 @@ export default function PurchaseOrderDetail() {
         const potentialPdfCols = ["S.No", "Item Details", "Unit", "HSN", "SAC", "Original Qty", "Ordered Qty", "Balance Qty", "Tax %", "Rate", "Amount"];
 
         const opt = {
-            margin: 5,
+            margin: [8, 5, 8, 5] as [number, number, number, number],
             filename: `PO_${po?.po_number || id}.pdf`,
-            image: { type: 'jpeg' as const, quality: 1.0 },
+            image: { type: 'jpeg' as const, quality: 0.98 },
             html2canvas: {
                 scale: 2,
                 useCORS: true,
                 logging: false,
+                scrollX: 0,
+                scrollY: 0,
+                windowWidth: 1200,
                 onclone: (clonedDoc: Document) => {
-                    clonedDoc.querySelectorAll('style, link[rel="stylesheet"]').forEach(el => el.remove());
+                    // Remove UI-only elements
                     clonedDoc.querySelectorAll('.no-print').forEach(el => el.remove());
 
-                    const clonedDetails = clonedDoc.getElementById('po-detail-content');
-                    if (clonedDetails) {
-                        clonedDetails.style.width = '794px';
-                        clonedDetails.style.maxWidth = '794px';
-                        clonedDetails.style.margin = '0';
-                        clonedDetails.style.padding = '30px';
-                        clonedDetails.style.backgroundColor = 'white';
-                        clonedDetails.style.color = '#000000';
+                    const clonedEl = clonedDoc.getElementById('po-detail-content');
+                    if (!clonedEl) return;
 
-                        const card = clonedDetails.querySelector('.Card, .po-container');
-                        if (card && card instanceof HTMLElement) {
-                            card.style.maxWidth = 'none';
-                            card.style.width = '100%';
-                            card.style.boxShadow = 'none';
-                            card.style.border = 'none';
+                    // Reset overflow/height so full content is captured
+                    clonedEl.style.overflow = 'visible';
+                    clonedEl.style.height = 'auto';
+                    clonedEl.style.width = '900px';
+
+                    // Fix all elements: remove clipping + fix oklch colors
+                    clonedEl.querySelectorAll('*').forEach(el => {
+                        const htmlEl = el as HTMLElement;
+                        htmlEl.style.overflow = 'visible';
+                        htmlEl.style.overflowY = 'visible';
+                        htmlEl.style.overflowX = 'visible';
+                        htmlEl.style.maxHeight = 'none';
+                    });
+
+                    // Inject a style tag to override all oklch/oklab to safe hex colors
+                    const safeStyle = clonedDoc.createElement('style');
+                    safeStyle.textContent = `
+                        * {
+                            color: revert !important;
+                            background-color: revert !important;
+                            border-color: revert !important;
                         }
+                        #po-detail-content, #po-detail-content * {
+                            --tw-ring-color: rgba(59,130,246,0.5) !important;
+                        }
+                        #po-detail-content .text-slate-900 { color: #0f172a !important; }
+                        #po-detail-content .text-slate-800 { color: #1e293b !important; }
+                        #po-detail-content .text-slate-700 { color: #334155 !important; }
+                        #po-detail-content .text-slate-600 { color: #475569 !important; }
+                        #po-detail-content .text-slate-500 { color: #64748b !important; }
+                        #po-detail-content .text-green-700 { color: #15803d !important; }
+                        #po-detail-content .text-green-600 { color: #16a34a !important; }
+                        #po-detail-content .text-blue-700 { color: #1d4ed8 !important; }
+                        #po-detail-content .text-emerald-700 { color: #047857 !important; }
+                        #po-detail-content .text-emerald-600 { color: #059669 !important; }
+                        #po-detail-content .text-amber-800 { color: #92400e !important; }
+                        #po-detail-content .text-red-700 { color: #b91c1c !important; }
+                        #po-detail-content .text-orange-700 { color: #c2410c !important; }
+                        #po-detail-content .text-indigo-700 { color: #4338ca !important; }
+                        #po-detail-content .bg-white { background-color: #ffffff !important; }
+                        #po-detail-content .bg-slate-50 { background-color: #f8fafc !important; }
+                        #po-detail-content .bg-slate-100 { background-color: #f1f5f9 !important; }
+                        #po-detail-content .bg-green-100 { background-color: #dcfce7 !important; }
+                        #po-detail-content .bg-emerald-50 { background-color: #ecfdf5 !important; }
+                        #po-detail-content .bg-amber-50 { background-color: #fffbeb !important; }
+                        #po-detail-content .bg-indigo-50 { background-color: #eef2ff !important; }
+                        #po-detail-content .border-slate-200 { border-color: #e2e8f0 !important; }
+                        #po-detail-content .border-slate-300 { border-color: #cbd5e1 !important; }
+                        #po-detail-content .bg-background { background-color: #ffffff !important; }
+                        #po-detail-content .text-foreground { color: #0f172a !important; }
+                        #po-detail-content .text-muted-foreground { color: #64748b !important; }
+                        #po-detail-content .truncate {
+                            overflow: visible !important;
+                            text-overflow: unset !important;
+                            white-space: normal !important;
+                        }
+                    `;
+                    clonedDoc.head.appendChild(safeStyle);
 
-                        if (selectedCols && selectedCols.length > 0) {
-                            const table = clonedDetails.querySelector('table');
-                            if (table) {
-                                table.style.width = '100%';
-                                table.style.tableLayout = 'auto';
-
-                                const rows = Array.from(table.rows);
-                                if (rows.length > 0) {
-                                    const headCells = Array.from(rows[0].cells);
-                                    const colIndicesToHide: number[] = [];
-
-                                    headCells.forEach((_, idx) => {
-                                        if (idx >= potentialPdfCols.length) {
-                                            colIndicesToHide.push(idx);
-                                            return;
-                                        }
-
-                                        const colName = potentialPdfCols[idx];
-                                        if (colName && !selectedCols.includes(colName)) {
-                                            colIndicesToHide.push(idx);
-                                        }
+                    // Hide columns not in selectedCols
+                    if (selectedCols && selectedCols.length > 0) {
+                        const table = clonedEl.querySelector('table');
+                        if (table) {
+                            const rows = Array.from(table.rows);
+                            if (rows.length > 0) {
+                                const colIndicesToHide: number[] = [];
+                                Array.from(rows[0].cells).forEach((_, idx) => {
+                                    const colName = potentialPdfCols[idx];
+                                    if (!colName || !selectedCols.includes(colName)) {
+                                        colIndicesToHide.push(idx);
+                                    }
+                                });
+                                rows.forEach(row => {
+                                    colIndicesToHide.forEach(idx => {
+                                        if (row.cells[idx]) row.cells[idx].style.display = 'none';
                                     });
-
-                                    rows.forEach(row => {
-                                        colIndicesToHide.forEach(idx => {
-                                            if (row.cells[idx]) {
-                                                row.cells[idx].style.display = 'none';
-                                            }
-                                        });
-                                    });
-                                }
+                                });
                             }
                         }
                     }
@@ -273,54 +309,7 @@ export default function PurchaseOrderDetail() {
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
         };
 
-        const clone = element.cloneNode(true) as HTMLElement;
-        const sourceElements = [element, ...Array.from(element.querySelectorAll('*'))] as HTMLElement[];
-        const cloneElements = [clone, ...Array.from(clone.querySelectorAll('*'))] as HTMLElement[];
-
-        sourceElements.forEach((sEl, i) => {
-            const cEl = cloneElements[i];
-            if (!cEl) return;
-
-            const isTableCell = sEl.tagName === 'TD' || sEl.tagName === 'TH';
-            const style = window.getComputedStyle(sEl);
-            const styleProperties = [
-                'display', 'position', 'top', 'left', 'right', 'bottom', 
-                ...(isTableCell ? [] : ['width', 'height']),
-                'padding', 'margin', 'font-size', 'font-family', 'font-weight', 'line-height',
-                'color', 'background-color', 'border-color', 'border-width', 'border-style',
-                'border-radius', 'flex', 'flex-direction', 'align-items', 'justify-content',
-                'text-align', 'box-sizing', 'white-space', 'vertical-align', 'opacity', 'z-index'
-            ];
-
-            styleProperties.forEach(prop => {
-                let val = style.getPropertyValue(prop);
-                if (val && (val.includes('oklch') || val.includes('oklab'))) {
-                    if (prop.includes('background')) val = '#ffffff';
-                    else if (prop.includes('border')) val = '#cbd5e1';
-                    else val = '#000000';
-                }
-                cEl.style.setProperty(prop, val);
-            });
-            
-            if (isTableCell) {
-                cEl.style.width = 'auto';
-                cEl.style.height = 'auto';
-            }
-        });
-
-        const container = document.createElement('div');
-        container.style.position = 'fixed';
-        container.style.top = '0';
-        container.style.left = '0';
-        container.style.width = '210mm';
-        container.style.zIndex = '-9999';
-        container.style.opacity = '0';
-        container.style.pointerEvents = 'none';
-        container.appendChild(clone);
-        document.body.appendChild(container);
-
-        html2pdf().set(opt).from(clone).save().then(() => {
-            document.body.removeChild(container);
+        html2pdf().set(opt).from(element).save().then(() => {
             setIsDownloading(false);
             toast({
                 title: "Success",
@@ -328,15 +317,12 @@ export default function PurchaseOrderDetail() {
             });
         }).catch((err: any) => {
             console.error("PDF generation error:", err);
-            if (container.parentNode) document.body.removeChild(container);
             setIsDownloading(false);
             toast({
                 title: "Error",
                 description: "Failed to generate PDF. Falling back to print...",
                 variant: "destructive"
             });
-            // Final fallback: try window.print if everything else fails
-            // window.print();
         });
     };
     const [comment, setComment] = useState("");
@@ -1007,7 +993,7 @@ export default function PurchaseOrderDetail() {
                 {/* Main PO Document ID Wrapper for PDF */}
                 <div id="po-detail-content">
                     {/* Main PO Document Card */}
-                    <Card className="max-w-[1000px] mx-auto border-slate-300 shadow-xl overflow-hidden bg-white po-container relative">
+                    <Card className="max-w-[1000px] mx-auto border-slate-300 shadow-xl bg-white po-container relative">
                         {po.status === 'approved' && <div className="watermark print-only hidden">Approved</div>}
                         {po.status === 'approved' && <div className="watermark no-print">Approved</div>}
 
@@ -1197,7 +1183,7 @@ export default function PurchaseOrderDetail() {
                                     </div>
                                 </div>
                             )}
-                            <div className="border border-slate-300 overflow-hidden">
+                            <div className="border border-slate-300">
                                 <Table>
                                     <TableHeader>
                                         <TableRow className="bg-slate-100 border-b border-slate-300">
@@ -1262,6 +1248,13 @@ export default function PurchaseOrderDetail() {
                                                                 <>
                                                                     <div className="text-[11px] font-medium text-slate-800 uppercase">{item.item || item.item_name}</div>
                                                                     {item.description && <div className="text-[10px] text-slate-400 mt-0.5 whitespace-pre-wrap">{item.description}</div>}
+                                                                    {item.technical_specification && (
+                                                                        <div className="text-[10px] text-slate-500 mt-1 whitespace-pre-wrap">
+                                                                            <span className="font-semibold text-slate-700">Technical Specification:</span>
+                                                                            <br />
+                                                                            {item.technical_specification}
+                                                                        </div>
+                                                                    )}
                                                                 </>
                                                             )}
                                                         </div>
@@ -1338,7 +1331,7 @@ export default function PurchaseOrderDetail() {
                                                                         handleRateChange(item.id, e.target.value);
                                                                     }
                                                                 }}
-                                                                className={`w-20 text-right ml-auto h-6 text-[10px] p-0.5 border-2 ${parseFloat(item.rate) < parseFloat(initialItems.find(i=>i.id === item.id)?.rate || '0') ? 'border-green-500 bg-green-50' : 'border-slate-200'}`}
+                                                                className={`w-20 text-right ml-auto h-6 text-[10px] p-0.5 border-2 ${parseFloat(item.rate) < parseFloat(initialItems.find(i => i.id === item.id)?.rate || '0') ? 'border-green-500 bg-green-50' : 'border-slate-200'}`}
                                                                 min="0"
                                                                 max={parseFloat(initialItems.find(i => i.id === item.id)?.rate || '0')}
                                                                 step="0.01"
@@ -1505,7 +1498,7 @@ export default function PurchaseOrderDetail() {
                         </CardContent>
                     </Card>
                 )}
-                      {/* Approval Dialog */}
+                {/* Approval Dialog */}
                 <Dialog open={showApprovalDialog} onOpenChange={setShowApprovalDialog}>
                     <DialogContent>
                         <DialogHeader>
@@ -1686,9 +1679,9 @@ export default function PurchaseOrderDetail() {
                         <div className="py-4 space-y-4">
                             <div className="flex justify-between items-center px-1">
                                 <Label className="text-sm font-bold text-slate-700">Columns to Display</Label>
-                                <Button 
-                                    variant="ghost" 
-                                    size="sm" 
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
                                     className="h-7 text-[10px] text-blue-600 font-bold"
                                     onClick={() => setSelectedPdfExportCols(["S.No", "Item Details", "Unit", "HSN", "SAC", "Original Qty", "Ordered Qty", "Balance Qty", "Tax %", "Rate", "Amount"])}
                                 >
@@ -1698,8 +1691,8 @@ export default function PurchaseOrderDetail() {
                             <ScrollArea className="h-[280px] p-4 border-2 border-slate-100 rounded-xl bg-slate-50/30">
                                 <div className="grid grid-cols-1 gap-1">
                                     {["S.No", "Item Details", "Unit", "HSN", "SAC", "Original Qty", "Ordered Qty", "Balance Qty", "Tax %", "Rate", "Amount"].map((col) => (
-                                        <div 
-                                            key={col} 
+                                        <div
+                                            key={col}
                                             className={`flex items-center space-x-3 p-2 rounded-lg transition-colors cursor-pointer ${selectedPdfExportCols.includes(col) ? 'bg-white shadow-sm' : 'hover:bg-slate-100/50'}`}
                                             onClick={() => {
                                                 if (selectedPdfExportCols.includes(col)) {
@@ -1730,9 +1723,9 @@ export default function PurchaseOrderDetail() {
                             <Button variant="outline" className="w-full flex-1" onClick={() => setIsPdfExportDialogOpen(false)}>
                                 Cancel
                             </Button>
-                            <Button 
-                                onClick={() => handleDownloadPDF(selectedPdfExportCols)} 
-                                disabled={isDownloading || selectedPdfExportCols.length === 0} 
+                            <Button
+                                onClick={() => handleDownloadPDF(selectedPdfExportCols)}
+                                disabled={isDownloading || selectedPdfExportCols.length === 0}
                                 className="w-full flex-1 bg-blue-600 hover:bg-blue-700 shadow-md shadow-blue-200"
                             >
                                 {isDownloading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
@@ -1742,66 +1735,66 @@ export default function PurchaseOrderDetail() {
                     </DialogContent>
                 </Dialog>
 
-            {/* Revise Reason Dialog */}
-            <Dialog open={showReviseDialog} onOpenChange={setShowReviseDialog}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Reason for Quantity Increase</DialogTitle>
-                        <DialogDescription>
-                            You have increased the quantity of one or more items.
-                            This revision will require Admin approval. Please provide a reason.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="py-4">
-                        <Textarea
-                            placeholder="Enter reason for quantity increase..."
-                            value={reviseReason}
-                            onChange={(e) => setReviseReason(e.target.value)}
-                            className="min-h-[100px]"
-                        />
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowReviseDialog(false)} disabled={isSubmitting}>Cancel</Button>
-                        <Button
-                            className="bg-blue-600 hover:bg-blue-700 text-white"
-                            onClick={() => submitRevision(reviseReason)}
-                            disabled={isSubmitting || !reviseReason.trim()}
-                        >
-                            {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                            Submit Revision
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                {/* Revise Reason Dialog */}
+                <Dialog open={showReviseDialog} onOpenChange={setShowReviseDialog}>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Reason for Quantity Increase</DialogTitle>
+                            <DialogDescription>
+                                You have increased the quantity of one or more items.
+                                This revision will require Admin approval. Please provide a reason.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="py-4">
+                            <Textarea
+                                placeholder="Enter reason for quantity increase..."
+                                value={reviseReason}
+                                onChange={(e) => setReviseReason(e.target.value)}
+                                className="min-h-[100px]"
+                            />
+                        </div>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setShowReviseDialog(false)} disabled={isSubmitting}>Cancel</Button>
+                            <Button
+                                className="bg-blue-600 hover:bg-blue-700 text-white"
+                                onClick={() => submitRevision(reviseReason)}
+                                disabled={isSubmitting || !reviseReason.trim()}
+                            >
+                                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                                Submit Revision
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
 
-            {/* Delete Existing Revision Dialog */}
-            <Dialog open={showDeleteExistingDialog} onOpenChange={setShowDeleteExistingDialog}>
-                <DialogContent className="sm:max-w-[425px]">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-amber-600">
-                            Revision Already Exists
-                        </DialogTitle>
-                        <DialogDescription className="pt-2">
-                            A revision (<strong className="text-slate-900">{existingRevisionToDelete?.po_number}</strong>) is currently in <span className="font-semibold uppercase text-slate-700">{existingRevisionToDelete?.status}</span> status.
-                            <br /><br />
-                            Do you want to <strong>delete</strong> the existing revision and start a fresh one?
-                        </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter className="mt-4">
-                        <Button variant="outline" onClick={() => setShowDeleteExistingDialog(false)}>
-                            Cancel
-                        </Button>
-                        <Button
-                            variant="destructive"
-                            onClick={confirmDeleteAndRevise}
-                            className="bg-red-600 hover:bg-red-700"
-                            disabled={isSubmitting}
-                        >
-                            {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
-                            Delete & Start Fresh
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
+                {/* Delete Existing Revision Dialog */}
+                <Dialog open={showDeleteExistingDialog} onOpenChange={setShowDeleteExistingDialog}>
+                    <DialogContent className="sm:max-w-[425px]">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2 text-amber-600">
+                                Revision Already Exists
+                            </DialogTitle>
+                            <DialogDescription className="pt-2">
+                                A revision (<strong className="text-slate-900">{existingRevisionToDelete?.po_number}</strong>) is currently in <span className="font-semibold uppercase text-slate-700">{existingRevisionToDelete?.status}</span> status.
+                                <br /><br />
+                                Do you want to <strong>delete</strong> the existing revision and start a fresh one?
+                            </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter className="mt-4">
+                            <Button variant="outline" onClick={() => setShowDeleteExistingDialog(false)}>
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="destructive"
+                                onClick={confirmDeleteAndRevise}
+                                className="bg-red-600 hover:bg-red-700"
+                                disabled={isSubmitting}
+                            >
+                                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                                Delete & Start Fresh
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
                 </Dialog>
             </div>
         </Layout>

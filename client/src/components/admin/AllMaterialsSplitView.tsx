@@ -55,7 +55,7 @@ export function AllMaterialsSplitView({ materials, localShops, categories, getSu
           <div className="grid grid-cols-2 gap-2">
             <Select value={materialCategoryFilter} onValueChange={(val) => { setMaterialCategoryFilter(val); setMaterialSubcategoryFilter('all'); }}>
               <SelectTrigger className="h-8 text-xs bg-slate-50/50"><SelectValue placeholder="Category" /></SelectTrigger>
-              <SelectContent>
+              <SelectContent className="max-h-60">
                 <SelectItem value="all">All Categories</SelectItem>
                 <SelectItem value="uncategorized" className="text-red-500">Uncategorized</SelectItem>
                 {categories?.map((cat) => (<SelectItem key={cat} value={cat}>{cat}</SelectItem>))}
@@ -63,7 +63,7 @@ export function AllMaterialsSplitView({ materials, localShops, categories, getSu
             </Select>
             <Select value={materialSubcategoryFilter} onValueChange={setMaterialSubcategoryFilter} disabled={materialCategoryFilter === 'all'}>
               <SelectTrigger className="h-8 text-xs bg-slate-50/50"><SelectValue placeholder="Subcategory" /></SelectTrigger>
-              <SelectContent>
+              <SelectContent className="max-h-60">
                 <SelectItem value="all">All Subcategories</SelectItem>
                 <SelectItem value="uncategorized" className="text-red-500">Uncategorized</SelectItem>
                 {materialCategoryFilter !== 'all' && materialCategoryFilter !== 'uncategorized' && getSubCategoriesForCategory(materialCategoryFilter).map((sub: any) => (<SelectItem key={sub.id || sub.name} value={sub.name}>{sub.name}</SelectItem>))}
@@ -216,10 +216,12 @@ export function AllMaterialsSplitView({ materials, localShops, categories, getSu
                             <div className="flex flex-col"><span className="text-xs text-slate-500 mb-1">Brand Name</span><span className="text-sm font-medium">{selectedMaterial.brandName || selectedMaterial.brand || '-'}</span></div>
                             <div className="flex flex-col"><span className="text-xs text-slate-500 mb-1">Model Number</span><span className="text-sm font-medium">{selectedMaterial.modelNumber || selectedMaterial.model || '-'}</span></div>
                             <div className="flex flex-col"><span className="text-xs text-slate-500 mb-1">Dimensions (L x W x H)</span><span className="text-sm font-medium">{selectedMaterial.dimensions || '-'}</span></div>
+                            <div className="flex flex-col"><span className="text-xs text-slate-500 mb-1">HSN Code</span><span className="text-sm font-medium">{selectedMaterial.hsnCode || selectedMaterial.hsn_code || selectedMaterial.template_hsn_code || '-'}</span></div>
                           </div>
                           <div className="space-y-4">
                             <div className="flex flex-col"><span className="text-xs text-slate-500 mb-1">Finish Type</span><span className="text-sm font-medium">{selectedMaterial.finish || selectedMaterial.finishtype || '-'}</span></div>
                             <div className="flex flex-col"><span className="text-xs text-slate-500 mb-1">Material Composition</span><span className="text-sm font-medium">{selectedMaterial.metalType || selectedMaterial.materialtype || '-'}</span></div>
+                            <div className="flex flex-col"><span className="text-xs text-slate-500 mb-1">SAC Code</span><span className="text-sm font-medium">{selectedMaterial.sacCode || selectedMaterial.sac_code || selectedMaterial.template_sac_code || '-'}</span></div>
                             <div className="flex flex-col">
                               <span className="text-xs text-slate-500 mb-1">Last Rate Update</span>
                               <div className={`text-sm font-medium flex items-center gap-1.5 ${!selectedMaterial.created_at ? 'text-slate-500' : differenceInDays(new Date(), new Date(selectedMaterial.created_at)) > 90 ? 'text-amber-600' : 'text-green-600'}`}>
