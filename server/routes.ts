@@ -10775,7 +10775,10 @@ export async function registerRoutes(
 
       // Fetch the PO items
       const itemsResult = await query(
-        `SELECT * FROM purchase_order_items WHERE po_id = $1 ORDER BY created_at ASC`,
+        `SELECT poi.*, m.technicalspecification as technical_specification 
+         FROM purchase_order_items poi 
+         LEFT JOIN materials m ON poi.material_id = m.id::text 
+         WHERE poi.po_id = $1 ORDER BY poi.created_at ASC`,
         [id]
       );
 
